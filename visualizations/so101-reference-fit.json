@@ -1,0 +1,34 @@
+{
+  "status": "provisional_visual_fit_not_actuator_calibration",
+  "reference": "calibration/reference_poses/follower-arm-measurement.json",
+  "calibration_sha256": "6fcce19349b7bea19b3d42c8d7fa80bbea938472c3a7a8f91e67f663f32d671a",
+  "encoder_radians": {
+    "shoulder_pan": 0.31600004230444206,
+    "shoulder_lift": 1.6129807984617517,
+    "elbow_flex": -1.4818254410975293,
+    "wrist_flex": 0.06442719309119693,
+    "wrist_roll": 1.7801847043412866
+  },
+  "cad_display_degrees": {
+    "shoulder_pan": 0,
+    "shoulder_lift": 183.1306829338506,
+    "elbow_flex": -179.5121844781468,
+    "wrist_flex": 1.482089611701561,
+    "wrist_roll": -90,
+    "gripper": 0
+  },
+  "assumptions": [
+    "Shoulder pan is zero only to choose a display orientation; actual CAD yaw is unknown.",
+    "The principal axes of the upper-arm and forearm meshes are approximated as level, extended toward CAD -Y.",
+    "The wrist-roll axis is approximated as horizontal.",
+    "Wrist-roll CAD -90 degrees is the user-supplied approximate reference.",
+    "CAD gripper angle remains zero; geometry clearance is not a measured contact model."
+  ],
+  "wrist_roll_zero_offset_hypotheses_rad": {
+    "if_cad_sign_positive": -3.3509810311361834,
+    "if_cad_sign_negative": 0.20938837754639006
+  },
+  "observed_nonoverlapping_gripper_closed_raw": 1339,
+  "gripper_calibration_range_min_raw": 1329,
+  "alignment_confirmed": false
+}

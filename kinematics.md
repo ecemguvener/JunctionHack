@@ -107,6 +107,36 @@ the CAD-axis sign. A Jacobian with respect to ticks is that matrix multiplied
 by `2*pi/4096`; the gripper does not add an arm column. For derivatives with
 respect to LeRobot degrees, multiply it by `(pi/180)*(4095/4096)`.
 
+### Recorded follower reference
+
+`calibration/reference_poses/follower-arm-measurement.json` preserves a supplied
+real-arm snapshot, with raw ticks as the primary numerical measurements. Its
+reported calibrated values match the merged follower profile within rounding.
+The user identifies wrist roll as approximately -90 CAD degrees, with the camera
+parallel to the ground, and the gripper closed without overlap at raw tick 1339.
+This observed closed point is 10 ticks above the existing calibrated minimum;
+the recording does not rewrite servo limits or redefine LeRobot's opening scale.
+The source photo is not stored in the repository.
+
+```bash
+~/frax/.venv/bin/python -B tools/so101_reference_pose.py
+```
+
+This validates the snapshot and generates `visualizations/so101-follower-reference.html`
+and `so101-reference-fit.json`. The display approximates the two long members as
+level, the wrist axis as horizontal, and uses zero base yaw only for display.
+Those are visual hypotheses, not recovered camera geometry or measured CAD joint
+angles. The wrist-roll reference comes from the user; all axis signs remain
+unknown. The CAD gripper coordinate remains zero, retaining existing clearance
+rather than claiming a measured contact-closure angle.
+
+At raw wrist-roll tick 3208 the encoder coordinate is 101.9970703125 degrees.
+The -90 CAD degree reference therefore gives two offset hypotheses:
+`-191.9970703125` degrees for positive sign (equivalent to `168.0029296875`),
+or `11.9970703125` degrees for negative sign. A second reference with a known
+rotation direction distinguishes them. The script leaves confirmed alignment
+and production URDFs untouched.
+
 ## Use
 
 On the Intel computer, in `~/Desktop/tarot-club-junction`:

@@ -57,3 +57,11 @@ explicit CAD alignment mapping and per-arm URDF exporter.
 | `wrist_flex` | 597–2949 | 972–3252 |
 | `wrist_roll` | 0–4095 | 0–4095 |
 | `gripper` | 1329–2829 | 1118–2642 |
+
+## Measured follower reference
+
+The snapshot in [reference_poses/follower-arm-measurement.json](reference_poses/follower-arm-measurement.json)
+records a non-overlapping closed gripper at raw 1339 (LeRobot opening value about
+0.67), and an approximate wrist-roll reference of -90 degrees in the CAD viewer
+at raw 3208. See [../kinematics.md](../kinematics.md#recorded-follower-reference)
+for the provisional visual fit and the remaining geometric alignment measurements.
