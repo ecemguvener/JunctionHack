@@ -17,3 +17,12 @@ This repository prepares visual inspection on native Apple Silicon before access
 - Keep Physical AI Studio, VLA training and optional MuJoCo dependencies separate from the core environment. No Docker or x86 emulation for the Mac baseline.
 - Native OpenVINO JIT/device probes may abort in Codex's filesystem/process sandbox. Use approved native execution or Terminal, and distinguish sandbox failures from hardware incompatibility. Doctor isolates probes in subprocesses.
 - Documentation must separate executed checks from planned hardware work. Update `docs/VALIDATION.md` with new evidence, including skipped tests and limitations.
+# Instructions for agents
+
+## Documents to read
+
+| Document | Read it when |
+|---|---|
+| [ssh.md](ssh.md) | You must connect to the Intel server, or the SSH connection fails. |
+| [hardware.md](hardware.md) | **You must install drivers or software for the hardware, or configure, calibrate, or control the hardware directly.** Read it before you do these tasks. It lists the connected devices and the software setup. |
+| [arm-api.md](arm-api.md) | You must control the arm through the API service, change the service code in arm-api/, or deploy, start, or stop the service. |

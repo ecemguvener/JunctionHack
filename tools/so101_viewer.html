@@ -1,0 +1,96 @@
+<div id="so101-view">
+  <div class="so-toolbar">
+    <span>SO-101 · CAD reference pose</span>
+    <button class="btn" id="so-reset" type="button">Zero angles</button>
+    <button class="btn" id="so-front" type="button">Side view</button>
+    <button class="btn" id="so-perspective" type="button">3D view</button>
+  </div>
+  <div id="so-stage" role="img" aria-label="Interactive SO-101 arm mesh with adjustable joints and rotation axes. Drag to orbit and scroll to zoom."><span id="so-loading">Loading arm…</span></div>
+  <div class="so-toolbar">
+    <label><input id="so-mesh" type="checkbox" checked> Meshes</label>
+    <label><input id="so-axes" type="checkbox" checked> Joint axes</label>
+    <span class="text-small">Drag to orbit · scroll to zoom</span>
+  </div>
+  <div id="so-sliders"></div>
+  <details><summary>All 17 exported CAD joints</summary><div class="so-toolbar"><label for="so-joint">Joint</label><select id="so-joint" class="form-select"></select><output id="so-extra-value">0°</output></div><input id="so-extra" class="form-range" type="range" min="-180" max="180" step="1" value="0" aria-label="Selected CAD joint angle"></details>
+  <div id="so-position" class="text-small" aria-live="polite"></div>
+  <div id="so-error" role="alert"></div>
+</div>
+<style>
+#so101-view{color:var(--foreground);font-family:var(--font-sans);display:grid;gap:12px}
+#so101-view .so-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#so-stage{height:410px;position:relative;min-width:0;touch-action:none}
+#so-stage canvas{display:block;max-width:100%}
+#so-stage .so-label{position:absolute;pointer-events:none;transform:translate(8px,-50%);color:var(--foreground);font:inherit;font-size:12px;text-shadow:0 0 4px var(--background),0 0 4px var(--background)}
+#so-sliders{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}
+#so101-view .so-control label{display:flex;justify-content:space-between;gap:8px}
+#so101-view input[type=range]{width:100%;accent-color:var(--chart-1)}
+#so-loading{position:absolute;inset:40% 0 auto;text-align:center}
+#so101-view select{max-width:100%}
+#so-error{color:var(--destructive)}
+@media(max-width:480px){#so-sliders{grid-template-columns:1fr}#so-stage{height:350px}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(()=>{
+const root=document.getElementById('so101-view'),stage=root.querySelector('#so-stage');
+try {
+const data=/*MODEL_DATA*/;
+const main=[['Base yaw','Revolute_1'],['Shoulder','Revolute_2'],['Elbow','Revolute_3'],['Wrist pitch','Revolute_2_5'],['Wrist roll','Revolute_4'],['Gripper','Revolute_5']];
+const color=(variable)=>{const d=document.createElement('span');d.style.color=`var(${variable})`;root.append(d);const css=getComputedStyle(d).color;d.remove();const c=document.createElement('canvas'),ctx=c.getContext('2d');ctx.fillStyle=css;ctx.fillRect(0,0,1,1);const rgb=ctx.getImageData(0,0,1,1).data;return new THREE.Color(rgb[0]/255,rgb[1]/255,rgb[2]/255)};
+const neutral=color('--muted-foreground'),accent=color('--chart-1'),lineColor=color('--border'),textColor=color('--foreground');
+const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(35,1,.001,10);camera.up.set(0,0,1);
+const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));stage.append(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x777777,1.25));
+const light=new THREE.DirectionalLight(0xffffff,.85);light.position.set(.5,-.3,1);scene.add(light);
+const control=new THREE.OrbitControls(camera,renderer.domElement);control.enableDamping=false;control.minDistance=.13;control.maxDistance=2;
+const nodes=[],meshes=[],axes=[],q=data.map(()=>0),homes=[];
+const byJoint=new Map(),labels=[];let selected=3;
+data.forEach((row,i)=>{
+ const node=new THREE.Group();node.matrixAutoUpdate=false;nodes.push(node);
+ const h=new THREE.Matrix4().set(...row.h);homes.push(h);
+ (row.parent<0?scene:nodes[row.parent]).add(node);
+ row.meshes.forEach(m=>{const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(m.v.map(x=>x*1e-5),3));g.setIndex(m.f);g.computeVertexNormals();const material=new THREE.MeshStandardMaterial({color:neutral,roughness:.62,metalness:.12,side:THREE.DoubleSide});const mesh=new THREE.Mesh(g,material);node.add(mesh);meshes.push(mesh)});
+ if(row.joint){byJoint.set(row.joint,i);const arrow=new THREE.ArrowHelper(new THREE.Vector3(...row.axis),new THREE.Vector3(),.034,accent,.008,.004);node.add(arrow);axes.push(arrow)}
+});
+const baseAxes=new THREE.AxesHelper(.065);scene.add(baseAxes);baseAxes.material.vertexColors=false;baseAxes.material.color.copy(textColor);
+function update(){
+ data.forEach((row,i)=>{const r=new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(...row.axis),q[i]*Math.PI/180);nodes[i].matrix.copy(homes[i]).multiply(r)});
+ scene.updateMatrixWorld(true);
+ const p=new THREE.Vector3();nodes[data.findIndex(x=>x.name==='Body5_2')].getWorldPosition(p);
+ root.querySelector('#so-position').textContent=`Jaw link frame: x ${(p.x*1000).toFixed(1)} · y ${(p.y*1000).toFixed(1)} · z ${(p.z*1000).toFixed(1)} mm`;
+ render();
+}
+function render(){renderer.render(scene,camera);labels.forEach(({el,node})=>{const p=new THREE.Vector3();node.getWorldPosition(p);p.project(camera);el.style.left=`${(p.x+1)/2*stage.clientWidth}px`;el.style.top=`${(1-p.y)/2*stage.clientHeight}px`;el.hidden=p.z>1||p.x<-.98||p.x>.85||p.y<-1||p.y>1})}
+main.forEach(([name,joint],n)=>{
+ const i=byJoint.get(joint);const el=document.createElement('span');el.className='so-label';el.textContent=String(n+1);stage.append(el);labels.push({el,node:nodes[i]});
+ const wrap=document.createElement('div');wrap.className='so-control';wrap.innerHTML=`<label for="so-q-${n}">${n+1}. ${name}<output id="so-v-${n}">0°</output></label><input id="so-q-${n}" class="form-range" type="range" min="-120" max="120" step="1" value="0">`;root.querySelector('#so-sliders').append(wrap);
+ wrap.querySelector('input').addEventListener('input',e=>{q[i]=+e.target.value;wrap.querySelector('output').textContent=q[i]+'°';selected=i;syncExtra();update()});
+});
+const select=root.querySelector('#so-joint'),extra=root.querySelector('#so-extra');
+data.forEach((d,i)=>{if(d.joint){const o=document.createElement('option');o.value=i;o.textContent=d.joint+' → '+d.name;select.append(o)}});
+function syncExtra(){select.value=selected;extra.value=q[selected];root.querySelector('#so-extra-value').textContent=q[selected]+'°';main.forEach(([,j],n)=>{const i=byJoint.get(j);root.querySelector('#so-q-'+n).value=q[i];root.querySelector('#so-v-'+n).textContent=q[i]+'°'})}
+select.addEventListener('change',()=>{selected=+select.value;syncExtra()});extra.addEventListener('input',()=>{q[selected]=+extra.value;syncExtra();update()});
+root.querySelector('#so-reset').onclick=()=>{q.fill(0);syncExtra();update()};
+root.querySelector('#so-mesh').onchange=e=>{meshes.forEach(m=>m.visible=e.target.checked);render()};
+root.querySelector('#so-axes').onchange=e=>{axes.forEach(m=>m.visible=e.target.checked);render()};
+update();
+const bbox=new THREE.Box3().setFromObject(scene),center=bbox.getCenter(new THREE.Vector3());
+const grid=new THREE.GridHelper(.65,13,lineColor,lineColor);grid.rotation.x=Math.PI/2;grid.position.z=bbox.min.z-.002;grid.material.transparent=true;grid.material.opacity=.45;scene.add(grid);
+control.target.copy(center);
+function view(side){camera.position.copy(center).add(side?new THREE.Vector3(.46,.02,.08):new THREE.Vector3(.28,-.34,.20));control.update();render()}
+root.querySelector('#so-front').onclick=()=>view(true);root.querySelector('#so-perspective').onclick=()=>view(false);
+control.addEventListener('change',render);
+new ResizeObserver(()=>{camera.aspect=stage.clientWidth/stage.clientHeight;camera.updateProjectionMatrix();renderer.setSize(stage.clientWidth,stage.clientHeight);render()}).observe(stage);
+syncExtra();view(false);root.querySelector('#so-loading').remove();
+window.so101Test={setJoint:(name,degrees)=>{q[byJoint.get(name)]=degrees;syncExtra();update()},positions:()=>nodes.map(n=>new THREE.Vector3().setFromMatrixPosition(n.matrixWorld).toArray())};
+const before=window.so101Test.positions(),slider=root.querySelector('#so-q-1');
+slider.value=15;slider.dispatchEvent(new Event('input',{bubbles:true}));
+const after=window.so101Test.positions();
+if(!after.some((p,i)=>Math.hypot(...p.map((x,k)=>x-before[i][k]))>.005))throw Error('Joint control did not update FK');
+root.querySelector('#so-reset').click();
+console.info('SO101 interaction check passed: shoulder slider changes geometry; zero pose restored.');
+}catch(e){root.querySelector('#so-error').textContent=e.message;console.error(e)}
+})();
+</script>

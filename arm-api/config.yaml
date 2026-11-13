@@ -1,0 +1,49 @@
+# armd configuration. The service reads this file at start.
+# Set the ARMD_CONFIG environment variable to use a different file.
+
+server:
+  host: 127.0.0.1        # Localhost only. Use an SSH tunnel for remote access.
+  port: 8765
+  poll_hz: 30            # How often the poller reads the state of each arm.
+  admin: false           # true = raw register endpoints are on. ARMD_ADMIN=1 also turns them on.
+
+arms:
+  follower:
+    # 12 V arm. This arm can move.
+    port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B3D040991-if00
+    baudrate: 1000000
+    allow_motion: true
+    allow_spin: false      # Wheel mode (continuous rotation). Keep off for arm joints.
+    max_speed: 1000        # ticks/s. All speeds are clamped to this value.
+    default_speed: 300     # ticks/s, used when a request gives no speed.
+    default_acc: 30        # 0-254. 0 = no ramp.
+    on_shutdown: hold      # hold = keep torque as it is. limp = torque off (the arm falls).
+    block_on_errors: [overload, temperature, current, sensor]
+    joints:
+      shoulder_pan:  {id: 1}
+      shoulder_lift: {id: 2}
+      elbow_flex:    {id: 3}
+      wrist_flex:    {id: 4}
+      wrist_roll:    {id: 5}
+      gripper:       {id: 6}
+      # Optional per-joint fields: min, max (ticks, override the servo EEPROM limits),
+      # default_speed, default_acc.
+
+  leader:
+    # 5 V arm, moved by hand for teleoperation. Read-only.
+    port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE7044736-if00
+    baudrate: 1000000
+    allow_motion: false
+    allow_spin: false
+    max_speed: 1000
+    default_speed: 300
+    default_acc: 30
+    on_shutdown: hold
+    block_on_errors: [overload, temperature, current, sensor]
+    joints:
+      shoulder_pan:  {id: 1}
+      shoulder_lift: {id: 2}
+      elbow_flex:    {id: 3}
+      wrist_flex:    {id: 4}
+      wrist_roll:    {id: 5}
+      gripper:       {id: 6}

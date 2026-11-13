@@ -20,7 +20,8 @@ This document tells an agent how to get SSH access to the team Intel server.
 - Do not ask for the private key text in chat. Ask only for the path to the key file.
 - Do not show the private key in your output, and do not commit it to this repo.
 - Do not turn off host key checks (`StrictHostKeyChecking no`).
-- Do not change the setup on the server.
+- Do not change the setup on the server. Only make changes that the user asks for (for example, to install packages or `udev` rules). For these changes, you can use `sudo` (see [Sudo](#sudo)).
+- Do not change the sudo, SSH, or network setup on the server.
 - Use `-o BatchMode=yes` for SSH commands, so that SSH does not stop to wait for a password.
 
 ## Step 1 — Log in
@@ -80,3 +81,24 @@ ssh -o BatchMode=yes intel '<command>'
 ```
 
 The network is not reliable, so start long-running commands in `tmux` or with `nohup`. Then a dropped connection does not stop them.
+
+## Sudo
+
+The `intel` user can use `sudo` without a password.
+
+| Item | Value |
+|---|---|
+| Sudo rule file | `/etc/sudoers.d/90-intel-nopasswd` (owner `root:root`, mode `0440`) |
+| Rule | `intel ALL=(ALL) NOPASSWD: ALL` |
+| Groups | `intel` is also in the `dialout` group. This gives access to USB serial ports, for example the SO-101 robot arms on `/dev/ttyACM*`. |
+| To remove the rule (only if the user asks) | `sudo rm /etc/sudoers.d/90-intel-nopasswd` |
+
+- Use `sudo -n`. If `sudo` asks for a password, the command then fails and does not stop to wait:
+
+  ```bash
+  ssh -o BatchMode=yes intel 'sudo -n <command>'
+  ```
+
+- Use `sudo` only for tasks that the user asks for. Do not change the sudo, SSH, or network setup.
+
+> **Important:** a person with the shared SSH key has full root access to the laptop.

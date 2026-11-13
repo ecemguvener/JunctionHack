@@ -1,0 +1,25 @@
+[project]
+name = "armd"
+version = "0.1.0"
+description = "HTTP API service for the SO-101 arms (Feetech STS3215 servos)"
+requires-python = ">=3.11"
+dependencies = [
+    "ftservo-python-sdk==2.0.1",
+    "pyserial==3.5",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["armd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
