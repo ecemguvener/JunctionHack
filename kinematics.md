@@ -24,7 +24,7 @@ supplied through Frax's `ee_offset` when a different tool frame is needed.
 
 The Jacobian has shape **6x5**, with linear velocity first and angular velocity
 second, both expressed in the base frame. For each revolute joint its column is
-`[axis Ã— (tcp_position - joint_origin); axis]`.
+`[axis × (tcp_position - joint_origin); axis]`.
 
 Keep gripper opening as a separate command when controlling a TCP fixed to the
 gripper body. Add its coordinate when controlling a moving fingertip or contact

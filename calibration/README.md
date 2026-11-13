@@ -39,7 +39,7 @@ On 2026-11-13 the servo IDs of the leader arm were in reverse order (ID 1 was th
 
 ## Values
 
-Values are raw servo ticks (0â€“4095, 4096 ticks = 360Â°). LeRobot always gives `wrist_roll` the full range (0â€“4095).
+Values are raw servo ticks (0–4095, 4096 ticks = 360°). LeRobot always gives `wrist_roll` the full range (0–4095).
 
 For model coordinates, the installed LeRobot 0.7 DEGREES conversion uses
 `(Present_Position - range_midpoint) * 360 / 4095`. This software convention is
@@ -51,9 +51,9 @@ explicit CAD alignment mapping and per-arm URDF exporter.
 
 | Joint | Follower range | Leader range |
 |---|---|---|
-| `shoulder_pan` | 708â€“2830 | 728â€“2934 |
-| `shoulder_lift` | 1195â€“3542 | 818â€“3174 |
-| `elbow_flex` | 791â€“2991 | 858â€“3059 |
-| `wrist_flex` | 597â€“2949 | 972â€“3252 |
-| `wrist_roll` | 0â€“4095 | 0â€“4095 |
-| `gripper` | 1329â€“2829 | 1118â€“2642 |
+| `shoulder_pan` | 708–2830 | 728–2934 |
+| `shoulder_lift` | 1195–3542 | 818–3174 |
+| `elbow_flex` | 791–2991 | 858–3059 |
+| `wrist_flex` | 597–2949 | 972–3252 |
+| `wrist_roll` | 0–4095 | 0–4095 |
+| `gripper` | 1329–2829 | 1118–2642 |
