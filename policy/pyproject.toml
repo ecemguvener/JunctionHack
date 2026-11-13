@@ -1,0 +1,22 @@
+[project]
+name = "brickcell-policy-lab"
+version = "0.1.0"
+description = "Isolated CPU ACT experiments; synthetic demonstrations, no hardware deployment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "physicalai-train[cpu]==0.3.0",
+  "torch==2.10.0",
+  "torchvision==0.25.0",
+]
+
+[tool.uv]
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
