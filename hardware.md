@@ -34,6 +34,10 @@ Last check: 2026-11-13.
 | `Intel IPU7 ISYS Capture` (`/dev/video0`–`/dev/video31`) | Built-in laptop camera pipeline. No sensor driver is attached, so these devices give no image. Do not use them as robot cameras. |
 | Synaptics SVP7500 (`06cb:0701`) | Intel USBIO bridge for the built-in camera. It is not a robot device. |
 
+## Arm API service
+
+The service **armd** controls the two SO-101 arms through an HTTP API on the server (`127.0.0.1:8765`). To use, run, or deploy it, read [arm-api.md](arm-api.md). Only one process can open a serial port. Release the arms in armd, or stop armd, before you start LeRobot.
+
 ## Check what is connected
 
 Use these read-only commands:
