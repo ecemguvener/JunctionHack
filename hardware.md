@@ -6,7 +6,7 @@ This document tells an agent which hardware is connected to the team Intel serve
 
 ## Rules
 
-- The `intel` user cannot use `sudo` without a password. If a step needs root (for example, to install `udev` rules or `apt` packages), stop and ask the user to run it.
+- The `intel` user can use `sudo` without a password. Use `sudo -n` for steps that need root (for example, to install `udev` rules or `apt` packages). See [ssh.md](ssh.md#sudo).
 - The network is not reliable. Start long installs in `tmux` or with `nohup`, and write a log file (see [ssh.md](ssh.md)).
 
 ## The server
@@ -66,5 +66,5 @@ To find which device is which, ask the user to connect one device at a time, and
 
 - The `uvcvideo` kernel driver gives the basic color and depth video streams through `/dev/video*`.
 - For depth data and camera settings, use the `pyrealsense2` Python package (`pip install pyrealsense2` in the `lerobot` environment). LeRobot uses it for RealSense cameras.
-- The RealSense tools (`rs-enumerate-devices`, `realsense-viewer`) and RealSense `udev` rules are not installed. To install them, you need `sudo`, so ask the user.
+- The RealSense tools (`rs-enumerate-devices`, `realsense-viewer`) and RealSense `udev` rules are not installed. To install them, use `sudo -n`.
 - Use the serial number `318123021715` to select this camera in LeRobot camera settings.
