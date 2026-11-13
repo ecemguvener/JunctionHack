@@ -6,9 +6,9 @@
 #   uninstall  Show the sudo commands that stop and remove the service.
 #   status     Show the service status and the last log lines.
 #
-# The intel user has no passwordless sudo. Thus this script does not run sudo.
-# It shows the root commands. Copy them and run them yourself.
-# With --run, the script runs the sudo commands itself (sudo asks for the password).
+# With no --run, the script only shows the root commands.
+# With --run, the script runs them with "sudo -n". The intel user has passwordless
+# sudo (see ssh.md). If sudo asks for a password, "sudo -n" fails and does not wait.
 set -euo pipefail
 
 APP_DIR="/home/intel/arm-api"
@@ -77,17 +77,17 @@ case "$CMD" in
     check_setup || { echo "Fix the errors, then run this script again." >&2; exit 1; }
     echo "Setup is OK."
     root_cmds \
-      "sudo install -m 644 $UNIT_SRC $UNIT_DST" \
-      "sudo systemctl daemon-reload" \
-      "sudo systemctl enable --now armd"
+      "sudo -n install -m 644 $UNIT_SRC $UNIT_DST" \
+      "sudo -n systemctl daemon-reload" \
+      "sudo -n systemctl enable --now armd"
     echo
     echo "Then check: systemctl status armd; journalctl -u armd -f; curl -s http://127.0.0.1:8765/health"
     ;;
   uninstall)
     root_cmds \
-      "sudo systemctl disable --now armd" \
-      "sudo rm -f $UNIT_DST" \
-      "sudo systemctl daemon-reload"
+      "sudo -n systemctl disable --now armd" \
+      "sudo -n rm -f $UNIT_DST" \
+      "sudo -n systemctl daemon-reload"
     ;;
   status)
     systemctl status armd --no-pager || true

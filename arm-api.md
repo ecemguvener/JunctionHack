@@ -199,19 +199,20 @@ cd arm-api && uv run --python 3.12 python -m armd --fake
 
 ### 7.4 Run as a systemd service
 
-The `intel` user has no passwordless `sudo`. The install script does not run `sudo`. It shows the commands. A human must run them.
+The `intel` user can use `sudo` without a password (see [ssh.md](ssh.md#sudo)). With no option, the install script only shows the root commands. With `--run`, it runs them with `sudo -n`.
 
 Install:
 
 ```bash
 ssh intel
 ~/arm-api/deploy/install.sh            # Checks the setup, then shows the sudo commands.
+~/arm-api/deploy/install.sh --run      # Checks the setup, then runs the sudo commands.
 ```
 
 The script shows these commands:
 
 ```bash
-sudo install -m 644 /home/intel/arm-api/deploy/armd.service /etc/systemd/system/armd.service && sudo systemctl daemon-reload && sudo systemctl enable --now armd
+sudo -n install -m 644 /home/intel/arm-api/deploy/armd.service /etc/systemd/system/armd.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable --now armd
 ```
 
 Operate the service:
@@ -224,7 +225,7 @@ Operate the service:
 | Restart (after a deploy or a config change) | `sudo systemctl restart armd` |
 | Stop | `sudo systemctl stop armd` |
 | Start | `sudo systemctl start armd` |
-| Remove the service | `~/arm-api/deploy/install.sh uninstall` (shows the sudo commands) |
+| Remove the service | `~/arm-api/deploy/install.sh uninstall --run` (without `--run`, it only shows the sudo commands) |
 
 The unit has `Restart=always`. If the process stops, systemd starts it again after 2 s. To stop the service, use `systemctl stop`. Do not use `kill`.
 
