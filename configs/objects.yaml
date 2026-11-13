@@ -1,0 +1,18 @@
+# From the user's reference photograph and rough 20–40 mm estimate.
+# Exact dimensions/grasp widths are unmeasured; do not treat these as CAD models.
+initial_defect_scope: [marker_marks, surface_contamination]
+required_faces: [front, right, back, left, top]
+excluded_faces: [bottom]
+top_definition: studded_face_in_object_coordinates
+families:
+  square:
+    dimensions_mm: null
+    measured: false
+  long_narrow:
+    dimensions_mm: null
+    measured: false
+capture_metadata: [object_id, family, color, face, session_id, defect_type, split]
+simulation_fixture:
+  family: synthetic_square
+  body_dimensions_mm: [32, 32, 32]
+  matches_all_real_objects: false

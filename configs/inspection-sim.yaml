@@ -1,0 +1,9 @@
+# Fixed camera ROI contains jaws as well as the object. These are quality heuristics,
+# not object-presence detection; the sim separately checks contact lift and held pose.
+min_std: 8.0
+min_laplacian_variance: 15.0
+background_distance: 25.0
+min_foreground_fraction: 0.1
+max_foreground_fraction: 0.95
+roi: [0.0, 0.0, 1.0, 1.0]
+max_outside_fraction: 0.0

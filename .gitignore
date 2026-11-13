@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+/data/
+/artifacts/
+.cache/
+.env
+*.pem
+intel_key
+intel_junction_ed25519
+MUJOCO_LOG.TXT
+.env.*
+!.env.example
