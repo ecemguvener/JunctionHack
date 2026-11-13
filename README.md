@@ -144,7 +144,7 @@ uv run ruff format --check src tests scripts
 uv run python scripts/inspect_apis.py
 ```
 
-Ordinary tests run offline without model assets and explicitly skip the three marked real-model tests. The opt-in suite checks OpenVINO load/inference, executed numerical parity, and real inspection results driving simulated good/defective sorting. Tests also cover data corruption/leakage, preprocessing/color channels, quality/thresholds, missing calibration, stale results, timeouts (including a blocked inspector), retry limits, failed grasps/releases, and logging failures.
+Ordinary tests run offline without model assets and explicitly skip four marked real-model tests and one live-simulator test. The opt-in suite checks OpenVINO load/inference, executed numerical parity, and real inspection results driving simulated good/defective sorting. Tests also cover data corruption/leakage, preprocessing/color channels, quality/thresholds, missing calibration, stale results, timeouts (including a blocked inspector), retry limits, failed grasps/releases, and logging failures.
 
 `evaluate` writes `test_report.json`: confusion matrix, precision/recall/F1, defect recall/miss rate, good false-rejection rate, AUROC/AUPR and per-image inference latency. Binary metrics use the frozen threshold; uncertainty-band abstentions are reported separately. View-quality gating is not included in detector-only metrics. p50 requires >=2 timings and p95 >=20; unavailable statistics are `null`. `benchmark` explicitly warms up and repeats one image to measure CPU inference latency only. It is not an accuracy test or physical robot throughput measurement.
 
