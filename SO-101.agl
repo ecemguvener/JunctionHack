@@ -1,0 +1,123 @@
+robot "robotics_ws model" {
+  from onshape "https://cad.onshape.com/documents/7806549e37d24879bdccee0b/w/dc47b44dfea0d246e90382fe/e/5c19eca5ff5747a3058d94ef" {
+    parts = 59;
+    fingerprint = "sha256:4f7b8a490e06db5f3e5ef62a05d3881d1f87d6a9875c15308ac75caff40978a1";
+  };
+  link Body1_2 = parts ["Arm_Design_3", "Arm_Design_5", "Arm_Design_36", "Arm_Design_37", "Arm_Design_39", "Arm_Design_40", "Arm_Design_41", "Arm_Design_42"];
+  link Body1_3 = parts ["Arm_Design_2", "Arm_Design_9", "Arm_Design_51", "Arm_Design_52", "Arm_Design_53", "Arm_Design_54", "Arm_Design_55", "Arm_Design_58"];
+  link Body3 = parts ["Arm_Design_6", "Arm_Design_28", "Arm_Design_29", "Arm_Design_30", "Arm_Design_32", "Arm_Design_33", "Arm_Design_34"];
+  link Body5_1 = parts ["Arm_Design_1", "Arm_Design_8", "Arm_Design_18", "Arm_Design_45", "Arm_Design_46", "Arm_Design_47", "Arm_Design_48", "Arm_Design_49", "Arm_Design_50"];
+  link Body5_2 = parts ["Arm_Design_7"];
+  link "Group 1" = parts ["Arm_Design_0", "Arm_Design_19", "Arm_Design_20", "Arm_Design_21", "Arm_Design_22", "Arm_Design_23", "Arm_Design_25"];
+  link "Group 1_2" = parts ["Arm_Design_4", "Arm_Design_11", "Arm_Design_12", "Arm_Design_13", "Arm_Design_14", "Arm_Design_16", "Arm_Design_17", "Arm_Design_57"];
+  link drive_hub_1 = parts ["Arm_Design_10"];
+  link drive_hub_2 = parts ["Arm_Design_24"];
+  link drive_hub_3 = parts ["Arm_Design_27"];
+  link drive_hub_4 = parts ["Arm_Design_35"];
+  link drive_hub_5 = parts ["Arm_Design_43"];
+  link drive_hub_6 = parts ["Arm_Design_56"];
+  link driven_hub_1 = parts ["Arm_Design_15"];
+  link driven_hub_2 = parts ["Arm_Design_26"];
+  link driven_hub_3 = parts ["Arm_Design_31"];
+  link driven_hub_4 = parts ["Arm_Design_38"];
+  link driven_hub_5 = parts ["Arm_Design_44"];
+
+  base Body5_1 : fixed;
+
+  joint Revolute_1 : revolute drive_hub_5 -> Body1_2 at face("Arm_Design_43", "f106") {
+    flipped = true;
+    spin = 0.07209603635826826rad;
+    offset = (0mm, 0mm, -5.133088680839997mm);
+  };
+
+  joint Revolute_2 : revolute drive_hub_4 -> "Group 1" at face("Arm_Design_0", "f174") {
+    spin = -1.6120942508066456rad;
+    offset = (0mm, 0mm, -36.40000000000009mm);
+  };
+
+  joint Revolute_3 : revolute drive_hub_2 -> Body1_3 at face("Arm_Design_2", "f165") {
+    spin = 1.489878346447003rad;
+    offset = (0mm, 0mm, -34.900000000000546mm);
+  };
+
+  joint Revolute_4 : revolute drive_hub_1 -> Body3 at face("Arm_Design_10", "f106") {
+    flipped = true;
+    spin = 3.0518345840528394rad;
+    offset = (0mm, 0mm, -5.133088680839801mm);
+  };
+
+  joint Revolute_5 : revolute drive_hub_3 -> Body5_2 at face("Arm_Design_27", "f106") {
+    spin = -0.8479581278043022rad;
+    offset = (0mm, 0mm, 5.133088680840277mm);
+  };
+
+  joint Revolute_1_2 : revolute Body5_1 -> drive_hub_5 at face("Arm_Design_43", "f106") {
+    flipped = true;
+    spin = -0.003973499045899555rad;
+    offset = (0mm, 0mm, -0.6330886808399896mm);
+  };
+
+  joint Revolute_2_2 : revolute Body5_1 -> driven_hub_5 at face("Arm_Design_44", "f0") {
+    flipped = true;
+    spin = 0.00000000000000011102230246251224rad;
+    offset = (0mm, 0mm, 0.3749988144462435mm);
+  };
+
+  joint Revolute_1_3 : revolute Body1_2 -> drive_hub_4 at face("Arm_Design_35", "f106") {
+    flipped = true;
+    spin = -0.02513993059952452rad;
+    offset = (0mm, 0mm, -0.6330886808401436mm);
+  };
+
+  joint Revolute_2_3 : revolute Body1_2 -> driven_hub_4 at face("Arm_Design_38", "f0") {
+    flipped = true;
+    spin = -0.0000000000000003380540326953075rad;
+    offset = (0mm, 0mm, 0.3749988144458341mm);
+  };
+
+  joint Revolute_1_4 : revolute "Group 1" -> drive_hub_2 at face("Arm_Design_21", "f152") {
+    flipped = true;
+    spin = 1.0319416681005706rad;
+    offset = (0mm, 0mm, 0.5999999999999478mm);
+  };
+
+  joint Revolute_2_4 : revolute "Group 1" -> driven_hub_2 at face("Arm_Design_23", "f176") {
+    spin = -0.04129792401173126rad;
+    offset = (0mm, 0mm, 4.2250000000002315mm);
+  };
+
+  joint Revolute_1_5 : revolute Body1_3 -> drive_hub_6 at face("Arm_Design_51", "f152") {
+    flipped = true;
+    spin = 1.2411380809468289rad;
+    offset = (0mm, 0mm, 0.6000000000000462mm);
+  };
+
+  joint Revolute_2_5 : revolute Body1_3 -> "Group 1_2" at face("Arm_Design_52", "f176") {
+    spin = 1.489878346447003rad;
+    offset = (0mm, 0mm, 4.2249999999999766mm);
+  };
+
+  joint Revolute_1_6 : revolute "Group 1_2" -> drive_hub_1 at face("Arm_Design_10", "f106") {
+    flipped = true;
+    spin = -1.393827897219066rad;
+    offset = (0mm, 0mm, -0.633088680839758mm);
+  };
+
+  joint Revolute_2_6 : revolute "Group 1_2" -> driven_hub_1 at face("Arm_Design_15", "f0") {
+    flipped = true;
+    spin = 1.5772170306670004rad;
+    offset = (0mm, 0mm, 0.37499881444610106mm);
+  };
+
+  joint Revolute_1_7 : revolute Body3 -> drive_hub_3 at face("Arm_Design_27", "f106") {
+    flipped = true;
+    spin = -2.293634525785491rad;
+    offset = (0mm, 0mm, -0.6330886808402343mm);
+  };
+
+  joint Revolute_2_7 : revolute Body3 -> driven_hub_3 at face("Arm_Design_31", "f0") {
+    flipped = true;
+    spin = 3.046075732072653rad;
+    offset = (0mm, 0mm, 0.3749988144459605mm);
+  };
+}
