@@ -24,7 +24,7 @@ supplied through Frax's `ee_offset` when a different tool frame is needed.
 
 The Jacobian has shape **6x5**, with linear velocity first and angular velocity
 second, both expressed in the base frame. For each revolute joint its column is
-`[axis × (tcp_position - joint_origin); axis]`.
+`[axis Ã— (tcp_position - joint_origin); axis]`.
 
 Keep gripper opening as a separate command when controlling a TCP fixed to the
 gripper body. Add its coordinate when controlling a moving fingertip or contact
@@ -33,11 +33,79 @@ Five arm coordinates cannot realize every arbitrary six-dimensional pose:
 choose a reachable task, such as position plus tool-axis direction, or use
 weighted least-squares IK with an explicitly accepted orientation residual.
 
-The export contains 17 independent CAD revolute joints, with no coupling or
-joint-limit definitions. The five-joint model locks the remaining hub and gripper
-joints at their CAD reference values. Joint signs, motor zero offsets, TCP,
-physical limits, and the actual hub couplings still require hardware calibration
-before using planned configurations as motor commands.
+The original export contains 17 independent CAD revolute joints, with no coupling
+or joint-limit definitions. The five-joint model locks the remaining hub and
+gripper joints at their CAD reference values. The reference `SO101Kinematics`
+continues to use CAD coordinates; see the calibrated-coordinate adapter below.
+
+## Per-arm calibration and CAD alignment
+
+The merged leader and follower JSON files are the source of truth for each arm's
+encoder interval and homing configuration. `tools/so101_calibration.py` reads them
+directly. Input ticks are `Present_Position` after the stored servo homing offset
+has been applied. **Do not subtract or add `homing_offset` again.**
+
+The installed LeRobot 0.7 DEGREES mode computes:
+
+```text
+zero_ticks = (range_min + range_max) / 2
+lerobot_degrees = (present_position - zero_ticks) * 360 / 4095
+q_encoder_rad = (present_position - zero_ticks) * 2*pi / 4096
+q_encoder_rad = radians(lerobot_degrees) * 4095/4096
+```
+
+The model uses encoder radians (4096 periods per turn), with explicit bridges
+to LeRobot's `resolution - 1` degree convention. Simply calling `radians()` on
+LeRobot degrees would introduce a small angle-scale mismatch.
+The gripper remains a separate opening percentage. Wrist-roll's recorded full
+encoder interval is not a measured collision or mechanical-stop limit.
+
+The files do **not** record the geometric pose at each range midpoint, or the
+sign relative to the CAD axes. `calibration/kinematics_alignment.json` explicitly
+records those values as unknown. Obtain them from a measured, identifiable arm
+pose and rotation directions before setting `confirmed` to true for an arm:
+
+```text
+q_cad = cad_at_zero_rad + cad_sign * q_encoder_rad
+```
+
+To obtain the missing mapping, record homed ticks in one physical pose whose five
+CAD joint angles are known (for example, manually matching the displayed CAD
+reference, if reachable). Determine whether increasing each joint's tick value
+matches the corresponding CAD axis direction. For that recorded pose:
+
+```text
+cad_at_zero_rad = measured_cad_angles - cad_sign * ticks_to_radians(measured_ticks)
+```
+
+Do this separately for leader and follower. Encoder zero need not match the
+folded CAD pose, and servo homing registers do not need changing. The alignment
+file binds its mapping to a canonical SHA-256 of the corresponding calibration;
+changed calibration data invalidates an older mapping.
+
+`CalibratedSO101Kinematics("follower")` (or `"leader"`) requires this confirmed
+mapping. It rotates each joint's home transform by the zero offset and sets its
+axis sign, so FK, the Jacobian, and the Frax model use the same encoder-radian coordinates.
+Its generated URDF contains bounded revolute joints with the per-arm calibrated
+position intervals in radians. Effort and velocity are unbounded placeholders
+because they were not measured; the model remains kinematics-only.
+
+```bash
+uv run --with numpy python tools/so101_calibration.py --arm follower
+# After confirming geometric offsets and signs:
+uv run --with numpy python tools/so101_calibration.py --arm follower \
+  --export-urdf /path/to/so101-follower.urdf
+uv run --with numpy python -m unittest discover -s tools -p 'test_so101_*.py'
+```
+
+While alignment is unknown, calibrated model construction and URDF export fail
+explicitly. They do not replace the original ZIP or emit a guessed physical model.
+`ServoCalibration` still provides conversions, position intervals, and explicit
+limit validation. Conversion and FK queries never clamp inputs silently.
+The calibrated Jacobian has columns with respect to encoder radians, including
+the CAD-axis sign. A Jacobian with respect to ticks is that matrix multiplied
+by `2*pi/4096`; the gripper does not add an arm column. For derivatives with
+respect to LeRobot degrees, multiply it by `(pi/180)*(4095/4096)`.
 
 ## Use
 

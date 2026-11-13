@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "coordinate_reference": "Encoder radians: q=(Present_Position-range_midpoint)*2*pi/4096. Installed LeRobot 0.7 DEGREES uses 360/4095; convert degrees with (pi/180)*(4095/4096). Present_Position already includes the hardware homing offset.",
+  "mapping": "q_cad = cad_at_zero_rad + cad_sign * q_encoder_rad",
+  "arms": {
+    "follower": {
+      "confirmed": false,
+      "cad_at_zero_rad": {
+        "shoulder_pan": null,
+        "shoulder_lift": null,
+        "elbow_flex": null,
+        "wrist_flex": null,
+        "wrist_roll": null
+      },
+      "cad_sign": {
+        "shoulder_pan": null,
+        "shoulder_lift": null,
+        "elbow_flex": null,
+        "wrist_flex": null,
+        "wrist_roll": null
+      },
+      "calibration_sha256": "6fcce19349b7bea19b3d42c8d7fa80bbea938472c3a7a8f91e67f663f32d671a"
+    },
+    "leader": {
+      "confirmed": false,
+      "cad_at_zero_rad": {
+        "shoulder_pan": null,
+        "shoulder_lift": null,
+        "elbow_flex": null,
+        "wrist_flex": null,
+        "wrist_roll": null
+      },
+      "cad_sign": {
+        "shoulder_pan": null,
+        "shoulder_lift": null,
+        "elbow_flex": null,
+        "wrist_flex": null,
+        "wrist_roll": null
+      },
+      "calibration_sha256": "a56c52b11006fff6f6345d91db4a0a7bac73c727d83b3565c2e0a764f69c074e"
+    }
+  }
+}

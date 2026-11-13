@@ -143,13 +143,76 @@ class SO101Kinematics:
                                    ee_offset=ee_offset)
 
 
+class CalibratedSO101Kinematics(SO101Kinematics):
+    """FK/Jacobian in a specific arm's midpoint-zero encoder radians.
+
+    Calibration ranges alone cannot determine CAD pose alignment. Construction
+    requires a confirmed per-arm CAD angle and sign mapping for all five joints.
+    """
+
+    def __init__(self, arm, archive=DEFAULT_ARCHIVE, alignment_path=None):
+        from so101_calibration import ServoCalibration, ALIGNMENT_PATH
+
+        super().__init__(archive)
+        self.calibration = ServoCalibration(arm)
+        offsets, signs = self.calibration.alignment(alignment_path or ALIGNMENT_PATH)
+        self.cad_at_zero = offsets
+        self.cad_sign = signs
+        updated = []
+        for name, parent, child, home, axis in self.joints:
+            if name in ARM_JOINTS:
+                index = ARM_JOINTS.index(name)
+                home = home@_rotation(axis, offsets[index])
+                axis = axis*signs[index]
+            updated.append((name, parent, child, home, axis))
+        self.joints = updated
+
+    def export_arm_urdf(self, destination):
+        super().export_arm_urdf(destination)
+        root = ET.parse(destination).getroot()
+        root.set('name', f'so101_{self.calibration.arm}_calibrated_kinematics')
+        rows = {row[0]: row for row in self.joints}
+        for joint in root.findall('joint'):
+            name = joint.get('name')
+            if name not in ARM_JOINTS:
+                continue
+            index = ARM_JOINTS.index(name)
+            _, _, _, home, axis = rows[name]
+            r = home[:3, :3]
+            pitch = np.arctan2(-r[2, 0], np.hypot(r[0, 0], r[1, 0]))
+            if np.hypot(r[0, 0], r[1, 0]) > 1e-12:
+                roll, yaw = np.arctan2(r[2, 1], r[2, 2]), np.arctan2(r[1, 0], r[0, 0])
+            else:
+                roll, yaw = np.arctan2(-r[1, 2], r[1, 1]), 0.
+            origin = joint.find('origin')
+            origin.set('xyz', ' '.join(format(v, '.17g') for v in home[:3, 3]))
+            origin.set('rpy', ' '.join(format(v, '.17g') for v in [roll, pitch, yaw]))
+            joint.find('axis').set('xyz', ' '.join(format(v, '.17g') for v in axis))
+            joint.set('type', 'revolute')
+            limit = joint.find('limit')
+            if limit is None:
+                limit = ET.SubElement(joint, 'limit')
+            # Only encoder position intervals were calibrated. Dynamics/speed
+            # remain unspecified; this is a kinematics-only model.
+            limit.attrib.update(lower=format(self.calibration.lower[index], '.17g'),
+                                upper=format(self.calibration.upper[index], '.17g'),
+                                effort='inf', velocity='inf')
+        ET.indent(root)
+        ET.ElementTree(root).write(destination, encoding='utf-8', xml_declaration=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--q', type=float, nargs=5, default=[0.]*5, metavar='RAD')
     parser.add_argument('--tcp', type=float, nargs=3, default=[0.]*3, metavar='M')
     parser.add_argument('--frax', action='store_true', help='also compare installed Frax')
+    parser.add_argument('--arm', choices=('follower', 'leader'), help='use confirmed calibrated encoder coordinates')
+    parser.add_argument('--alignment', type=Path, help='per-arm CAD alignment file (requires --arm)')
     args = parser.parse_args()
-    model = SO101Kinematics()
+    if args.alignment and not args.arm:
+        parser.error('--alignment requires --arm')
+    model = (CalibratedSO101Kinematics(args.arm, alignment_path=args.alignment)
+             if args.arm else SO101Kinematics())
     np.set_printoptions(precision=8, suppress=True)
     print('Joint order:', ', '.join(ARM_JOINTS))
     print('Base-to-TCP pose:\n', model.fk(args.q, args.tcp))
