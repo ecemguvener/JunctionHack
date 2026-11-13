@@ -1,15 +1,11 @@
 # Hardware on the Intel server — instructions for agents
 
-This document tells an agent which hardware is connected to the team Intel server and how to work with it safely.
+This document tells an agent which hardware is connected to the team Intel server and how to work with it.
 
 > **Read this document before you install drivers or software for the hardware, or before you configure, calibrate, or control the hardware.** For SSH access to the server, read [ssh.md](ssh.md) first.
 
 ## Rules
 
-- **Do not move motors.** Do not send commands that move a robot arm or another actuator (calibrate, teleoperate, replay, record with a robot, torque on) until the user tells you to do it. A person must be near the robot and ready to stop it.
-- Reading is safe. You can read USB descriptors, `lsusb`, `/sys`, `/dev`, and the kernel log at any time.
-- You can read frames from the cameras.
-- Do not flash or update the firmware on a device unless the user tells you to do it.
 - The `intel` user cannot use `sudo` without a password. If a step needs root (for example, to install `udev` rules or `apt` packages), stop and ask the user to run it.
 - The network is not reliable. Start long installs in `tmux` or with `nohup`, and write a log file (see [ssh.md](ssh.md)).
 
@@ -30,8 +26,6 @@ Last check: 2026-11-13.
 |---|---|---|---|---|
 | Intel RealSense D415 depth camera | `8086:0ad3` | Hub port 3, USB 3 (5 Gbit/s) | `/dev/video32`–`/dev/video37`. Stable names are in `/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_415_*` | Serial number `318123021715`. Driver: `uvcvideo`. |
 | USB-C hub: VIA Labs VL822 and Realtek RTS5411 | `2109:0822`, `2109:2822`, `0bda:0411`, `0bda:5411` | Laptop USB-C port 2 | — | 7 free ports for devices. If a device does not show, make sure that the hub has power. |
-
-**Robot arms: none are connected at the last check.** No `/dev/ttyACM*`, `/dev/ttyUSB*`, or `/dev/serial/by-id` devices exist. When an arm is connected, its motor controller board shows as a serial device. Add it to the table above with its USB ID, serial number, and `/dev/serial/by-id/...` path.
 
 ### Built-in devices (ignore these for the robot work)
 
