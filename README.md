@@ -24,6 +24,21 @@ uv run python -m brickcell.simulation.run --reset
 
 Open **http://127.0.0.1:19091/**. The two bowls are GOOD and DEFECTIVE; the panel shows the camera image, score and action. Motion uses scripted IK and known pickup poses, not a trained VLA. Only one fixed inspection view is evaluated; no five-face verification is performed. [Full setup, training, tests and limitations](docs/SIMULATION.md).
 
+## Live Real2Sim 3-plate 8-block MuJoCo mirror (`brickcell.block_inspector`)
+
+To mirror the physical Intel cell (`scripts/live_depth.py` on `:8094` + `armd` on `:8765`) into MuJoCo 4.0.1 Desktop in real time (defaulting to the overhead `top` D415 `350122060653`, supporting `lavender`, `brown`, `yellow`, `green`, `white`, and `red` DUPLO bricks and all 3 IKEA KALAS bowls while rejecting human arms, laptops, wires, and trash):
+
+```bash
+# One-time isolated simulator venv (leaves locked core uv.lock untouched):
+uv venv artifacts/arch-venv --python 3.12
+uv pip install --python artifacts/arch-venv -r configs/arch-local-requirements.txt
+uv pip install --python artifacts/arch-venv --no-deps -e .
+
+# Run live Real2Sim mirror (auto-opens SSH port-forward to `intel` if needed):
+.\artifacts\arch-venv\Scripts\python.exe -m brickcell.block_inspector real2sim
+# Optional camera modes: --camera-mode {top,plate,fused} (default: top)
+```
+
 ## Install and verify
 
 An experimental [policy preparation lab](docs/POLICY_LAB.md) now records synthetic

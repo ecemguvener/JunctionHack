@@ -1,5 +1,18 @@
 # Executed validation — 13 November 2026
 
+## Live Real2Sim mirror connected to the physical Intel cell — 14 November 2026
+
+Connected `Real2SimPipeline.run_live_real2sim_mirror` (`src/brickcell/block_inspector/real2sim.py` and `src/brickcell/block_inspector/twin.py`) to the physical Intel workstation (`intel-XPS-16-DA16260`) over a read-only SSH port-forward tunnel (`127.0.0.1:8094` -> `scripts/live_depth.py`, `127.0.0.1:8765` -> `armd`), defaulting to `--camera-mode top` (`350122060653`).
+
+- **Live overhead D415 point-cloud + `armd` follower state mirroring**:
+  - Polled `GET http://127.0.0.1:8765/arms/follower/state` (`armd_connected=true`), decoded calibrated follower joint angles (`q_enc_rad = [0.5553, -1.3629, 1.6966, -0.0767, 1.7081]`, `gripper_pct = 0.03`), and mirrored them directly into the MuJoCo 4.0.1 Desktop 3D viewer (`set_arm_state_direct`). No motion commands (`POST`) were sent to `armd`.
+  - Polled live overhead D415 point clouds (`GET http://127.0.0.1:8094/points/top`, `8,738` raw points/frame, `128.6 ms` perception latency), leveled the physical wooden tabletop to `z_world = 0`, localized all 3 physical IKEA KALAS bowls (`source=[0.2978, -0.0758, 0.0]`, `good=[0.3849, +0.1004, 0.0]`, `defective=[0.2066, +0.1065, 0.0]`, all `from_prior=false`, with `19.3–44.8 mm` rim-to-rim clearance at `79.5 mm` outer bowl radius), and segmented the 8 interior DUPLO bricks across the 6 physical brick colors (`lavender`, `brown`, `yellow`, `green`, `white`, `red`) while rejecting non-brick clutter (`human_arm`, `wire`, `trash`, `robot_arm`).
+- **Automated tests & linting**:
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest tests/test_block_inspector.py -k "real2sim or three_plates"`: **5 passed**.
+  - `.\artifacts\arch-venv\Scripts\ruff.exe check src tests scripts` and `.\artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts` passed across all 80 files.
+- **Limitations**:
+  - The live Real2Sim mirror session was strictly **read-only** on the physical robot (`GET /arms/follower/state` and `GET /points/top`); no autonomous physical pick, spin, or sort motion commands were sent to the physical follower arm during this check, and no physical defect-classification accuracy claims are made.
+
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
 Implemented `RGBDInspector` with separate modality models and explicit serial,

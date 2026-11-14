@@ -1,0 +1,15 @@
+Run current policy pipeline in Mujoco
+.\artifacts\arch-venv\Scripts\python.exe -m brickcell.block_inspector.studio_vision --num-blocks 8 --seed 42
+
+OR
+
+.\artifacts\arch-venv\Scripts\python.exe -m brickcell.block_inspector real2sim --num-blocks 8
+
+
+
+Run real2sim pipeline
+
+.\artifacts\arch-venv\Scripts\python.exe -m brickcell.block_inspector real2sim
+
+(Optional: you can switch cameras anytime with --camera-mode plate, --camera-mode top, or --camera-mode fused.)
+

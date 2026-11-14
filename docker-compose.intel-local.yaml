@@ -1,0 +1,69 @@
+name: so101-block-inspector
+services:
+  camera-pub:
+    build: ./services/camera_pub
+    network_mode: host
+    ipc: shareable
+    shm_size: "512m"
+    environment:
+      LIVE_DEPTH_URL: "http://127.0.0.1:8094"
+      WRIST_HTTP_URL: "http://127.0.0.1:8091/frame.jpg"
+      CAMERA_PUB_HZ: "15.0"
+    volumes:
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  frax-mujoco-twin:
+    build: ./services/frax_mujoco_twin
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub]
+    environment:
+      MUJOCO_GL: egl
+      JAX_PLATFORMS: cpu
+      JAX_ENABLE_X64: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      XLA_FLAGS: "--xla_cpu_multi_thread_eigen=false --xla_cpu_scheduler_type=CPU_SCHEDULER_TYPE_MEMORY_OPTIMIZED"
+    volumes:
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  xpu-perception-policy:
+    build: ./services/xpu_perception_policy
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub, frax-mujoco-twin]
+    group_add: ["render", "video"]
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/accel/accel0:/dev/accel/accel0
+    volumes:
+      - ./calibration:/data/calibration:ro
+      - inspection-data:/data/reports
+    restart: unless-stopped
+
+  armd-bridge:
+    build: ./services/armd_bridge
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [frax-mujoco-twin]
+    environment:
+      ARMD_BASE_URL: "http://127.0.0.1:8765"
+      SAFE_GRIPPER_MIN_RAW: "1339"
+      FOLLOWER_CALIB_JSON: "/data/calibration/robots/so_follower/follower.json"
+      KINEMATICS_ALIGNMENT_JSON: "/data/calibration/kinematics_alignment.json"
+    volumes:
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  cogman-inspector:
+    build: ./services/cogman_inspector
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub, frax-mujoco-twin, xpu-perception-policy, armd-bridge]
+    volumes:
+      - inspection-data:/data/reports
+    restart: unless-stopped
+
+volumes:
+  inspection-data:

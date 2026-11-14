@@ -1,0 +1,84 @@
+{
+  "$schema": "https://wendy.dev/schemas/wendy.json",
+  "appId": "dev.junction.so101.block-inspector",
+  "version": "1.0.0",
+  "platform": "linux/amd64",
+  "language": "python",
+  "isolation": "shared-ipc",
+  "env": {
+    "ARMD_BASE_URL": "http://127.0.0.1:8765",
+    "LIVE_DEPTH_URL": "http://127.0.0.1:8094",
+    "WRIST_HTTP_URL": "http://127.0.0.1:8091/frame.jpg",
+    "CAM_UI_URL": "http://127.0.0.1:8093",
+    "DASHBOARD_URL": "http://127.0.0.1:8096",
+    "REALSENSE_1_SERIAL": "350122060653",
+    "REALSENSE_2_SERIAL": "243622060450",
+    "WRIST_UVC_BY_ID": "/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0",
+    "SAFE_GRIPPER_MIN_RAW": "1339",
+    "BABYROS_SHM_BYTES": "134217728",
+    "MUJOCO_GL": "egl",
+    "XPOLICY_WS_URL": "${XPOLICY_WS_URL}"
+  },
+  "resources": {
+    "pids": 2048
+  },
+  "entitlements": [
+    { "type": "network", "mode": "host" }
+  ],
+  "services": {
+    "camera-pub": {
+      "context": "./services/camera_pub",
+      "resources": { "cpus": "2.0", "memory": "2Gi" },
+      "entitlements": [
+        {
+          "type": "camera",
+          "allowlist": [
+            "/dev/video32", "/dev/video33", "/dev/video34", "/dev/video35", "/dev/video36", "/dev/video37",
+            "/dev/video38", "/dev/video39", "/dev/video40", "/dev/video41", "/dev/video42", "/dev/video43",
+            "/dev/video44", "/dev/video45"
+          ]
+        },
+        { "type": "usb" },
+        { "type": "persist", "name": "junction-so101-calib", "path": "/data" }
+      ]
+    },
+    "frax-mujoco-twin": {
+      "context": "./services/frax_mujoco_twin",
+      "dependsOn": ["camera-pub"],
+      "resources": { "cpus": "4.0", "memory": "4Gi" },
+      "env": {
+        "JAX_PLATFORMS": "cpu",
+        "JAX_ENABLE_X64": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "entitlements": [
+        { "type": "persist", "name": "junction-so101-calib", "path": "/data" }
+      ]
+    },
+    "armd-bridge": {
+      "context": "./services/armd_bridge",
+      "dependsOn": ["frax-mujoco-twin"],
+      "resources": { "cpus": "1.0", "memory": "512Mi" },
+      "env": {
+        "FOLLOWER_CALIB_JSON": "/data/calibration/robots/so_follower/follower.json",
+        "KINEMATICS_ALIGNMENT_JSON": "/data/calibration/kinematics_alignment.json"
+      },
+      "entitlements": [
+        { "type": "persist", "name": "junction-so101-calib", "path": "/data" }
+      ]
+    },
+    "cogman-inspector": {
+      "context": "./services/cogman_inspector",
+      "dependsOn": ["camera-pub", "frax-mujoco-twin", "armd-bridge"],
+      "resources": { "cpus": "2.0", "memory": "2Gi" },
+      "entitlements": [
+        { "type": "persist", "name": "junction-so101-calib", "path": "/data" },
+        { "type": "episode-write" }
+      ],
+      "readiness": {
+        "tcpSocket": { "port": 8095 },
+        "timeoutSeconds": 30
+      }
+    }
+  }
+}
