@@ -4,6 +4,15 @@ A working Anomalib 2.7.0 PatchCore → OpenVINO CPU inspection pipeline with a r
 
 The examples use **synthetic drawings and rendered camera images**. They demonstrate software integration, not real brick-defect accuracy. All robot actions are simulated. See [executed validation](docs/VALIDATION.md), [architecture](docs/ARCHITECTURE.md), [real-image collection](docs/DATA_COLLECTION.md), and [Intel deployment plan](docs/INTEL_DEPLOYMENT.md).
 
+## Physical AI Studio — SO-101 Model-Based Pick-and-Place Architecture Workbench
+
+Our modification to Intel's [Physical AI Studio](physical-ai-studio/README.md) (`open-edge-platform/physical-ai-studio`, deployed at `/home/intel/physical-ai-studio` on the Intel workstation and mirrored in [`physical-ai-studio/`](physical-ai-studio/)) embeds our complete analytical SO-101 Pick-Inspect-Place / Spin-and-Sort architecture directly into the Physical AI Studio UI (`http://localhost:7860`) with zero external installations required:
+
+- **Auto-Syncs with Physical AI Studio (`physicalai.db`)**: Automatically discovers registered projects (`white-block-picker`), `SO101_Follower` & `SO101_Leader` calibration profiles (including Physical AI Studio's `normalized` `[-100, 100]` body / `[0, 100]` gripper unit mode, homed STS3215 `ticks`, encoder `radians`, LeRobot `degrees`, and CAD angles), and all 3 camera streams (`top` D415, `side`/`plate` D415, `wrist` Sonix UVC).
+- **Analytical Kinematics, $6\times 5$ Jacobians, Published CAD Dynamics & 5-DOF IK**: Provides live $4\times 4$ $\text{SE}(3)$ FK, $6\times 5$ geometric Jacobians ($J_{\text{rad}}, J_{\text{tick}}, J_{\text{deg}}$), 5-DOF Yoshikawa manipulability $w_5(q) = \sqrt{\det(J^T J)}$, published CAD mass/inertia dynamics ($M(q)$, gravity torque $g(q)$, feedforward tick compensation), damped Gauss-Newton 5-DOF Grasp IK, Leader $\rightarrow$ Follower CAD posture teaching, and 1-click standalone Python controller + calibrated URDF export for **any SO-101 arm**.
+
+See the step-by-step setup and mathematical guide in [**`physical-ai-studio/README.md`**](physical-ai-studio/README.md). You can also launch the standalone workbench locally via `uv run python -m brickcell studio --port 7860`.
+
 ## Watch the two-bowl inspection cell
 
 For hardware-independent preparation, use the [data and training workbench](docs/WORKBENCH.md)

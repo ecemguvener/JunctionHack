@@ -50,14 +50,19 @@
   <aside class="options">
     <h3>Overlay · sim / real</h3>
     <div class="opt">
+      <button class="toggle" data-opt="hud">Real2Sim HUD <span class="sw"></span></button>
+      <small><b data-bind="hud-count">0</b> DUPLO bricks · 3 KALAS bowls · 6D OBBs &amp; triads</small>
+    </div>
+    <div class="opt">
       <button class="toggle" data-opt="defects">Defects <span class="sw"></span></button>
       <div class="only-defects"><div class="seg"><button data-scope="all">All visible</button><button data-scope="focus">Focus only</button></div></div>
-      <div class="stub" data-stub="anomalies">Not connected<br><span data-bind="anomalies-reason"></span></div>
+      <div class="stub" data-stub="anomalies"><b data-bind="anomalies-state">No evidence</b><br><span data-bind="anomalies-reason"></span></div>
+      <small data-bind="anomalies-provenance">Detector method and calibration unknown</small>
       <small><b data-bind="defect-count">0</b> shown · score = raw distance, not a probability</small>
     </div>
     <div class="opt">
       <button class="toggle" data-opt="focus">Focus block <span class="sw"></span></button>
-      <div class="stub" data-stub="focus">Not connected<br><span data-bind="focus-reason"></span></div>
+      <div class="stub" data-stub="focus"><b data-bind="focus-state">No evidence</b><br><span data-bind="focus-reason"></span></div>
       <small>The block the arm selected to pick and inspect</small>
     </div>
     <dl>
@@ -66,9 +71,11 @@
       <dt>Cloud</dt><dd data-bind="cloud-points">–</dd>
       <dt>View</dt><dd data-bind="src"></dd>
     </dl>
-    <div class="keys"><kbd>T</kbd>Sim / real<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>8</kbd>Top cloud<kbd>9</kbd>Plate cloud<kbd>Esc</kbd>Exit full screen</div>
+    <div class="keys"><kbd>T</kbd>Sim / real<kbd>H</kbd>Real2Sim HUD<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>8</kbd>Top cloud<kbd>9</kbd>Plate cloud<kbd>Esc</kbd>Exit full screen</div>
   </aside>
 </main>
+<script src="/static/evidence.js"></script>
 <script src="/static/app.js"></script>
+<script defer src="/api/so101/ui-extension.js"></script>
 </body>
 </html>

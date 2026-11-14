@@ -15,16 +15,19 @@ import base64
 import io
 import json
 import math
+import os
 import socket
 import subprocess
 import threading
 import time
 import urllib.request
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal
 
 import cv2
+import mujoco
 import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation
@@ -134,8 +137,8 @@ class PerceivedBrick:
     cluster_pts_world: np.ndarray
 
     def color_name(self) -> str:
-        """Classify brick into one of the 6 physical DUPLO colors (`lavender`, `brown`, `yellow`, `green`, `white`, `red`)."""
-        r, g, b = (float(x) for x in self.mean_rgb)
+        """Classify brick into its physical DUPLO color (`lavender`, `brown`, `yellow`, `green`, `white`, `red`, `blue`)."""
+        r, g, _b = (float(x) for x in self.mean_rgb)
         rgb_u8 = np.clip(np.round(self.mean_rgb), 0, 255).astype(np.uint8).reshape(1, 1, 3)
         h, s, v = (int(x) for x in cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2HSV)[0, 0])
         if s <= 58 and v >= 150:
@@ -150,12 +153,14 @@ class PerceivedBrick:
             return "yellow"
         if 37 <= h <= 84:
             return "green"
+        if 85 <= h <= 104 and s >= 150:
+            return "blue"
         if 85 <= h <= 161:
             return "lavender"
         return "red"
 
     def display_rgba(self) -> tuple[float, float, float, float]:
-        """Return vivid LEGO DUPLO RGBA for the 6 physical brick colors (`lavender`, `brown`, `yellow`, `green`, `white`, `red`)."""
+        """Return vivid LEGO DUPLO RGBA for the physical brick palette (`lavender`, `brown`, `yellow`, `green`, `white`, `red`, `blue`)."""
         cname = self.color_name()
         palette = {
             "white": (0.94, 0.96, 0.96, 1.0),  # LEGO White
@@ -163,6 +168,7 @@ class PerceivedBrick:
             "brown": (0.52, 0.27, 0.12, 1.0),  # LEGO Reddish Brown
             "yellow": (0.95, 0.78, 0.12, 1.0),  # LEGO Bright Yellow
             "green": (0.14, 0.74, 0.28, 1.0),  # LEGO Bright Green
+            "blue": (0.04, 0.56, 0.82, 1.0),  # LEGO Medium Azure / Blue
             "lavender": (0.68, 0.56, 0.88, 1.0),  # LEGO Medium Lavender
         }
         return palette.get(cname, tuple(float(x) for x in self.spec.rgba))  # type: ignore[return-value]
@@ -227,10 +233,21 @@ class Real2SimSceneState:
         return counts
 
     def to_summary_dict(self) -> dict[str, Any]:
+        R_w_top, p_w_top, K_top = real_intel_camera_poses_world()["top"]
         return {
             "provenance": self.provenance,
             "frame_index": self.frame_index,
             "latency_ms": round(self.latency_ms, 3),
+            "camera_top": {
+                "pos": [round(float(x), 5) for x in p_w_top],
+                "rotation_cv": [[round(float(v), 7) for v in row] for row in R_w_top],
+                "fx": round(float(K_top[0, 0]), 4),
+                "fy": round(float(K_top[1, 1]), 4),
+                "cx": round(float(K_top[0, 2]), 4),
+                "cy": round(float(K_top[1, 2]), 4),
+                "width": 640,
+                "height": 480,
+            },
             "raw_point_count": self.raw_point_count,
             "downsampled_point_count": self.downsampled_point_count,
             "robot_masked_point_count": self.robot_masked_point_count,
@@ -242,9 +259,21 @@ class Real2SimSceneState:
                     "part_name": b.spec.name,
                     "part_id": b.spec.part_id,
                     "color_name": b.color_name(),
+                    "display_rgba": [round(float(x), 3) for x in b.display_rgba()],
+                    "dims_m": [round(float(x), 4) for x in b.spec.dims_m],
                     "stable_pose": b.stable_pose_name,
                     "support_region": b.support_region,
                     "pos_world_m": [round(float(x), 4) for x in b.T_world_block[:3, 3]],
+                    "R_world_block": [
+                        [round(float(v), 5) for v in row] for row in b.T_world_block[:3, :3]
+                    ],
+                    "corners_world_m": [
+                        [round(float(v), 4) for v in pt]
+                        for pt in (
+                            (b.spec.corners_local() @ b.T_world_block[:3, :3].T)
+                            + b.T_world_block[:3, 3]
+                        )
+                    ],
                     "xy_yaw": [round(float(x), 4) for x in b.xy_yaw],
                     "icp_fitness": round(b.icp_fitness, 3),
                     "icp_rmse_mm": round(b.icp_rmse_m * 1000.0, 2),
@@ -257,6 +286,7 @@ class Real2SimSceneState:
             "plates": {
                 role: {
                     "pos_world_m": [round(float(x), 4) for x in p.pos_world],
+                    "outer_radius_m": 0.0795,
                     "inlier_count": p.inlier_count,
                     "from_prior": p.from_prior,
                 }
@@ -276,6 +306,26 @@ class Real2SimSceneState:
         }
 
 
+def _down_normal_to_rpy_deg(
+    down_normal: list[float] | tuple[float, ...],
+) -> tuple[float, float, float]:
+    """Map body-frame down-face normal `(nx, ny, nz)` to `(roll, pitch, yaw)` in degrees."""
+    nx, ny, nz = float(down_normal[0]), float(down_normal[1]), float(down_normal[2])
+    if nz <= -0.8:
+        return (0.0, 0.0, 0.0)
+    if nz >= 0.8:
+        return (180.0, 0.0, 0.0)
+    if ny >= 0.8:
+        return (-90.0, 0.0, 0.0)
+    if ny <= -0.8:
+        return (90.0, 0.0, 0.0)
+    if nx >= 0.8:
+        return (0.0, 90.0, 0.0)
+    if nx <= -0.8:
+        return (0.0, -90.0, 0.0)
+    return (0.0, 0.0, 0.0)
+
+
 def load_duplo_stable_poses(
     path: Path | None = None,
 ) -> dict[str, list[StablePoseEntry]]:
@@ -286,8 +336,32 @@ def load_duplo_stable_poses(
 
     if json_path.exists():
         doc = json.loads(json_path.read_text(encoding="utf-8"))
-        for pid, pinfo in doc.get("parts", {}).items():
+        # Support top-level `"bricks"` schema (`assets/duplo/stable_poses.json`)
+        for bkey, binfo in doc.get("bricks", {}).items():
             entries: list[StablePoseEntry] = []
+            for sp in binfo.get("poses", []):
+                if sp.get("marginal", False):
+                    continue
+                pose_id = str(sp.get("id") or sp.get("name") or "upright")
+                if "rpy_deg" in sp:
+                    rpy = tuple(float(v) for v in sp["rpy_deg"])
+                elif "down_face_normal_body" in sp:
+                    rpy = _down_normal_to_rpy_deg(sp["down_face_normal_body"])
+                else:
+                    rpy = (0.0, 0.0, 0.0)
+                R_loc = Rotation.from_euler("xyz", rpy, degrees=True).as_matrix()
+                entries.append(StablePoseEntry(name=pose_id, rpy_deg=rpy, R_local=R_loc))
+            if entries:
+                out[bkey] = entries
+                pid = str(binfo.get("part", ""))
+                if pid:
+                    out[pid] = entries
+                    if pid in part_id_to_name:
+                        out[part_id_to_name[pid]] = entries
+
+        # Also support legacy `"parts"` schema if passed
+        for pid, pinfo in doc.get("parts", {}).items():
+            entries = []
             for sp in pinfo.get("stable_poses", []):
                 rpy = tuple(float(v) for v in sp["rpy_deg"])
                 R_loc = Rotation.from_euler("xyz", rpy, degrees=True).as_matrix()
@@ -513,27 +587,15 @@ def fuse_teammate_top_and_plate_packets(
     is_real_plate = _pkt_is_real(plate_packet)
 
     if (is_real_top or is_real_plate) and provisional_transform is None:
-        pts_list: list[np.ndarray] = []
-        col_list: list[np.ndarray] = []
         if top_packet is not None:
             p_t, c_t = ingest_teammate_depth_packet(top_packet, cam_rig.realsense_1)
             if len(p_t):
-                pts_list.append(p_t)
-                col_list.append(c_t)
+                return p_t, c_t
         if plate_packet is not None:
             p_p, c_p = ingest_teammate_depth_packet(plate_packet, cam_rig.realsense_2)
             if len(p_p):
-                # When top camera is present on the real table, keep elevated/in-air points from plate
-                # camera so grazing-angle bowl-rim shadows do not smear resting bricks inside the bowl.
-                if pts_list:
-                    elev = p_p[:, 2] > 0.045
-                    p_p, c_p = p_p[elev], c_p[elev]
-                if len(p_p):
-                    pts_list.append(p_p)
-                    col_list.append(c_p)
-        if not pts_list:
-            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.uint8)
-        return np.vstack(pts_list), np.vstack(col_list)
+                return p_p, c_p
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.uint8)
 
     T_world_top = cam_rig.realsense_1.world_transform()
     if provisional_transform and "top_from_plate_R" in provisional_transform:
@@ -659,6 +721,23 @@ def decode_live_depth_snapshot(
             (pts_world >= REAL2SIM_WORKSPACE_MIN) & (pts_world <= REAL2SIM_WORKSPACE_MAX), axis=1
         )
         return pts_world[in_ws], cols[in_ws]
+    if float(intr.get("fx", 0.0)) > 0.0:
+        from dataclasses import replace
+
+        fx = float(intr["fx"])
+        fy = float(intr.get("fy", fx))
+        ppx = float(intr.get("ppx", depth_m.shape[1] * 0.5))
+        ppy = float(intr.get("ppy", depth_m.shape[0] * 0.5))
+        K_override = np.array(
+            [[fx, 0.0, ppx], [0.0, fy, ppy], [0.0, 0.0, 1.0]],
+            dtype=np.float64,
+        )
+        cam = replace(
+            cam,
+            width=int(depth_m.shape[1]),
+            height=int(depth_m.shape[0]),
+            K=K_override,
+        )
     return unproject_rgbd_workspace(depth_m, rgb, cam, stride=stride)
 
 
@@ -907,6 +986,12 @@ def filter_robot_arm_points(
             & (hsv_r[:, 1] >= 45)
         )
         on_robot |= is_purple_pla
+    in_source_bowl_layer = (
+        (points_world[:, 0] >= 0.195)
+        & (np.abs(points_world[:, 1]) <= 0.082)
+        & (points_world[:, 2] <= 0.046)
+    )
+    on_robot &= ~in_source_bowl_layer
     return points_world[~on_robot], colors_rgb[~on_robot], points_world[on_robot]
 
 
@@ -976,9 +1061,9 @@ def localize_and_subtract_support_surfaces(
         from_prior = True
 
         if len(rim_pts) >= 40:
-            # Known-radius (R_rim = 0.0785 m) Gauss-Newton circle-center fit invariant to one-sided camera density
+            # Known-radius (R_rim = 0.0855 m) Gauss-Newton circle-center fit invariant to one-sided camera density
             est_xy = nom_xy.copy()
-            r_target = 0.0785
+            r_target = 0.0855
             xy_pts = rim_pts[:, :2]
             angs = np.arctan2(xy_pts[:, 1] - nom_xy[1], xy_pts[:, 0] - nom_xy[0])
             octants = np.floor((angs + math.pi) / (0.25 * math.pi)).astype(int) % 8
@@ -1073,8 +1158,8 @@ def localize_and_subtract_support_surfaces(
             from_prior=from_prior,
         )
 
-    # Enforce physical non-overlap between localized bowls on the tabletop (min center-to-center = 164 mm)
-    min_bowl_dist_m = 0.164
+    # Enforce physical non-overlap between localized bowls on the tabletop without shifting `source`
+    min_bowl_dist_m = 0.162
     roles_order = ("source", "good", "defective")
     for _ in range(4):
         for i_r in range(len(roles_order)):
@@ -1084,9 +1169,12 @@ def localize_and_subtract_support_surfaces(
                 diff = pb.pos_world[:2] - pa.pos_world[:2]
                 d = float(np.linalg.norm(diff))
                 if 1e-4 < d < min_bowl_dist_m:
-                    push = 0.5 * (min_bowl_dist_m - d) * (diff / d)
-                    pa.pos_world[:2] -= push
-                    pb.pos_world[:2] += push
+                    delta = (min_bowl_dist_m - d) * (diff / d)
+                    if pa.role == "source":
+                        pb.pos_world[:2] += delta
+                    else:
+                        pa.pos_world[:2] -= 0.5 * delta
+                        pb.pos_world[:2] += 0.5 * delta
 
     if len(points_world) == 0:
         return points_world, colors_rgb, localized_plates
@@ -1120,10 +1208,19 @@ def localize_and_subtract_support_surfaces(
         is_plate_floor = in_flat & (z <= p_floor_z + 0.0032)
         is_plate_rim = in_rim & (z <= 0.0268) & (hue_ok | (z <= p_floor_z + 0.010))
         # Preserve elevated cyan/blue DUPLO bricks sitting inside the aquamarine/blue source plate
-        # (whose top/side surfaces sit > 8.0 mm above p_floor_z inside the flat inner bowl).
-        is_plate_plastic = (
-            (in_flat & (z <= p_floor_z + 0.0080)) | (in_rim & (z <= 0.0272))
-        ) & hue_ok
+        # (whose top/side surfaces sit > 8.0 mm above p_floor_z inside the flat inner bowl),
+        # while subtracting pastel mint-green/pink sorting bowl walls across their full radius.
+        if role == "source":
+            is_plate_plastic = (
+                (in_flat & (z <= p_floor_z + 0.0080)) | (in_rim & (z <= 0.0272))
+            ) & hue_ok
+        else:
+            is_pastel_bowl = hue_ok & (sat <= 150.0)
+            is_plate_plastic = (
+                (in_flat & (z <= p_floor_z + 0.0080) & hue_ok)
+                | (in_rim & (z <= 0.0272) & hue_ok)
+                | ((r_p <= SOURCE_PLATE_OUTER_RADIUS_M + 0.008) & (z <= 0.0275) & is_pastel_bowl)
+            )
         keep = keep & (~is_plate_floor) & (~is_plate_rim) & (~is_plate_plastic)
 
     return points_world[keep], colors_rgb[keep], localized_plates
@@ -1221,7 +1318,7 @@ def _match_duplo_color_and_defect(
             med_hue <= 18.0 and g_over_r >= 0.36 and med_sat >= 75.0 and med_val >= 55.0
         ):
             best_dist = min(best_dist, 0.085)
-            best_spec = DUPLO_CATALOG["duplo_1x2x2_76371"]
+            best_spec = DUPLO_CATALOG["duplo_2x2_3437"]
         # 4. Yellow DUPLO brick
         elif 18.0 < med_hue <= 37.0 and med_sat >= 75.0 and med_val >= 95.0:
             best_dist = min(best_dist, 0.075)
@@ -1230,7 +1327,11 @@ def _match_duplo_color_and_defect(
         elif 37.0 < med_hue <= 85.0 and med_sat >= 60.0 and med_val >= 60.0:
             best_dist = min(best_dist, 0.08)
             best_spec = DUPLO_CATALOG["duplo_2x3_curved_top_2302"]
-        # 6. Lavender DUPLO brick (includes purple-lilac and camera white-balance-shifted periwinkle in bowl)
+        # 6. Blue DUPLO 1x2x2 brick (high-saturation cyan-blue)
+        elif 88.0 <= med_hue <= 116.0 and med_sat >= 165.0 and med_val >= 65.0:
+            best_dist = min(best_dist, 0.08)
+            best_spec = DUPLO_CATALOG["duplo_1x2x2_76371"]
+        # 7. Lavender DUPLO 2x2 brick (purple-lilac and medium-saturation periwinkle)
         elif 88.0 <= med_hue <= 161.0 and med_sat >= 28.0 and med_val >= 70.0:
             best_dist = min(best_dist, 0.08)
             best_spec = DUPLO_CATALOG["duplo_2x2_3437"]
@@ -1247,7 +1348,16 @@ def _fit_6d_stable_pose_to_brick_cluster(
     lock_table_resting: bool = True,
 ) -> tuple[BlockSpec, str, np.ndarray, float, float, bool]:
     """Jointly infer `BlockSpec`, `stable_pose_name`, and 6D `T_world_block` via surface ICP."""
-    pts_xy = cluster_pts[:, :2].astype(np.float32)
+    # Trim lowest 15% skirt points on sparse real-camera clusters so shadow/floor bleed doesn't skew OBB
+    if 20 <= len(cluster_pts) < 120:
+        z_cut = float(np.percentile(cluster_pts[:, 2], 15))
+        core_pts = cluster_pts[cluster_pts[:, 2] >= z_cut]
+        if len(core_pts) < 12:
+            core_pts = cluster_pts
+    else:
+        core_pts = cluster_pts
+
+    pts_xy = core_pts[:, :2].astype(np.float32)
     (cx, cy), (w_rect, h_rect), angle_deg = cv2.minAreaRect(pts_xy)
     yaw_base = math.radians(angle_deg)
     if w_rect < h_rect:
@@ -1256,12 +1366,31 @@ def _fit_6d_stable_pose_to_brick_cluster(
 
     obs_major = max(float(w_rect), float(h_rect))
     obs_minor = min(float(w_rect), float(h_rect))
-    z_top = float(np.percentile(cluster_pts[:, 2], 96))
-    obs_h = max(z_top - support_z_m, 0.012)
+    z_med_rel = max(0.010, float(np.median(cluster_pts[:, 2])) - support_z_m)
+    z_95_rel = max(0.012, float(np.percentile(cluster_pts[:, 2], 95)) - support_z_m)
 
-    color_spec, _, _, _, has_defect = _match_duplo_color_and_defect(
+    if z_95_rel >= 0.0275:
+        obs_h = z_95_rel
+    elif (
+        z_med_rel < 0.0190
+        and z_95_rel < 0.0210
+        and 0.0375 <= obs_major <= 0.0495
+        and obs_minor <= 0.0375
+    ):
+        # 1x2x2 brick lying flat on its wide 32x42.8 mm side has physical height 16.0 mm
+        obs_h = 0.0160
+    else:
+        obs_h = max(0.5 * (z_med_rel + z_95_rel), 0.012)
+
+    color_spec, _, med_sat, _, has_defect = _match_duplo_color_and_defect(
         cluster_cols, allow_real_palette=True
     )
+    hsv_c = cv2.cvtColor(cluster_cols.reshape(-1, 1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+    med_hue = float(np.median(hsv_c[:, 0]))
+    is_green_brick = (37.0 < med_hue <= 85.0) and (med_sat >= 55.0)
+
+    # Upside-down hollow cavity signature: lower median & 95th-percentile height than upright studs
+    is_upside_down_cavity = z_med_rel < 0.0195 and z_95_rel < 0.0212
 
     # Score candidate (spec, stable_pose) pairs by 3D bounding-box compatibility + color match
     cols_norm = cluster_cols.astype(np.float64) / 255.0
@@ -1274,11 +1403,14 @@ def _fit_6d_stable_pose_to_brick_cluster(
         exp_c = spec_rgb / max(float(np.sum(spec_rgb)), 1e-6)
         chrom_err = float(np.linalg.norm(obs_c - exp_c))
         if spec.name == color_spec.name:
-            chrom_err *= 0.65
-        # In the real cell, 2x4 bricks (`3011`) and 2x2 bricks (`3437`) occur in multiple LEGO colors
-        # (e.g. Red 2x4, White 2x4, Cyan 2x2). Let measured 3D geometry dominate when footprint is unambiguous.
-        if obs_major >= 0.051 or obs_major <= 0.038:
-            chrom_err = min(chrom_err, 0.16)
+            chrom_err *= 0.55
+        # In the real cell, 2x4 (`3011`), 2x2 (`3437`), and 1x2x2 (`76371`) occur in multiple LEGO colors.
+        # Let measured 3D geometry + color_spec guide selection, and never invent a green 2x3 curved block
+        # unless the cluster color is actually green.
+        if spec.name != "duplo_2x3_curved_top_2302":
+            chrom_err = min(chrom_err, 0.14 if spec.name == color_spec.name else 0.17)
+        elif not is_green_brick:
+            chrom_err += 0.14
 
         for sp_entry in stable_poses_map.get(spec.name, []):
             rot_dims = np.abs(sp_entry.R_local) @ np.asarray(spec.dims_m, dtype=np.float64)
@@ -1286,28 +1418,28 @@ def _fit_6d_stable_pose_to_brick_cluster(
             exp_min = float(min(rot_dims[0], rot_dims[1]))
             exp_h = float(rot_dims[2])
             geom_err = (
-                2.4 * abs(obs_h - exp_h)
-                + 2.2 * abs(obs_major - exp_maj)
-                + 1.5 * abs(obs_minor - exp_min)
+                2.6 * abs(obs_h - exp_h)
+                + 2.3 * abs(obs_major - exp_maj)
+                + 1.7 * abs(obs_minor - exp_min)
             )
-            # Slight prior preference for upright/upside-down unless height clearly indicates side pose
-            pose_prior = (
-                0.0
-                if sp_entry.name == "upright"
-                else (0.012 if sp_entry.name == "upside_down" else 0.025)
-            )
+            if sp_entry.name == "upright":
+                pose_prior = 0.045 if is_upside_down_cavity else 0.0
+            elif sp_entry.name == "upside_down":
+                pose_prior = 0.0 if is_upside_down_cavity else 0.018
+            else:
+                pose_prior = 0.012
             cost = chrom_err + 12.0 * geom_err + pose_prior
             candidate_hyps.append((cost, spec, sp_entry))
 
     candidate_hyps.sort(key=lambda item: item[0])
-    # Only evaluate second hypothesis if its cost is nearly tied with the best hypothesis
     hyps_to_run = [candidate_hyps[0]]
-    if len(candidate_hyps) > 1 and (candidate_hyps[1][0] - candidate_hyps[0][0]) < 0.045:
-        hyps_to_run.append(candidate_hyps[1])
+    for extra_hyp in candidate_hyps[1:3]:
+        if (extra_hyp[0] - candidate_hyps[0][0]) < 0.055:
+            hyps_to_run.append(extra_hyp)
 
     pts_icp = cluster_pts
-    if len(pts_icp) > 220:
-        idx_sub = np.linspace(0, len(pts_icp) - 1, 220, dtype=int)
+    if len(pts_icp) > 280:
+        idx_sub = np.linspace(0, len(pts_icp) - 1, 280, dtype=int)
         pts_icp = pts_icp[idx_sub]
 
     best_spec = hyps_to_run[0][1]
@@ -1327,23 +1459,50 @@ def _fit_6d_stable_pose_to_brick_cluster(
             support_z_m + 0.5 * hz_r if lock_table_resting else float(np.median(cluster_pts[:, 2]))
         )
 
-        # Because a cuboid's surface is invariant under 180-deg yaw (and 90-deg yaw when lx_r == wy_r),
-        # a single ICP seed at yaw0 finds the exact optimum without redundant quarter-turn solves!
-        R_world = Rotation.from_euler("z", yaw0).as_matrix() @ sp_entry.R_local
-        T0 = np.eye(4, dtype=np.float64)
-        T0[:3, :3] = R_world
-        T0[:3, 3] = [float(cx), float(cy), z_center]
-        T_opt, fit, rmse = refine_cuboid_icp(
-            pts_icp, T0, spec.dims_m, max_iters=10, lock_table_resting=lock_table_resting
-        )
-        score = fit - 20.0 * rmse - 0.35 * prior_cost
-        if score > best_score:
-            best_score = score
-            best_spec = spec
-            best_pose_name = sp_entry.name
-            best_T = T_opt
-            best_fit = fit
-            best_rmse = rmse
+        # For side-lying poses (`abs(R_local[2, 2]) < 0.5`), the top studs (+Z_local) point horizontally.
+        # Check opposite (or quarter-turn if nearly square) yaws so +Z_local points toward the lower-Z stud shelf.
+        is_side_pose = abs(float(sp_entry.R_local[2, 2])) < 0.5
+        if is_side_pose and abs(lx_r - wy_r) < 0.0095:
+            cand_yaws = [yaw0 + k * 0.5 * math.pi for k in range(4)]
+        elif is_side_pose:
+            cand_yaws = [yaw0, yaw0 + math.pi]
+        elif abs(lx_r - wy_r) > 0.004:
+            cand_yaws = [yaw0, yaw0 + 0.5 * math.pi]
+        else:
+            cand_yaws = [yaw0]
+
+        for y_idx, y_cand in enumerate(cand_yaws):
+            R_world = Rotation.from_euler("z", y_cand).as_matrix() @ sp_entry.R_local
+            T0 = np.eye(4, dtype=np.float64)
+            T0[:3, :3] = R_world
+            T0[:3, 3] = [float(cx), float(cy), z_center]
+            T_opt, fit, rmse = refine_cuboid_icp(
+                pts_icp,
+                T0,
+                spec.dims_m,
+                max_iters=18,
+                lock_table_resting=lock_table_resting,
+            )
+            stud_bonus = 0.0
+            if is_side_pose:
+                # In side-lying poses, the 4.4mm stud end (+Z_local) has lower Z than the solid wall end (-Z_local)
+                p_loc = (cluster_pts - T_opt[:3, 3]) @ T_opt[:3, :3]
+                z_stud_end = cluster_pts[p_loc[:, 2] > 0.004, 2]
+                z_base_end = cluster_pts[p_loc[:, 2] < -0.004, 2]
+                if len(z_stud_end) >= 4 and len(z_base_end) >= 4:
+                    if float(np.percentile(z_stud_end, 80)) < float(np.percentile(z_base_end, 80)):
+                        stud_bonus = 0.045
+                    else:
+                        stud_bonus = -0.045
+            yaw_pen = 0.025 if (not is_side_pose and y_idx > 0) else 0.0
+            score = fit - 20.0 * rmse - 0.45 * prior_cost + stud_bonus - yaw_pen
+            if score > best_score:
+                best_score = score
+                best_spec = spec
+                best_pose_name = sp_entry.name
+                best_T = T_opt
+                best_fit = fit
+                best_rmse = rmse
 
     # Disambiguate C1 asymmetric slope direction for `duplo_2x3_curved_top_2302` (+Y is tall 2-stud end)
     if best_spec.symmetry_group == "C1" and best_pose_name == "upright":
@@ -1362,7 +1521,7 @@ def _segment_plate_interior_bricks_by_color(
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Segment touching multi-color and same-color DUPLO bricks inside a localized plate.
 
-    Supports all 6 physical brick colors: `white`, `red`, `brown`, `yellow`, `green`, and `lavender`.
+    Supports all physical brick colors: `white`, `red`, `brown`, `yellow`, `green`, `blue`, and `lavender`.
     """
     if len(pts) < 7:
         return []
@@ -1387,7 +1546,7 @@ def _segment_plate_interior_bricks_by_color(
     fam[(s >= 75.0) & (v >= 95.0) & (h >= 18.5) & (h <= 38.0)] = 3
     # 4: green DUPLO brick
     fam[(s >= 60.0) & (v >= 60.0) & (h > 38.0) & (h <= 86.0)] = 4
-    # 5: high-saturation periwinkle / camera-shifted lavender inside blue bowl
+    # 5: blue DUPLO brick inside aquamarine bowl
     fam[(s >= 145.0) & (v >= 65.0) & (h >= 90.0) & (h <= 116.0)] = 5
     # 6: pastel lavender / lilac / violet DUPLO brick
     fam[(s >= 28.0) & (s < 145.0) & (v >= 75.0) & (h >= 98.0) & (h <= 161.0)] = 6
@@ -1399,6 +1558,12 @@ def _segment_plate_interior_bricks_by_color(
             continue
         f_pts = pts[mask]
         f_cols = cols[mask]
+        # For blue bricks inside the blue bowl (`fid == 5`), trim low-Z (<17.8mm) bowl-floor bleed points
+        if fid == 5:
+            hi_z = f_pts[:, 2] >= 0.0178
+            if int(np.sum(hi_z)) >= 12:
+                f_pts = f_pts[hi_z]
+                f_cols = f_cols[hi_z]
         eps = 0.0115 if fid == 5 else 0.0145
         labels = DBSCAN(eps=eps, min_samples=4).fit_predict(f_pts)
         for lbl in sorted(set(labels)):
@@ -1766,6 +1931,9 @@ def perceive_bricks_and_reject_clutter(
             )
         )
 
+    # Resolve pairwise 2D OBB overlaps and bowl-wall containment for resting bricks
+    bricks = _resolve_resting_bricks_non_overlap(bricks, plates)
+
     # Sort perceived bricks deterministically (source plate first, then by distance to plate center)
     src_xy = plates["source"].pos_world[:2]
     bricks.sort(
@@ -1799,21 +1967,193 @@ def perceive_bricks_and_reject_clutter(
     return renumbered, rejected
 
 
+def _resolve_resting_bricks_non_overlap(
+    bricks: list[PerceivedBrick],
+    plates: dict[str, PerceivedPlate],
+    iterations: int = 8,
+) -> list[PerceivedBrick]:
+    """Separate resting bricks in XY so their 3D OBBs neither penetrate each other nor the bowl rim."""
+    if len(bricks) <= 1:
+        return bricks
+
+    def _world_xy_radii(b: PerceivedBrick) -> tuple[float, float, float]:
+        R = b.T_world_block[:3, :3]
+        half = 0.5 * np.asarray(b.spec.dims_m, dtype=np.float64)
+        # Projected half-extents along world X and Y and effective separation radius
+        hx = float(np.sum(np.abs(R[0, :3]) * half))
+        hy = float(np.sum(np.abs(R[1, :3]) * half))
+        r_eff = 0.52 * math.hypot(hx, hy) + 0.0012
+        return hx, hy, r_eff
+
+    positions = [b.T_world_block[:3, 3].copy() for b in bricks]
+    radii = [_world_xy_radii(b) for b in bricks]
+    is_resting = [b.support_region not in ("in_gripper", "in_air") for b in bricks]
+
+    for _ in range(iterations):
+        moved = False
+        for i in range(len(bricks)):
+            if not is_resting[i]:
+                continue
+            for j in range(i + 1, len(bricks)):
+                if not is_resting[j]:
+                    continue
+                # Only resolve bricks sharing the same support region and similar Z layer
+                if bricks[i].support_region != bricks[j].support_region:
+                    continue
+                if abs(float(positions[i][2] - positions[j][2])) > 0.028:
+                    continue
+                delta = positions[j][:2] - positions[i][:2]
+                dist = float(np.linalg.norm(delta))
+                # Axis-aligned / oriented box separation check in XY
+                hx_sum = 0.88 * (radii[i][0] + radii[j][0])
+                hy_sum = 0.88 * (radii[i][1] + radii[j][1])
+                if abs(float(delta[0])) < hx_sum and abs(float(delta[1])) < hy_sum:
+                    min_sep = min(radii[i][2] + radii[j][2], math.hypot(hx_sum, hy_sum) * 0.68)
+                    if dist < min_sep:
+                        direction = (
+                            delta / dist
+                            if dist > 1e-5
+                            else np.array([math.cos(0.7 * (i + 1)), math.sin(0.7 * (i + 1))])
+                        )
+                        push = 0.5 * (min_sep - dist + 0.0008) * direction
+                        positions[i][:2] -= push
+                        positions[j][:2] += push
+                        moved = True
+        # Clamp bricks inside their bowl's inner floor/slope radius so they don't climb the rim wall
+        for i, b in enumerate(bricks):
+            if not is_resting[i]:
+                continue
+            reg = b.support_region
+            if reg in plates:
+                p_xy = plates[reg].pos_world[:2]
+                rel = positions[i][:2] - p_xy
+                r = float(np.linalg.norm(rel))
+                max_r = max(0.036, 0.068 - 0.55 * min(radii[i][0], radii[i][1]))
+                if r > max_r and r > 1e-6:
+                    positions[i][:2] = p_xy + rel * (max_r / r)
+                    moved = True
+        if not moved:
+            break
+
+    out: list[PerceivedBrick] = []
+    for i, b in enumerate(bricks):
+        T_wb = b.T_world_block.copy()
+        T_wb[:3, 3] = positions[i]
+        T_mesh = T_wb.copy()
+        T_mesh[:3, 3] = T_wb[:3, 3] + T_wb[:3, :3] @ np.array(
+            [0.0, 0.0, -0.5 * b.spec.dims_m[2]], dtype=np.float64
+        )
+        yaw = math.atan2(float(T_wb[1, 0]), float(T_wb[0, 0]))
+        out.append(
+            PerceivedBrick(
+                block_id=b.block_id,
+                spec=b.spec,
+                T_world_block=T_wb,
+                T_world_mesh_origin=T_mesh,
+                stable_pose_name=b.stable_pose_name,
+                xy_yaw=(float(T_wb[0, 3]), float(T_wb[1, 3]), float(yaw)),
+                support_region=b.support_region,
+                icp_fitness=b.icp_fitness,
+                icp_rmse_m=b.icp_rmse_m,
+                confidence=b.confidence,
+                has_visual_defect=b.has_visual_defect,
+                num_points=b.num_points,
+                mean_rgb=b.mean_rgb,
+                cluster_pts_world=b.cluster_pts_world,
+            )
+        )
+    return out
+
+
+def _refine_bricks_with_plate_rgb(
+    bricks: list[PerceivedBrick],
+    plate_rgb: np.ndarray,
+) -> list[PerceivedBrick]:
+    """Use the close-up Plate camera 2D RGB feed (`/rgb/plate`) to verify/refine brick color and side profile."""
+    if not bricks or plate_rgb is None or plate_rgb.ndim != 3:
+        return bricks
+    img_h, img_w = plate_rgb.shape[:2]
+    poses = real_intel_camera_poses_world()
+    R_w_plate, p_w_plate, K_plate = poses["plate"]
+    refined: list[PerceivedBrick] = []
+    for b in bricks:
+        box_2d, _ = project_world_obb_to_image_box(
+            b.T_world_block,
+            b.spec.dims_m,
+            R_w_plate,
+            p_w_plate,
+            K_plate,
+            width=img_w,
+            height=img_h,
+            pad_px=8,
+        )
+        if box_2d is None:
+            refined.append(b)
+            continue
+        u0, v0, u1, v1 = box_2d
+        patch = plate_rgb[v0:v1, u0:u1]
+        if patch.size == 0:
+            refined.append(b)
+            continue
+        flat_rgb = patch.reshape(-1, 3)
+        hsv = cv2.cvtColor(flat_rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+        # Exclude aquamarine bowl rim and wood table pixels in the close-up Plate RGB patch
+        is_aqua = (hsv[:, 0] >= 72) & (hsv[:, 0] <= 104) & (hsv[:, 1] >= 42) & (hsv[:, 2] >= 45)
+        if b.color_name() == "blue":
+            is_aqua = (hsv[:, 0] >= 72) & (hsv[:, 0] <= 86) & (hsv[:, 1] >= 42)
+        is_wood = (hsv[:, 0] >= 10) & (hsv[:, 0] <= 24) & (hsv[:, 1] >= 75) & (hsv[:, 1] <= 185)
+        b_rgb = np.asarray(b.mean_rgb, dtype=np.float64)
+        rgb_dist = np.linalg.norm(flat_rgb.astype(np.float64) - b_rgb[None, :], axis=1)
+        fg_mask = (~is_aqua) & (~is_wood) & (rgb_dist <= 52.0) & (hsv[:, 2] >= 35)
+        if int(np.sum(fg_mask)) >= 16:
+            patch_mean = np.mean(flat_rgb[fg_mask], axis=0)
+            blended_rgb = 0.72 * b_rgb + 0.28 * patch_mean
+            mean_rgb_tuple = (
+                float(blended_rgb[0]),
+                float(blended_rgb[1]),
+                float(blended_rgb[2]),
+            )
+            refined.append(
+                PerceivedBrick(
+                    block_id=b.block_id,
+                    spec=b.spec,
+                    T_world_block=b.T_world_block,
+                    T_world_mesh_origin=b.T_world_mesh_origin,
+                    stable_pose_name=b.stable_pose_name,
+                    xy_yaw=b.xy_yaw,
+                    support_region=b.support_region,
+                    icp_fitness=b.icp_fitness,
+                    icp_rmse_m=b.icp_rmse_m,
+                    confidence=min(0.99, float(b.confidence) + 0.03),
+                    has_visual_defect=b.has_visual_defect,
+                    num_points=b.num_points,
+                    mean_rgb=mean_rgb_tuple,
+                    cluster_pts_world=b.cluster_pts_world,
+                )
+            )
+        else:
+            refined.append(b)
+    return refined
+
+
 @dataclass
 class _TrackedBrickSlot:
     brick: PerceivedBrick
     missed_frames: int = 0
     latched_in_gripper: bool = False
     T_ee_to_brick: np.ndarray | None = None
+    pending_spec_name: str | None = None
+    pending_pose_name: str | None = None
+    pending_streak: int = 0
 
 
 class Real2SimSceneTracker:
-    """Real-time frame-to-frame SE(3) brick tracker with EMA filtering, occlusion hold, and gripper latching."""
+    """Real-time frame-to-frame SE(3) brick tracker with EMA filtering, hysteresis, deadband, and gripper latching."""
 
     def __init__(
         self,
-        ema_alpha: float = 0.58,
-        max_assoc_dist_m: float = 0.042,
+        ema_alpha: float = 0.35,
+        max_assoc_dist_m: float = 0.045,
         max_missed_frames: int = 5,
     ) -> None:
         self.ema_alpha = float(np.clip(ema_alpha, 0.05, 1.0))
@@ -1895,22 +2235,26 @@ class Real2SimSceneTracker:
         unmatched_dets = list(range(len(detections)))
         matches: list[tuple[str, int]] = []
 
-        # Greedy nearest-neighbor matching gated by part name + color similarity and 3D distance
+        # Greedy nearest-neighbor matching by 3D distance + color similarity (do NOT hard-reject part-name
+        # flicker, which would otherwise spawn a second overlapping brick at the same 3D location).
         pairs: list[tuple[float, str, int]] = []
         for tid in unmatched_tracks:
             t_brick = self._tracks[tid].brick
             t_rgb = np.asarray(t_brick.mean_rgb, dtype=np.float64)
+            t_col = t_brick.color_name()
             for didx in unmatched_dets:
                 d_brick = detections[didx]
-                if t_brick.spec.name != d_brick.spec.name:
-                    continue
                 dist = float(
                     np.linalg.norm(t_brick.T_world_block[:3, 3] - d_brick.T_world_block[:3, 3])
                 )
                 if dist <= self.max_assoc_dist_m:
                     d_rgb = np.asarray(d_brick.mean_rgb, dtype=np.float64)
-                    col_pen = 0.00015 * float(np.linalg.norm(t_rgb - d_rgb))
-                    pairs.append((dist + col_pen, tid, didx))
+                    rgb_dist = float(np.linalg.norm(t_rgb - d_rgb))
+                    if t_col != d_brick.color_name() and rgb_dist > 65.0 and dist > 0.022:
+                        continue
+                    part_pen = 0.004 if t_brick.spec.name != d_brick.spec.name else 0.0
+                    col_pen = 0.00015 * rgb_dist
+                    pairs.append((dist + col_pen + part_pen, tid, didx))
         pairs.sort(key=lambda x: x[0])
 
         for _, tid, didx in pairs:
@@ -1919,33 +2263,75 @@ class Real2SimSceneTracker:
                 unmatched_tracks.remove(tid)
                 unmatched_dets.remove(didx)
 
-        alpha = self.ema_alpha
         for tid, didx in matches:
             slot = self._tracks[tid]
             prev = slot.brick
             det = detections[didx]
-            T_smooth = det.T_world_block.copy()
-            T_smooth[:3, 3] = (1.0 - alpha) * prev.T_world_block[:3, 3] + alpha * det.T_world_block[
-                :3, 3
-            ]
-            # Blend rotation only if geodesic angle is small (avoids averaging across discrete symmetry jumps)
-            if so3_geodesic_angle_rad(prev.T_world_block[:3, :3], det.T_world_block[:3, :3]) < 0.35:
+
+            # Hysteresis on (part spec, stable pose) so resting bricks never oscillate between part types/poses
+            chosen_brick_meta = prev
+            p_streak = slot.pending_streak
+            p_spec = slot.pending_spec_name
+            p_pose = slot.pending_pose_name
+            if det.spec.name == prev.spec.name and det.stable_pose_name == prev.stable_pose_name:
+                p_streak = 0
+                p_spec = None
+                p_pose = None
+                chosen_brick_meta = det
+            else:
+                if det.spec.name == p_spec and det.stable_pose_name == p_pose:
+                    p_streak += 1
+                else:
+                    p_spec = det.spec.name
+                    p_pose = det.stable_pose_name
+                    p_streak = 1
+                if p_streak >= 4 or det.confidence > prev.confidence + 0.16:
+                    chosen_brick_meta = det
+                    p_streak = 0
+                    p_spec = None
+                    p_pose = None
+
+            pos_diff = float(np.linalg.norm(det.T_world_block[:3, 3] - prev.T_world_block[:3, 3]))
+            ang_diff = so3_geodesic_angle_rad(prev.T_world_block[:3, :3], det.T_world_block[:3, :3])
+            is_resting = det.support_region not in ("in_gripper", "in_air")
+
+            T_smooth = prev.T_world_block.copy()
+            if is_resting and pos_diff < 0.0085 and chosen_brick_meta.spec.name == prev.spec.name:
+                # Deadband: suppress sensor depth noise (< 8.5 mm) on stationary bricks
+                T_smooth[:3, 3] = 0.92 * prev.T_world_block[:3, 3] + 0.08 * det.T_world_block[:3, 3]
+            else:
+                eff_alpha = 0.24 if (is_resting and pos_diff < 0.022) else self.ema_alpha
+                T_smooth[:3, 3] = (1.0 - eff_alpha) * prev.T_world_block[
+                    :3, 3
+                ] + eff_alpha * det.T_world_block[:3, 3]
+
+            if chosen_brick_meta is det and (
+                prev.spec.name != det.spec.name or prev.stable_pose_name != det.stable_pose_name
+            ):
+                T_smooth[:3, :3] = det.T_world_block[:3, :3].copy()
+            elif ang_diff < 0.28 and not (is_resting and ang_diff < 0.12):
                 R_rel = prev.T_world_block[:3, :3].T @ det.T_world_block[:3, :3]
                 rvec = Rotation.from_matrix(R_rel).as_rotvec()
                 T_smooth[:3, :3] = (
-                    prev.T_world_block[:3, :3] @ Rotation.from_rotvec(alpha * rvec).as_matrix()
+                    prev.T_world_block[:3, :3] @ Rotation.from_rotvec(0.20 * rvec).as_matrix()
                 )
+
+            base_brick = det if chosen_brick_meta is det else prev
             updated = self._rebind_id(
-                det,
+                base_brick,
                 tid,
                 T_smooth,
                 has_defect=(prev.has_visual_defect or det.has_visual_defect),
+                support_region=det.support_region,
             )
             self._tracks[tid] = _TrackedBrickSlot(
                 brick=updated,
                 missed_frames=0,
                 latched_in_gripper=slot.latched_in_gripper,
                 T_ee_to_brick=slot.T_ee_to_brick,
+                pending_spec_name=p_spec,
+                pending_pose_name=p_pose,
+                pending_streak=p_streak,
             )
 
         for tid in list(unmatched_tracks):
@@ -1960,6 +2346,14 @@ class Real2SimSceneTracker:
 
         for didx in unmatched_dets:
             det = detections[didx]
+            # Never spawn a new track on top of an existing active track within 22mm XY
+            too_close = any(
+                float(np.linalg.norm(s.brick.T_world_block[:2, 3] - det.T_world_block[:2, 3]))
+                < 0.022
+                for s in self._tracks.values()
+            )
+            if too_close:
+                continue
             bid = f"block_{self._next_id}"
             self._next_id += 1
             nb = self._rebind_id(det, bid, det.T_world_block)
@@ -2454,29 +2848,50 @@ class Real2SimPipeline:
                     provenance=f"live_depth_http_snapshots:{camera_mode}",
                 )
 
+        def _fetch_rgb_jpeg(url: str) -> np.ndarray | None:
+            try:
+                with urllib.request.urlopen(url, timeout=min(timeout_s, 0.9)) as resp:
+                    raw = resp.read()
+                bgr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if bgr is not None:
+                    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            except Exception:
+                pass
+            return None
+
+        def _apply_plate_rgb_verification(scene: Real2SimSceneState) -> Real2SimSceneState:
+            if not scene.bricks or camera_mode == "plate":
+                return scene
+            plate_rgb = _fetch_rgb_jpeg(f"{base}/rgb/plate")
+            if plate_rgb is None:
+                return scene
+            scene.bricks = _refine_bricks_with_plate_rgb(scene.bricks, plate_rgb)
+            return scene
+
         top_pkt = _fetch_json(f"{base}/points/top") if camera_mode in ("top", "fused") else None
-        plate_pkt = (
-            _fetch_json(f"{base}/points/plate") if camera_mode in ("plate", "fused") else None
-        )
+        plate_pkt = _fetch_json(f"{base}/points/plate") if camera_mode == "plate" else None
         if (top_pkt and "points" in top_pkt) or (plate_pkt and "points" in plate_pkt):
-            return self.perceive_teammate_packets(
+            sc = self.perceive_teammate_packets(
                 top_packet=top_pkt,
                 plate_packet=plate_pkt,
                 q_arm_rad=q_arm_rad,
             )
+            return _apply_plate_rgb_verification(sc)
 
         merged_pkt = _fetch_json(f"{base}/points/merged")
         if merged_pkt and "points" in merged_pkt:
             p_m, c_m = ingest_teammate_depth_packet(merged_pkt, self.rig.realsense_1)
-            return self.perceive_point_cloud(
+            sc = self.perceive_point_cloud(
                 p_m, c_m, q_arm_rad=q_arm_rad, provenance="live_depth_http_merged"
             )
+            return _apply_plate_rgb_verification(sc)
 
-        return self.perceive_teammate_packets(
+        sc = self.perceive_teammate_packets(
             top_packet=top_pkt,
             plate_packet=plate_pkt,
             q_arm_rad=q_arm_rad,
         )
+        return _apply_plate_rgb_verification(sc)
 
     def perceive_capture_directory(
         self,
@@ -2872,7 +3287,7 @@ class Real2SimPipeline:
 
         if self.tracker is None:
             self.tracker = Real2SimSceneTracker(
-                ema_alpha=0.62, max_assoc_dist_m=0.045, max_missed_frames=6
+                ema_alpha=0.35, max_assoc_dist_m=0.045, max_missed_frames=5
             )
 
         # Fetch initial arm state and initial depth point-cloud scene
@@ -2926,7 +3341,7 @@ class Real2SimPipeline:
             rig=self.rig,
             initial_block_xy_yaw=preallocated_blocks[0].initial_xy_yaw,
             show_viewer=show_viewer,
-            show_camera_windows=False,
+            show_camera_windows=None if show_viewer else False,
             realtime_pacing=False,
             spawned_blocks=preallocated_blocks,
             plate_positions=initial_scene.plate_positions_dict(),
@@ -2936,13 +3351,167 @@ class Real2SimPipeline:
         latest_q: np.ndarray | None = q_init
         latest_grip: float = grip_init
         latest_scene: Real2SimSceneState = initial_scene
+        latest_live_rgb: np.ndarray | None = None
+        latest_sim_png: bytes | None = None
         scene_dirty: bool = True
         stop_event = threading.Event()
         depth_frames_processed = 1
         arm_updates_processed = 1 if q_init is not None else 0
+        rgb_endpoint = "plate" if camera_mode == "plate" else "top"
+        live_cam_model = self.rig.realsense_2 if camera_mode == "plate" else self.rig.realsense_1
+        live_hud_win = "Brickcell Studio - LIVE CAMERA + REAL2SIM 3D HUD"
+        live_hud_opened = False
+        sim_renderer: mujoco.Renderer | None = None
+        try:
+            sim_renderer = mujoco.Renderer(twin.model, height=480, width=640)
+        except Exception:
+            sim_renderer = None
+
+        def _render_sim_overhead_png() -> bytes | None:
+            if sim_renderer is None:
+                return None
+            try:
+                sim_renderer.update_scene(twin.data, camera="realsense_1")
+                rgb_sim = sim_renderer.render()
+                ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb_sim, cv2.COLOR_RGB2BGR))
+                if ok:
+                    return buf.tobytes()
+            except Exception:
+                pass
+            return None
+
+        def _build_sim_scene_payload(sc: Real2SimSceneState) -> dict[str, Any]:
+            T_b3 = twin.body3_world_pose()
+            cams_out: list[dict[str, Any]] = []
+            for cam_m, cname in (
+                (self.rig.realsense_1, "overhead"),
+                (self.rig.realsense_2, "side"),
+                (self.rig.wrist, "wrist"),
+            ):
+                T_wc = cam_m.world_transform(T_b3 if cam_m.is_wrist else None)
+                cams_out.append(
+                    {
+                        "name": cname,
+                        "enabled": True,
+                        "world_pos": [round(float(x), 5) for x in T_wc[:3, 3]],
+                        "world_rotation_cv": [
+                            [round(float(v), 7) for v in row] for row in T_wc[:3, :3]
+                        ],
+                        "fx": round(float(cam_m.K[0, 0]), 4),
+                        "fy": round(float(cam_m.K[1, 1]), 4),
+                        "cx": round(float(cam_m.K[0, 2]), 4),
+                        "cy": round(float(cam_m.K[1, 2]), 4),
+                        "width": int(cam_m.width),
+                        "height": int(cam_m.height),
+                    }
+                )
+            return {
+                "config": "real2sim_so101_inspection_twin",
+                "inference_camera": "overhead",
+                "cameras": cams_out,
+                "real2sim": sc.to_summary_dict(),
+            }
+
+        sim_http_server: ThreadingHTTPServer | None = None
+        sim_port_Pref = int(os.environ.get("BRICKCELL_SIM_API_PORT", "18081"))
+
+        class _SimApiHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_args: Any) -> None:
+                pass
+
+            def _send(self, code: int, ctype: str, body: bytes) -> None:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self) -> None:
+                path = self.path.split("?", 1)[0]
+                with latest_lock:
+                    sc_snap = latest_scene
+                    png_snap = latest_sim_png
+                if path.startswith("/camera/") and path.endswith(".png"):
+                    if png_snap is None:
+                        self._send(503, "application/json", b'{"error":"sim frame not ready"}')
+                        return
+                    self._send(200, "image/png", png_snap)
+                    return
+                if path == "/scene":
+                    body = json.dumps(_build_sim_scene_payload(sc_snap)).encode("utf-8")
+                    self._send(200, "application/json", body)
+                    return
+                if path == "/health":
+                    body = json.dumps(
+                        {
+                            "mode": "mujoco_real2sim_live",
+                            "objects": [b.block_id for b in sc_snap.bricks],
+                            "run_id": "real2sim-live",
+                            "cameras": ["overhead", "side", "wrist"],
+                            "inference_camera": "overhead",
+                            "busy": False,
+                            "stopped": False,
+                        }
+                    ).encode("utf-8")
+                    self._send(200, "application/json", body)
+                    return
+                if path == "/real2sim":
+                    body = json.dumps(sc_snap.to_summary_dict()).encode("utf-8")
+                    self._send(200, "application/json", body)
+                    return
+                self._send(404, "application/json", b'{"error":"not found"}')
+
+        for candidate_port in (sim_port_Pref, 18082):
+            try:
+                sim_http_server = ThreadingHTTPServer(("127.0.0.1", candidate_port), _SimApiHandler)
+                sim_http_server.daemon_threads = True
+                threading.Thread(
+                    target=sim_http_server.serve_forever,
+                    name="real2sim-sim-api",
+                    daemon=True,
+                ).start()
+                print(
+                    f"[Real2Sim Live] Serving MuJoCo twin HTTP API on http://127.0.0.1:{candidate_port}",
+                    flush=True,
+                )
+                break
+            except OSError:
+                sim_http_server = None
+
+        def _fetch_live_rgb() -> np.ndarray | None:
+            url = f"{live_depth_url.rstrip('/')}/rgb/{rgb_endpoint}"
+            try:
+                with urllib.request.urlopen(url, timeout=1.2) as resp:
+                    raw = resp.read()
+                arr = np.frombuffer(raw, dtype=np.uint8)
+                bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if bgr is not None:
+                    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            except Exception:
+                pass
+            return None
+
+        initial_live_rgb = _fetch_live_rgb()
+        if initial_live_rgb is not None:
+            latest_live_rgb = initial_live_rgb
+            try:
+                from brickcell.block_inspector.studio_vision import (
+                    render_real2sim_hud_on_live_frame,
+                )
+
+                hud_init = render_real2sim_hud_on_live_frame(
+                    initial_live_rgb,
+                    live_cam_model,
+                    initial_scene,
+                    T_world_body3=twin.body3_world_pose(),
+                )
+                Image.fromarray(hud_init).save(out_root / "latest_live_camera_hud.png")
+            except Exception:
+                pass
 
         def _depth_worker() -> None:
-            nonlocal latest_scene, scene_dirty, depth_frames_processed
+            nonlocal latest_scene, latest_live_rgb, scene_dirty, depth_frames_processed
             while not stop_event.is_set():
                 with latest_lock:
                     q_cur = latest_q.copy() if latest_q is not None else None
@@ -2954,9 +3523,12 @@ class Real2SimPipeline:
                         prefer_snapshots=prefer_snapshots,
                         camera_mode=camera_mode,
                     )
+                    rgb_live = _fetch_live_rgb()
                     if sc.raw_point_count > 0:
                         with latest_lock:
                             latest_scene = sc
+                            if rgb_live is not None:
+                                latest_live_rgb = rgb_live
                             scene_dirty = True
                             depth_frames_processed += 1
                 except Exception:
@@ -2971,7 +3543,12 @@ class Real2SimPipeline:
         try:
             if q_init is not None:
                 twin.set_arm_state_direct(q_init, grip_init, sync_viewer=False)
-            twin.sync_real2sim_scene(initial_scene, settle_steps=0)
+            twin.sync_real2sim_scene(initial_scene, settle_steps=12)
+            init_png = _render_sim_overhead_png()
+            if init_png is not None:
+                with latest_lock:
+                    latest_sim_png = init_png
+            last_sim_render_t = time.monotonic()
 
             while True:
                 elapsed = time.monotonic() - t_start
@@ -3003,18 +3580,56 @@ class Real2SimPipeline:
 
                 # 2. Apply latest perceived 3D scene (plates + DUPLO bricks) to MuJoCo
                 sc_to_apply: Real2SimSceneState | None = None
+                rgb_to_apply: np.ndarray | None = None
                 with latest_lock:
                     if scene_dirty:
                         sc_to_apply = latest_scene
+                        rgb_to_apply = latest_live_rgb
                         scene_dirty = False
                     sc_cur = latest_scene
                     q_disp = latest_q
                     g_disp = latest_grip
 
                 if sc_to_apply is not None:
-                    twin.sync_real2sim_scene(sc_to_apply, settle_steps=0)
+                    twin.sync_real2sim_scene(sc_to_apply, settle_steps=6)
+                    png_now = _render_sim_overhead_png()
+                    if png_now is not None:
+                        with latest_lock:
+                            latest_sim_png = png_now
+                    last_sim_render_t = time.monotonic()
+                    if rgb_to_apply is not None:
+                        try:
+                            from brickcell.block_inspector.studio_vision import (
+                                render_real2sim_hud_on_live_frame,
+                            )
+
+                            hud_img = render_real2sim_hud_on_live_frame(
+                                rgb_to_apply,
+                                live_cam_model,
+                                sc_to_apply,
+                                T_world_body3=twin.body3_world_pose(),
+                            )
+                            Image.fromarray(hud_img).save(out_root / "latest_live_camera_hud.png")
+                            if (
+                                show_viewer
+                                and os.environ.get("BRICKCELL_CAMERA_WINDOWS", "1") != "0"
+                            ):
+                                if not live_hud_opened:
+                                    cv2.namedWindow(live_hud_win, cv2.WINDOW_NORMAL)
+                                    cv2.resizeWindow(live_hud_win, 640, 480)
+                                    live_hud_opened = True
+                                cv2.imshow(live_hud_win, cv2.cvtColor(hud_img, cv2.COLOR_RGB2BGR))
+                                cv2.waitKey(1)
+                        except Exception:
+                            pass
                 else:
                     twin._sync_viewer()
+                    if time.monotonic() - last_sim_render_t >= 0.20:
+                        png_now = _render_sim_overhead_png()
+                        if png_now is not None:
+                            with latest_lock:
+                                latest_sim_png = png_now
+                        last_sim_render_t = time.monotonic()
 
                 q0_deg = math.degrees(float(q_disp[0])) if q_disp is not None else 0.0
                 g_pct_disp = float(g_disp) * 100.0 if float(g_disp) <= 1.05 else float(g_disp)
@@ -3040,6 +3655,17 @@ class Real2SimPipeline:
         finally:
             stop_event.set()
             worker.join(timeout=1.5)
+            if sim_http_server is not None:
+                try:
+                    sim_http_server.shutdown()
+                    sim_http_server.server_close()
+                except Exception:
+                    pass
+            if sim_renderer is not None:
+                try:
+                    sim_renderer.close()
+                except Exception:
+                    pass
             twin.close()
             if tunnel_proc is not None and tunnel_proc.poll() is None:
                 try:

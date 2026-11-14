@@ -163,12 +163,18 @@ class ArmdFollowerBridge:
         }
 
     def decode_state_message(
-        self, msg: dict[str, Any], stop_on_fault: bool = True
+        self,
+        msg: dict[str, Any],
+        stop_on_fault: bool = True,
+        allow_gripper_overload: bool = False,
     ) -> DecodedArmState | None:
         """Decode GET /arms/follower/state or WS /arms/follower/stream payload.
 
         Returns None on partial single-servo dropout so 30 Hz consumers skip the frame
         cleanly; triggers emergency hold stop and raises ArmFaultError on blocking fault.
+        When `allow_gripper_overload=True` (actively clamping a rigid brick), steady
+        `overload`/`current` on `gripper` is expected holding torque and must NOT trigger
+        `emergency_stop_hold()` (which would reset gripper goal to present and drop the brick).
         """
         joints_raw = msg.get("joints")
         if isinstance(joints_raw, list):
@@ -184,11 +190,18 @@ class ArmdFollowerBridge:
             if j is None:
                 return None
             if j.get("healthy") is False:
-                if stop_on_fault:
-                    self.emergency_stop_hold()
-                raise ArmFaultError(
-                    f"Blocking servo fault on {jname}: errors={j.get('errors', [])}"
-                )
+                errs = list(j.get("errors") or [])
+                if (
+                    allow_gripper_overload
+                    and jname == "gripper"
+                    and errs
+                    and set(errs).issubset({"overload", "current"})
+                ):
+                    pass
+                else:
+                    if stop_on_fault:
+                        self.emergency_stop_hold()
+                    raise ArmFaultError(f"Blocking servo fault on {jname}: errors={errs}")
             if j.get("online") is False or j.get("position") is None:
                 return None
 

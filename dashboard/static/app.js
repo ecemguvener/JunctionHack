@@ -19,6 +19,7 @@
   const hash = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
   const state = {
     src: hash.src === "real" ? "real" : "sim",
+    hud: hash.hud !== "0",
     defects: hash.defects === "1",
     focus: hash.focus !== "0",
     scope: hash.scope === "focus" ? "focus" : "all",
@@ -40,10 +41,10 @@
   const STATUS_STALE_MS = 4000;
   let statusAt = 0;
   const statusFresh = () => !!status && performance.now() - statusAt < STATUS_STALE_MS;
-  const focusOverlay = () => (statusFresh() && status.focus?.connected && status.focus.object_id ? status.focus : null);
+  const focusOverlay = () => (OverlayEvidence.drawable(status?.focus, state.src, statusFresh()) && status.focus.object_id ? status.focus : null);
   function visibleAnomalies() {
     const a = status?.anomalies;
-    if (!state.defects || !statusFresh() || !a?.connected) return [];
+    if (!state.defects || !OverlayEvidence.drawable(a, state.src, statusFresh())) return [];
     const f = focusOverlay();
     return state.scope === "all" ? a.items : a.items.filter((i) => f && i.object_id === f.object_id);
   }
@@ -70,6 +71,7 @@
     bind("src-long", state.src === "sim" ? "MuJoCo sim" : "Real camera");
     renderStatus();
     drawOverlay();
+    cloud?.updateHud();
     cloud?.resize();
   }
 
@@ -92,6 +94,7 @@
       for (const kind of ["anomalies", "focus"]) {
         $(`[data-stub="${kind}"]`).classList.toggle("show", state[kind === "anomalies" ? "defects" : "focus"]);
         bind(`${kind}-reason`, "Server unreachable");
+        bind(`${kind}-state`, "Publisher offline");
       }
       return;
     }
@@ -99,8 +102,12 @@
     const cam = state.src === "sim" ? S.sim : S.real;
     const fps = shownFps(state.src);
     const shown = fps == null ? "–" : fps.toFixed(fps < 10 ? 1 : 0);
+    const r2s = status.real2sim;
+    bind("hud-count", String(r2s?.bricks?.length || 0));
     bind("cam-detail", state.src === "sim"
-      ? `${config?.sim_camera ?? "overhead"} render · ${shown} fps shown · not twin-synced`
+      ? (r2s?.ok
+        ? `Real2Sim MuJoCo 4.0 twin · ${r2s.bricks?.length || 0} bricks · ${shown} fps shown`
+        : `${config?.sim_camera ?? "overhead"} render · ${shown} fps shown`)
       : `D415 Top · ${shown} fps shown`);
     bind("cam-age", `age ${fmtAge(cam.age_s)}`);
     bind("cam-error", cam.error || (cam.ok ? "" : "The source sends no fresh frames."));
@@ -114,9 +121,15 @@
     bind("focus-label", f ? (f.label || f.object_id) : "–");
     for (const kind of ["anomalies", "focus"]) {
       const o = status[kind];
-      $(`[data-stub="${kind}"]`).classList.toggle("show", !o.connected && state[kind === "anomalies" ? "defects" : "focus"]);
-      bind(`${kind}-reason`, o.reason || "");
+      $(`[data-stub="${kind}"]`).classList.toggle("show", state[kind === "anomalies" ? "defects" : "focus"]);
+      bind(`${kind}-state`, OverlayEvidence.label(o, state.src));
+      bind(`${kind}-reason`, o.evidence && o.evidence.mode !== state.src
+        ? `Result belongs to ${o.evidence.mode}; hidden in ${state.src} view.` : o.reason || "");
     }
+    const e = S && status.anomalies?.evidence;
+    bind("anomalies-provenance", e
+      ? `${e.method || "Unknown method"} · model ${e.model_version || "unknown"} · ${e.threshold_version ? "threshold " + e.threshold_version : "uncalibrated / unknown threshold"} · capture ${fmtAge(status.anomalies.capture_age_s)}`
+      : "Detector method and calibration unknown");
     bind("defect-count", String(visibleAnomalies().length));
   }
 
@@ -141,6 +154,7 @@
     const k = e.key.toLowerCase();
     if (k === "t") state.src = state.src === "sim" ? "real" : "sim";
     else if (k === "escape") state.fs = "";
+    else if (k === "h") state.hud = !state.hud;
     else if (k === "d") state.defects = !state.defects;
     else if (k === "f") state.focus = !state.focus;
     else if (k === "z") state.zoom = !state.zoom;
@@ -192,10 +206,21 @@
   // ------------------------------------------------------------------ camera overlay
   const camPanel = $('[data-panel="cam"]');
   const overlay = $("canvas.cam-overlay", camPanel);
-  function projectTop(p) {
-    const c = config.cameras.top, R = c.rotation_cv, d = [p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]];
+  function projectTop(p, camOverride) {
+    const c = camOverride || config.cameras.top, R = c.rotation_cv, d = [p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]];
     const q = [0, 1, 2].map((j) => R[0][j] * d[0] + R[1][j] * d[1] + R[2][j] * d[2]);
     return q[2] > 0 ? [c.fx * q[0] / q[2] + c.cx, c.fy * q[1] / q[2] + c.cy] : null;
+  }
+  function r2sToCloud(p, r2sCam) {
+    if (!r2sCam || !config?.cameras?.top) return p;
+    const R1 = r2sCam.rotation_cv, P1 = r2sCam.pos, d = [p[0] - P1[0], p[1] - P1[1], p[2] - P1[2]];
+    const q = [0, 1, 2].map((j) => R1[0][j] * d[0] + R1[1][j] * d[1] + R1[2][j] * d[2]);
+    const R2 = config.cameras.top.rotation_cv, P2 = config.cameras.top.pos;
+    return [
+      R2[0][0] * q[0] + R2[0][1] * q[1] + R2[0][2] * q[2] + P2[0],
+      R2[1][0] * q[0] + R2[1][1] * q[1] + R2[1][2] * q[2] + P2[1],
+      p[2],
+    ];
   }
   function contentRect(stage) {
     const W = stage.clientWidth, H = stage.clientHeight, iw = config.image.width, ih = config.image.height;
@@ -230,11 +255,127 @@
       pad: parseFloat(css(camPanel, "--box-pad", "4")),
     };
     const f = focusOverlay();
-    if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
+    if (state.hud && statusFresh() && status?.real2sim?.ok) drawReal2SimHud(g, P, st);
+    if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `PROJECTED FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
     for (const a of visibleAnomalies()) {
-      const label = [a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
+      const label = ["OBJECT ESTIMATE ·", a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
       box(g, P, a.box, css(camPanel, "--defect", "#ff3b3b"), st, 2, label, "bottom");
     }
+  }
+  const OBB_EDGES = [
+    [0, 1], [1, 3], [3, 2], [2, 0],
+    [4, 5], [5, 7], [7, 6], [6, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ];
+  function rgbaCss(rgba, a = 1) {
+    if (!Array.isArray(rgba) || rgba.length < 3) return `rgba(255,178,127,${a})`;
+    return `rgba(${Math.round(rgba[0] * 255)},${Math.round(rgba[1] * 255)},${Math.round(rgba[2] * 255)},${a})`;
+  }
+  function drawReal2SimHud(g, P, st) {
+    const r2s = status.real2sim;
+    const r2sCam = r2s.camera_top || config.cameras.top;
+    const projR2S = (pt) => projectTop(pt, r2sCam);
+    const plates = r2s.plates || {};
+    g.save();
+    // 1. 3D projected KALAS plate rings + labels
+    for (const [role, pl] of Object.entries(plates)) {
+      const pos = pl.pos_world_m;
+      if (!Array.isArray(pos) || pos.length < 3) continue;
+      const rad = pl.outer_radius_m || 0.0795;
+      const col = rgbaCss(pl.rgba, 0.85);
+      g.strokeStyle = col;
+      g.lineWidth = 1.75;
+      g.setLineDash([5, 4]);
+      g.beginPath();
+      let started = false;
+      for (let k = 0; k <= 36; k++) {
+        const th = (2 * Math.PI * k) / 36;
+        const uv = projR2S([pos[0] + rad * Math.cos(th), pos[1] + rad * Math.sin(th), pos[2] + 0.008]);
+        if (!uv) continue;
+        const [sx, sy] = P(uv[0], uv[1]);
+        if (!started) { g.moveTo(sx, sy); started = true; } else g.lineTo(sx, sy);
+      }
+      g.stroke();
+      g.setLineDash([]);
+      const rimUv = projR2S([pos[0] - rad, pos[1], pos[2] + 0.012]);
+      if (rimUv) {
+        const [lx, ly] = P(rimUv[0], rimUv[1]);
+        const txt = `${role.toUpperCase()} BOWL`;
+        g.font = st.font;
+        const tw = g.measureText(txt).width + 8;
+        g.fillStyle = "rgba(10,10,12,0.78)";
+        g.fillRect(lx - tw / 2, ly - 9, tw, 16);
+        g.fillStyle = col;
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(txt, lx, ly - 1);
+      }
+    }
+    // 2. 3D oriented bounding boxes (OBBs), 8 corner dots, 6D pose triads, and brick tags
+    const bricks = r2s.bricks || [];
+    for (let i = 0; i < bricks.length; i++) {
+      const b = bricks[i];
+      const corners = b.corners_world_m;
+      const pos = b.pos_world_m;
+      const R = b.R_world_block;
+      const col = rgbaCss(b.display_rgba, 0.96);
+      if (Array.isArray(corners) && corners.length === 8) {
+        const proj = corners.map((c) => { const uv = projR2S(c); return uv ? P(uv[0], uv[1]) : null; });
+        g.strokeStyle = col;
+        for (const [ia, ib] of OBB_EDGES) {
+          if (!proj[ia] || !proj[ib]) continue;
+          g.lineWidth = ia >= 4 && ib >= 4 ? 2.2 : 1.4;
+          g.beginPath();
+          g.moveTo(proj[ia][0], proj[ia][1]);
+          g.lineTo(proj[ib][0], proj[ib][1]);
+          g.stroke();
+        }
+        g.fillStyle = col;
+        for (const pt of proj) {
+          if (!pt) continue;
+          g.beginPath();
+          g.arc(pt[0], pt[1], 2.2, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+      if (Array.isArray(pos) && Array.isArray(R) && R.length === 3) {
+        const cUv = projR2S(pos);
+        if (cUv) {
+          const [cx, cy] = P(cUv[0], cUv[1]);
+          const axes = [
+            [[R[0][0], R[1][0], R[2][0]], "#ff4747"],
+            [[R[0][1], R[1][1], R[2][1]], "#38e54d"],
+            [[R[0][2], R[1][2], R[2][2]], "#3b9eff"],
+          ];
+          for (const [ax, acol] of axes) {
+            const tipUv = projR2S([pos[0] + 0.022 * ax[0], pos[1] + 0.022 * ax[1], pos[2] + 0.022 * ax[2]]);
+            if (!tipUv) continue;
+            const [tx, ty] = P(tipUv[0], tipUv[1]);
+            g.strokeStyle = acol;
+            g.lineWidth = 2.0;
+            g.beginPath();
+            g.moveTo(cx, cy);
+            g.lineTo(tx, ty);
+            g.stroke();
+          }
+          const shortPart = (b.part_id || "").replace("duplo_", "");
+          const tag = `#${i} ${b.color_name || ""} ${shortPart} (${b.stable_pose || ""})`;
+          g.font = "600 10.5px monospace";
+          const tw = g.measureText(tag).width + 8;
+          const tx0 = cx - tw / 2, ty0 = cy - 22;
+          g.fillStyle = "rgba(10,10,12,0.82)";
+          g.fillRect(tx0, ty0, tw, 15);
+          g.strokeStyle = col;
+          g.lineWidth = 1;
+          g.strokeRect(tx0, ty0, tw, 15);
+          g.fillStyle = col;
+          g.textAlign = "left";
+          g.textBaseline = "middle";
+          g.fillText(tag, tx0 + 4, ty0 + 8);
+        }
+      }
+    }
+    g.restore();
   }
   function box(g, P, b, color, st, pad, label, where) {
     let [x0, y0] = P(b[0], b[1]);
@@ -333,6 +474,56 @@
       lineP = buf(new Float32Array(L)); lineC = buf(new Float32Array(C));
     })();
 
+    // Dynamic Real2Sim 3D HUD buffers (3 KALAS plate rings + brick 3D OBB wireframes + 6D pose triads)
+    const hudP = gl.createBuffer(), hudC = gl.createBuffer();
+    let hudN = 0;
+    function updateHud() {
+      const L = [], C = [], seg = (a, b, c) => { L.push(...a, ...b); C.push(...c, ...c); };
+      const r2s = statusFresh() ? status?.real2sim : null;
+      const r2sCam = r2s?.camera_top;
+      const tc = (pt) => r2sToCloud(pt, r2sCam);
+      if (state.hud && r2s?.ok) {
+        for (const pl of Object.values(r2s.plates || {})) {
+          const pos = pl.pos_world_m;
+          if (!Array.isArray(pos) || pos.length < 3) continue;
+          const rad = pl.outer_radius_m || 0.0795;
+          const col = Array.isArray(pl.rgba) ? pl.rgba.slice(0, 3) : [0.28, 0.82, 0.80];
+          for (let k = 0; k < 32; k++) {
+            const t0 = (2 * Math.PI * k) / 32, t1 = (2 * Math.PI * (k + 1)) / 32;
+            seg(
+              tc([pos[0] + rad * Math.cos(t0), pos[1] + rad * Math.sin(t0), pos[2] + 0.006]),
+              tc([pos[0] + rad * Math.cos(t1), pos[1] + rad * Math.sin(t1), pos[2] + 0.006]),
+              col,
+            );
+          }
+        }
+        for (const b of r2s.bricks || []) {
+          const corners = b.corners_world_m;
+          const col = Array.isArray(b.display_rgba) ? b.display_rgba.slice(0, 3) : [0.95, 0.78, 0.12];
+          if (Array.isArray(corners) && corners.length === 8) {
+            const cCloud = corners.map(tc);
+            for (const [ia, ib] of OBB_EDGES) seg(cCloud[ia], cCloud[ib], col);
+          }
+          const pos = b.pos_world_m, R = b.R_world_block;
+          if (Array.isArray(pos) && Array.isArray(R) && R.length === 3) {
+            const p0 = tc(pos);
+            const axes = [
+              [[R[0][0], R[1][0], R[2][0]], [1.0, 0.28, 0.28]],
+              [[R[0][1], R[1][1], R[2][1]], [0.22, 0.90, 0.30]],
+              [[R[0][2], R[1][2], R[2][2]], [0.23, 0.62, 1.0]],
+            ];
+            for (const [ax, acol] of axes) {
+              seg(p0, tc([pos[0] + 0.022 * ax[0], pos[1] + 0.022 * ax[1], pos[2] + 0.022 * ax[2]]), acol);
+            }
+          }
+        }
+      }
+      hudN = L.length / 3;
+      gl.bindBuffer(gl.ARRAY_BUFFER, hudP); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(L), gl.DYNAMIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, hudC); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(C), gl.DYNAMIC_DRAW);
+      dirty();
+    }
+
     // view: "cam" = exactly the real Top camera; "orbit" = Blender-style around a target
     const R = top.rotation_cv, col = (j) => [R[0][j], R[1][j], R[2][j]];
     const fovBase = 2 * Math.atan(config.image.height / 2 / top.fy), camAspect = config.image.width / config.image.height;
@@ -406,6 +597,11 @@
         if (state.show.top) gl.drawArrays(gl.POINTS, 0, nTop);
         if (state.show.plate && n > nTop) gl.drawArrays(gl.POINTS, nTop, n - nTop);
       }
+      if (state.hud && hudN > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, hudP); gl.vertexAttribPointer(pa, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, hudC); gl.vertexAttribPointer(ca, 3, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.LINES, 0, hudN);
+      }
       drawLabels(M);
       drawGizmo();
       bind("proj", view.ortho ? "ORTHO" : "PERSP");
@@ -431,6 +627,24 @@
       };
       if (view.mode !== "cam" && state.show.top) put(top.pos, "D415 TOP");
       if (cams.plate && state.show.plate) put(cams.plate.pos, "D415 PLATE");
+      if (state.hud && statusFresh() && status?.real2sim?.ok) {
+        const r2sCam = status.real2sim.camera_top;
+        const tc = (pt) => r2sToCloud(pt, r2sCam);
+        for (const [role, pl] of Object.entries(status.real2sim.plates || {})) {
+          const pos = pl.pos_world_m;
+          if (!Array.isArray(pos)) continue;
+          g.fillStyle = rgbaCss(pl.rgba, 0.92);
+          put(tc([pos[0], pos[1], pos[2] + 0.015]), `${role.toUpperCase()} BOWL`);
+        }
+        const bricks = status.real2sim.bricks || [];
+        for (let i = 0; i < bricks.length; i++) {
+          const b = bricks[i], pos = b.pos_world_m;
+          if (!Array.isArray(pos)) continue;
+          g.fillStyle = rgbaCss(b.display_rgba, 0.98);
+          const shortPart = (b.part_id || "").replace("duplo_", "");
+          put(tc([pos[0], pos[1], pos[2] + 0.022]), `#${i} ${b.color_name || ""} ${shortPart}`);
+        }
+      }
     }
     function drawGizmo() {
       const g = gizmo.getContext("2d"), W = gizmo.width, H = gizmo.height, dpr = devicePixelRatio || 1;
@@ -513,7 +727,7 @@
     new ResizeObserver(resize).observe(canvas);
     if (hash.view) preset(hash.view);
     if (hash.orbit) { leaveCam(); const [y, p, d] = hash.orbit.split(",").map(Number); Object.assign(view, { yaw: y, pitch: p, dist: d, target: [...pivot] }); }
-    return { resize, recolor, key, dirty, setPoints, count: () => n, counts: () => ({ top: nTop, plate: n - nTop }), view };
+    return { resize, recolor, key, dirty, setPoints, updateHud, count: () => n, counts: () => ({ top: nTop, plate: n - nTop }), view };
   }
 
   // ------------------------------------------------------------------ live loops
@@ -535,6 +749,7 @@
       } catch { /* statusFresh() turns false after STATUS_STALE_MS */ }
       renderStatus();
       drawOverlay();
+      cloud?.updateHud();
       await new Promise((ok) => setTimeout(ok, 1000));
     }
   }

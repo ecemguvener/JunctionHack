@@ -106,27 +106,27 @@ def _extract_so101_meshes(cache_dir: Path) -> tuple[Path, ET.Element]:
 def _write_kalas_plate_obj(path: Path, segments: int = 64) -> None:
     profile_mm = [
         (0, 3.7),
-        (28, 3.6),
-        (55, 3.3),
-        (68, 3.1),
-        (71, 4.2),
-        (73.5, 7.0),
-        (75.5, 11.5),
-        (77.0, 16.5),
-        (78.2, 21.5),
-        (78.6, 23.0),
-        (79.5, 23.0),
-        (79.2, 21.0),
-        (77.8, 16.5),
-        (76.0, 11.0),
-        (74.0, 6.0),
-        (71.5, 2.8),
-        (70.0, 1.0),
-        (69.0, 0.0),
-        (58, 0.0),
-        (55, 0.8),
-        (52, 1.5),
-        (26, 1.8),
+        (30, 3.6),
+        (60, 3.3),
+        (75, 3.1),
+        (79, 4.0),
+        (82, 6.5),
+        (85, 11.0),
+        (88, 16.5),
+        (90.5, 21.5),
+        (91.3, 23.5),
+        (93.0, 23.5),
+        (92.8, 21.5),
+        (90.5, 17.0),
+        (87.5, 11.5),
+        (84.5, 6.5),
+        (81.5, 3.0),
+        (80, 1.2),
+        (79, 0.0),
+        (66, 0.0),
+        (63, 0.8),
+        (60, 1.5),
+        (30, 1.8),
         (0, 1.9),
     ]
     profile = [(r / 1000.0, z / 1000.0) for r, z in profile_mm]
@@ -1908,11 +1908,15 @@ class SO101InspectionTwin:
                     )
                     pos[2] = max(float(pos[2]), z_floor + half_world_z + 0.0005)
 
-                self.data.qpos[q_adr : q_adr + 3] = pos
-                self.data.qpos[q_adr + 3 : q_adr + 7] = _rotmat_to_mj_quat(T_wb[:3, :3])
-                self.data.qvel[v_adr : v_adr + 6] = 0.0
+                target_quat = _rotmat_to_mj_quat(T_wb[:3, :3])
+                cur_pos = np.asarray(self.data.qpos[q_adr : q_adr + 3], dtype=np.float64)
+                cur_quat = np.asarray(self.data.qpos[q_adr + 3 : q_adr + 7], dtype=np.float64)
+                pos_jump = float(np.linalg.norm(pos - cur_pos))
+                quat_dot = min(1.0, abs(float(np.dot(target_quat, cur_quat))))
+                ang_jump = 2.0 * math.acos(quat_dot)
 
                 # Dynamically update mesh asset, collision box size, and perceived brick RGBA
+                mesh_changed = False
                 try:
                     cub_gid = int(self.model.geom(f"{bname}_cuboid").id)
                     self.model.geom_size[cub_gid] = 0.5 * np.asarray(
@@ -1923,10 +1927,15 @@ class SO101InspectionTwin:
                 try:
                     vis_gid = int(self.model.geom(f"{bname}_mesh_vis").id)
                     mesh_id = int(self.model.mesh(b.spec.name).id)
+                    mesh_changed = int(self.model.geom_dataid[vis_gid]) != mesh_id
                     self.model.geom_dataid[vis_gid] = mesh_id
-                    self.model.geom_pos[vis_gid] = np.array(
-                        [0.0, 0.0, -0.5 * float(b.spec.dims_m[2])], dtype=np.float64
+                    m_pos = np.asarray(self.model.mesh_pos[mesh_id], dtype=np.float64)
+                    m_quat = np.asarray(self.model.mesh_quat[mesh_id], dtype=np.float64)
+                    self.model.geom_pos[vis_gid] = (
+                        np.array([0.0, 0.0, -0.5 * float(b.spec.dims_m[2])], dtype=np.float64)
+                        + m_pos
                     )
+                    self.model.geom_quat[vis_gid] = m_quat
                     rgba = (
                         b.display_rgba()
                         if hasattr(b, "display_rgba")
@@ -1935,6 +1944,18 @@ class SO101InspectionTwin:
                     self.model.geom_rgba[vis_gid] = np.asarray(rgba, dtype=np.float32)
                 except Exception:
                     pass
+
+                # Only teleport qpos if brick moved by >6.5mm, rotated >0.18rad, changed mesh, or was hidden (< -0.1m)
+                if (
+                    is_air
+                    or mesh_changed
+                    or float(cur_pos[2]) < -0.05
+                    or pos_jump > 0.0065
+                    or ang_jump > 0.18
+                ):
+                    self.data.qpos[q_adr : q_adr + 3] = pos
+                    self.data.qpos[q_adr + 3 : q_adr + 7] = target_quat
+                self.data.qvel[v_adr : v_adr + 6] = 0.0
             else:
                 # Hide unused pre-allocated brick slot beneath table
                 self.data.qpos[q_adr : q_adr + 3] = [0.0, 0.0, -0.50 - 0.05 * idx]
@@ -1949,6 +1970,13 @@ class SO101InspectionTwin:
         mujoco.mj_forward(self.model, self.data)
         for _ in range(max(0, int(settle_steps))):
             mujoco.mj_step(self.model, self.data)
+            for idx in range(min(len(bricks), total_slots)):
+                bname = f"block_{idx}"
+                if bname in self.block_body_ids:
+                    j_id = int(self.model.joint(f"{bname}_joint").id)
+                    v_adr = int(self.model.jnt_dofadr[j_id])
+                    self.data.qvel[v_adr : v_adr + 6] *= 0.25
+        mujoco.mj_forward(self.model, self.data)
 
         self.remaining_source_blocks = sum(
             1 for b in bricks if getattr(b, "support_region", "") == "source"

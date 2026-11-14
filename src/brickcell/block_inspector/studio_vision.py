@@ -471,7 +471,55 @@ def populate_studio_3d_scene(twin: Any, scn: Any) -> None:
                 eye_mat,
             )
 
-    # 6. Real2Sim ignored distractors (human arms, wires, trash)
+    # 6. Real2Sim perceived bricks (3D OBB wireframes, 6D pose triads, 8 corners & 3D point clouds)
+    if twin.real2sim_state is not None:
+        for b_idx, rb in enumerate(getattr(twin.real2sim_state, "bricks", ())):
+            if scn.ngeom >= scn.maxgeom - 32:
+                break
+            disp_rgba = (
+                np.asarray(rb.display_rgba(), dtype=np.float32)
+                if hasattr(rb, "display_rgba")
+                else np.array([0.25, 0.92, 0.98, 0.90], dtype=np.float32)
+            )
+            wire_rgba = np.clip(
+                np.array(
+                    [
+                        disp_rgba[0] * 0.8 + 0.2,
+                        disp_rgba[1] * 0.8 + 0.2,
+                        disp_rgba[2] * 0.8 + 0.2,
+                        0.92,
+                    ],
+                    dtype=np.float32,
+                ),
+                0.0,
+                1.0,
+            )
+            corners_rb = _draw_obb_wireframe_3d(
+                scn,
+                rb.T_world_block,
+                rb.spec.dims_m,
+                rgba=wire_rgba,
+                eye_mat=eye_mat,
+                radius_m=0.0012 if b_idx == 0 else 0.0010,
+                top_only=False,
+                draw_axes=True,
+            )
+            for c_pt in corners_rb:
+                if scn.ngeom >= scn.maxgeom - 16:
+                    break
+                _add_sphere(scn, c_pt, 0.0026, wire_rgba, eye_mat)
+            c_pts = getattr(rb, "cluster_pts_world", None)
+            if c_pts is not None and len(c_pts) > 0:
+                stride_rb = max(1, len(c_pts) // 14)
+                pt_col = np.array(
+                    [disp_rgba[0], disp_rgba[1], disp_rgba[2], 0.72], dtype=np.float32
+                )
+                for pt in c_pts[::stride_rb]:
+                    if scn.ngeom >= scn.maxgeom - 16:
+                        break
+                    _add_sphere(scn, pt, 0.0020, pt_col, eye_mat)
+
+    # 7. Real2Sim ignored distractors (human arms, wires, trash)
     if twin.real2sim_state is not None and twin.show_real2sim_ignored_overlay:
         cat_rgba = {
             "human_arm": np.array([1.00, 0.32, 0.22, 0.42], dtype=np.float32),
@@ -511,8 +559,9 @@ def _draw_projected_obb_on_rgb(
     thickness: int = 2,
     label: str | None = None,
     draw_corner_ids: bool = False,
+    draw_axes: bool = True,
 ) -> None:
-    """Draw projected 12-edge 3D wireframe box on an RGB image."""
+    """Draw projected 12-edge 3D wireframe box and 6D coordinate triad on an RGB image."""
     uv, z = _project_cuboid_2d(cam, T_world_block, spec.dims_m, T_world_body3)
     if not np.all(z > 0.03):
         return
@@ -523,6 +572,27 @@ def _draw_projected_obb_on_rgb(
         p1 = (int(pts_i[i1, 0]), int(pts_i[i1, 1]))
         if (-200 <= p0[0] <= w + 200) and (-200 <= p0[1] <= h + 200):
             cv2.line(canvas, p0, p1, color_rgb, thickness, cv2.LINE_AA)
+
+    if draw_axes:
+        T = np.asarray(T_world_block, dtype=np.float64)
+        p_c = T[:3, 3]
+        R_b = T[:3, :3]
+        axis_len = 0.018
+        axis_pts_w = np.vstack(
+            [
+                p_c,
+                p_c + axis_len * R_b[:, 0],
+                p_c + axis_len * R_b[:, 1],
+                p_c + axis_len * R_b[:, 2],
+            ]
+        )
+        uv_ax, z_ax = cam.project_world_points(axis_pts_w, T_world_body3=T_world_body3)
+        if np.all(z_ax > 0.03):
+            ax_i = np.round(uv_ax).astype(np.int32)
+            c0 = (int(ax_i[0, 0]), int(ax_i[0, 1]))
+            for ax_idx, ax_col in ((1, (255, 65, 65)), (2, (65, 245, 95)), (3, (70, 165, 255))):
+                p_end = (int(ax_i[ax_idx, 0]), int(ax_i[ax_idx, 1]))
+                cv2.line(canvas, c0, p_end, ax_col, max(1, thickness), cv2.LINE_AA)
 
     if draw_corner_ids:
         for idx in range(8):
@@ -542,18 +612,174 @@ def _draw_projected_obb_on_rgb(
 
     if label:
         top_pt = pts_i[np.argmin(pts_i[:, 1])]
-        lx = int(np.clip(top_pt[0] - 24, 6, w - 120))
-        ly = int(np.clip(top_pt[1] - 8, 18, h - 10))
+        lx = int(np.clip(top_pt[0] - 28, 6, w - 150))
+        ly = int(np.clip(top_pt[1] - 6, 18, h - 10))
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.36, 1)
+        cv2.rectangle(canvas, (lx - 2, ly - th - 2), (lx + tw + 2, ly + 3), (12, 18, 32), -1)
         cv2.putText(
             canvas,
             label,
             (lx, ly),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.44,
+            0.36,
             color_rgb,
             1,
             cv2.LINE_AA,
         )
+
+
+def _draw_projected_plate_ring_on_rgb(
+    canvas: np.ndarray,
+    cam: CameraModel,
+    pos_world: np.ndarray,
+    radius_m: float,
+    T_world_body3: np.ndarray,
+    color_rgb: tuple[int, int, int],
+    label: str | None = None,
+) -> None:
+    """Project a 3D circular plate rim onto an RGB camera frame."""
+    angles = np.linspace(0.0, 2.0 * math.pi, 40, endpoint=False)
+    rim_pts = np.column_stack(
+        [
+            float(pos_world[0]) + radius_m * np.cos(angles),
+            float(pos_world[1]) + radius_m * np.sin(angles),
+            np.full_like(angles, float(pos_world[2]) + 0.014),
+        ]
+    )
+    uv, z = cam.project_world_points(rim_pts, T_world_body3=T_world_body3)
+    if not np.all(z > 0.05):
+        return
+    pts_i = np.round(uv).astype(np.int32).reshape(-1, 1, 2)
+    cv2.polylines(
+        canvas, [pts_i], isClosed=True, color=color_rgb, thickness=1, lineType=cv2.LINE_AA
+    )
+    if label:
+        h, w = canvas.shape[:2]
+        bot_pt = pts_i.reshape(-1, 2)[np.argmax(pts_i[:, 0, 1])]
+        lx = int(np.clip(bot_pt[0] - 42, 6, w - 140))
+        ly = int(np.clip(bot_pt[1] + 15, 22, h - 8))
+        cv2.putText(
+            canvas,
+            label,
+            (lx, ly),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.40,
+            color_rgb,
+            1,
+            cv2.LINE_AA,
+        )
+
+
+def render_real2sim_hud_on_live_frame(
+    rgb_frame: np.ndarray,
+    cam: CameraModel,
+    scene_state: Any,
+    T_world_body3: np.ndarray | None = None,
+    title: str = "LIVE CAMERA FEED + REAL2SIM 3D HUD OVERLAY",
+    draw_point_cloud: bool = True,
+) -> np.ndarray:
+    """Render the simulation 3D HUD overlays directly onto an actual live camera RGB frame."""
+    canvas = np.asarray(rgb_frame, dtype=np.uint8).copy()
+    h, w = canvas.shape[:2]
+    T_b3 = (
+        np.eye(4, dtype=np.float64)
+        if T_world_body3 is None
+        else np.asarray(T_world_body3, dtype=np.float64)
+    )
+
+    # 1. Draw localized 3D KALAS plate rings & labels
+    plate_colors = {
+        "source": (80, 235, 230),
+        "good": (95, 245, 135),
+        "defective": (255, 125, 165),
+    }
+    plates = getattr(scene_state, "plates", {}) or {}
+    bricks = getattr(scene_state, "bricks", ()) or ()
+    for role, p_obj in plates.items():
+        cnt = sum(1 for b in bricks if getattr(b, "support_region", "") == role)
+        p_col = plate_colors.get(role, (180, 220, 255))
+        _draw_projected_plate_ring_on_rgb(
+            canvas,
+            cam,
+            np.asarray(p_obj.pos_world, dtype=np.float64),
+            0.0795,
+            T_b3,
+            color_rgb=p_col,
+            label=f"{role.upper()} ({cnt})",
+        )
+
+    # 2. Optionally project perceived 3D point cloud inliers onto the live camera feed
+    if draw_point_cloud:
+        for rb in bricks:
+            c_pts = getattr(rb, "cluster_pts_world", None)
+            if c_pts is None or len(c_pts) == 0:
+                continue
+            uv_pts, z_pts = cam.project_world_points(c_pts[::2], T_world_body3=T_b3)
+            disp_rgba = rb.display_rgba() if hasattr(rb, "display_rgba") else rb.spec.rgba
+            pt_col = (
+                int(round(min(255.0, disp_rgba[0] * 255.0 + 35.0))),
+                int(round(min(255.0, disp_rgba[1] * 255.0 + 35.0))),
+                int(round(min(255.0, disp_rgba[2] * 255.0 + 35.0))),
+            )
+            for (u_f, v_f), z_f in zip(uv_pts, z_pts):
+                if z_f > 0.05:
+                    px, py = int(round(float(u_f))), int(round(float(v_f)))
+                    if 0 <= px < w and 0 <= py < h:
+                        cv2.circle(canvas, (px, py), 1, pt_col, -1, cv2.LINE_AA)
+
+    # 3. Draw 3D wireframe OBBs, 6D pose triads, corners, and labels for all perceived DUPLO bricks
+    for rb in bricks:
+        disp_rgba = rb.display_rgba() if hasattr(rb, "display_rgba") else rb.spec.rgba
+        col_rgb = (
+            int(round(min(255.0, disp_rgba[0] * 220.0 + 35.0))),
+            int(round(min(255.0, disp_rgba[1] * 220.0 + 35.0))),
+            int(round(min(255.0, disp_rgba[2] * 220.0 + 35.0))),
+        )
+        c_name = rb.color_name() if hasattr(rb, "color_name") else ""
+        pose_short = (
+            str(getattr(rb, "stable_pose_name", "upright"))
+            .replace("wide_side_", "wide_")
+            .replace("narrow_side_", "narrow_")
+        )
+        lbl = f"{c_name} {rb.spec.part_id} [{pose_short}]".strip()
+        _draw_projected_obb_on_rgb(
+            canvas,
+            cam,
+            rb.T_world_block,
+            rb.spec,
+            T_b3,
+            color_rgb=col_rgb,
+            thickness=2,
+            label=lbl,
+            draw_corner_ids=False,
+            draw_axes=True,
+        )
+
+    # 4. Header banner with Real2Sim telemetry
+    cv2.rectangle(canvas, (0, 0), (w, 48), (15, 23, 42), -1)
+    cv2.putText(
+        canvas,
+        title,
+        (10, 19),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.45,
+        (95, 225, 255),
+        1,
+        cv2.LINE_AA,
+    )
+    lat = getattr(scene_state, "latency_ms", 0.0)
+    fg_n = getattr(scene_state, "foreground_point_count", 0)
+    cv2.putText(
+        canvas,
+        f"Bricks: {len(bricks)} | Plates: {len(plates)} | FG Cloud: {fg_n} pts | ICP+OBB Latency: {lat:.0f} ms",
+        (10, 39),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (215, 232, 255),
+        1,
+        cv2.LINE_AA,
+    )
+    return canvas
 
 
 def _depth_to_rgb_pip(
@@ -747,6 +973,47 @@ def render_annotated_virtual_camera_frames(
     o_img = rgb_o.copy()
     oh, ow = o_img.shape[:2]
     over_cam = twin.rig.realsense_1
+
+    # Draw Real2Sim perceived bricks & 6D poses on Overhead D415 and Low Plate D415
+    if getattr(twin, "real2sim_state", None) is not None:
+        for rb in getattr(twin.real2sim_state, "bricks", ()):
+            disp_rgba = rb.display_rgba() if hasattr(rb, "display_rgba") else rb.spec.rgba
+            col_rgb = (
+                int(round(min(255.0, disp_rgba[0] * 220.0 + 35.0))),
+                int(round(min(255.0, disp_rgba[1] * 220.0 + 35.0))),
+                int(round(min(255.0, disp_rgba[2] * 220.0 + 35.0))),
+            )
+            c_name = rb.color_name() if hasattr(rb, "color_name") else ""
+            pose_short = (
+                str(getattr(rb, "stable_pose_name", "upright"))
+                .replace("wide_side_", "wide_")
+                .replace("narrow_side_", "narrow_")
+            )
+            lbl = f"{c_name} {rb.spec.part_id} [{pose_short}]".strip()
+            _draw_projected_obb_on_rgb(
+                o_img,
+                over_cam,
+                rb.T_world_block,
+                rb.spec,
+                T_b3,
+                color_rgb=col_rgb,
+                thickness=2,
+                label=lbl,
+                draw_corner_ids=False,
+                draw_axes=True,
+            )
+            _draw_projected_obb_on_rgb(
+                p_img,
+                plate_cam,
+                rb.T_world_block,
+                rb.spec,
+                T_b3,
+                color_rgb=col_rgb,
+                thickness=2,
+                label=lbl,
+                draw_corner_ids=False,
+                draw_axes=True,
+            )
 
     # Draw perceived cluster candidate OBBs in source plate
     cands = getattr(twin, "_perceived_cluster_candidates", None) or []

@@ -373,10 +373,10 @@ class CogManInspectionAgent:
         t0 = time.monotonic()
         goal = compile_instruction(instruction, block_id=block_id, mode=mode)
         effective_max_steps = (
-            max(self.max_steps, 96) if goal.mode == "clear_source_plate" else self.max_steps
+            max(self.max_steps, 180) if goal.mode == "clear_source_plate" else self.max_steps
         )
         effective_max_replans = (
-            max(self.max_replans, 16) if goal.mode == "clear_source_plate" else self.max_replans
+            max(self.max_replans, 32) if goal.mode == "clear_source_plate" else self.max_replans
         )
         trace: list[dict] = []
         replans = 0
@@ -461,6 +461,14 @@ class CogManInspectionAgent:
                     "PresentAndSpinAtPlateCamera",
                     "SortBlockToPile",
                 }:
+                    if (
+                        op.name == "PresentAndSpinAtPlateCamera"
+                        and outcome.reason.startswith("pick_dropped_retrying")
+                        and state.hand_empty
+                        and not state.plate_scan_completed
+                    ):
+                        # Block slipped prior to scan: hand is empty & unlocalized, replan fresh pick
+                        continue
                     # Untrusted scan view or slip must halt safely rather than re-sorting blindly
                     break
 

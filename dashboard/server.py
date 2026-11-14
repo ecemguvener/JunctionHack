@@ -184,6 +184,7 @@ class Scene:
         self.sim_url, self.timeout = sim_url.rstrip("/"), timeout
         self.lock = threading.Lock()
         self.cameras: dict[str, dict] = {}
+        self.real2sim: dict | None = None
         self.loaded_at: float | None = None
         self.health: dict | None = None
         self.health_at: float | None = None
@@ -203,6 +204,8 @@ class Scene:
         now = time.time()
         with self.lock:
             self.cameras, self.loaded_at, self.error = cameras, now, None
+            if isinstance(scene.get("real2sim"), dict):
+                self.real2sim = scene["real2sim"]
             self.health = {
                 k: health.get(k) for k in ("mode", "busy", "stopped", "run_id", "objects")
             }
@@ -378,6 +381,8 @@ class CloudWorker:
         }
         self.rng = np.random.default_rng(0)
         self.levels: dict[str, tuple[float, Level | None]] = {}
+        self.real2sim_state: dict | None = None
+        self.real2sim_at: float | None = None
 
     def level(self, sensor: str, xyz: np.ndarray) -> Level | None:
         """Table plane fit per camera, refreshed every LEVEL_PERIOD_S. Keeps the last good fit."""
@@ -434,10 +439,32 @@ class CloudWorker:
             xyz, rgb, sensor = xyz[pick], rgb[pick], sensor[pick]
         data = pack(xyz, rgb, sensor)
         gz = gzip.compress(data, compresslevel=1, mtime=0)
+        now_t = time.time()
+        with self.scene.lock:
+            r2s = self.scene.real2sim
         with self.cond:
             seq = (self.cloud.seq + 1) if self.cloud else 1
-            self.cloud = Cloud(seq, data, gz, len(xyz), time.time(), per_camera)
+            self.cloud = Cloud(seq, data, gz, len(xyz), now_t, per_camera)
+            if isinstance(r2s, dict):
+                self.real2sim_state = r2s
+                self.real2sim_at = now_t
             self.cond.notify_all()
+
+    def real2sim_status(self, now: float) -> dict:
+        with self.cond:
+            state, at = self.real2sim_state, self.real2sim_at
+        if state is None:
+            with self.scene.lock:
+                state, at = self.scene.real2sim, self.scene.health_at
+        if state is None or at is None:
+            return dict(ok=False, bricks=[], plates={})
+        age = now - at
+        return dict(
+            ok=age <= max(self.stale_s * 3, 10.0),
+            age_s=round(age, 3),
+            bricks=state.get("bricks", []),
+            plates=state.get("plates", {}),
+        )
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -495,6 +522,7 @@ class Overlay:
         self.lock = threading.Lock()
         self.payload: dict | None = None
         self.at: float | None = None
+        self.capture_times: collections.OrderedDict[tuple, float] = collections.OrderedDict()
 
     def update(self, body: dict, now: float | None = None) -> dict:
         if not isinstance(body, dict):
@@ -530,24 +558,99 @@ class Overlay:
                 label=_text(body.get("label")),
                 box=_box(body.get("box"), self.width, self.height) if object_id else None,
             )
+        received = time.time() if now is None else now
+        evidence = body.get("evidence")
+        if evidence is not None:
+            if not isinstance(evidence, dict):
+                raise ValueError("evidence must be an object")
+            captured = evidence.get("captured_at")
+            if type(captured) not in (int, float) or not math.isfinite(captured):
+                raise ValueError("captured_at must be finite acquisition time")
+            if captured > received + 0.5:
+                raise ValueError("captured_at is in the future; check source clock")
+            evidence = {
+                "captured_at": captured,
+                **{
+                    k: _text(evidence.get(k), 160)
+                    for k in (
+                        "frame_id",
+                        "camera_id",
+                        "mode",
+                        "box_space",
+                        "method",
+                        "model_version",
+                        "threshold_version",
+                    )
+                },
+            }
+            if not evidence["frame_id"] or not evidence["camera_id"]:
+                raise ValueError("evidence requires source frame_id and camera_id")
+            if evidence["mode"] not in ("real", "sim"):
+                raise ValueError("evidence mode must be real or sim")
+            if evidence["box_space"] not in ("top_projected_object", "source_image_pixels"):
+                raise ValueError("Unsupported evidence box_space")
+        payload["evidence"] = evidence
         with self.lock:
-            self.payload, self.at = payload, time.time() if now is None else now
+            if evidence:
+                key = (source, evidence["mode"], evidence["camera_id"], evidence["frame_id"])
+                if key in self.capture_times and self.capture_times[key] != evidence["captured_at"]:
+                    raise ValueError("Cannot change acquisition time for a previously seen frame")
+                self.capture_times[key] = evidence["captured_at"]
+                self.capture_times.move_to_end(key)
+                while len(self.capture_times) > 1024:
+                    self.capture_times.popitem(last=False)
+            self.payload, self.at = payload, received
         return payload
 
     def status(self, now: float) -> dict:
         with self.lock:
             payload, at = self.payload, self.at
         if payload is None:
-            return dict(connected=False, stub=True, reason="No service posts to this endpoint yet")
+            return dict(
+                connected=False,
+                drawable=False,
+                stub=True,
+                evidence_state="missing",
+                reason="No publisher result received",
+            )
         age = now - at
         if age > self.stale_s:
             return dict(
                 connected=False,
+                drawable=False,
                 stub=True,
+                evidence_state="publisher_stale",
                 reason=f"Last update {age:.0f} s ago",
                 source=payload["source"],
             )
-        return dict(connected=True, stub=False, age_s=round(age, 3), **payload)
+        evidence = payload.get("evidence")
+        result = dict(connected=True, stub=False, age_s=round(age, 3), drawable=False, **payload)
+        if evidence is None:
+            return dict(
+                **result,
+                evidence_state="unverified",
+                reason="Publisher online; capture identity/time missing. Boxes hidden.",
+            )
+        capture_age = now - evidence["captured_at"]
+        result["capture_age_s"] = round(capture_age, 3)
+        if not -0.5 <= capture_age <= self.stale_s:
+            return dict(
+                **result,
+                evidence_state="capture_stale",
+                reason="Inspection capture expired; heartbeat cannot refresh it.",
+            )
+        if evidence["box_space"] != "top_projected_object":
+            return dict(
+                **result,
+                evidence_state="source_frame_required",
+                reason="Source-image regions need the exact scored frame; live overlay hidden.",
+            )
+        result["drawable"] = True
+        return dict(
+            **result,
+            evidence_state="projected_object",
+            reason="Recent projected object estimate, not defect-pixel localization.",
+        )
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -617,7 +720,23 @@ class Dashboard:
             sources=sources,
             focus=self.focus.status(now),
             anomalies=self.anomalies.status(now),
+            real2sim=self.cloud.real2sim_status(now),
         )
+
+
+def _get_studio_engine(app: Dashboard):
+    engine = getattr(app, "_studio_engine", None)
+    if engine is None:
+        import sys
+
+        src_dir = Path(__file__).resolve().parent.parent / "src"
+        if str(src_dir) not in sys.path:
+            sys.path.insert(0, str(src_dir))
+        from brickcell.studio.engine import SO101StudioEngine
+
+        engine = SO101StudioEngine()
+        app._studio_engine = engine
+    return engine
 
 
 def make_handler(app: Dashboard):
@@ -643,6 +762,13 @@ def make_handler(app: Dashboard):
         def do_GET(self):
             url = urlparse(self.path)
             route, query = url.path, parse_qs(url.query)
+            if route.startswith(("/api/so101/", "/api/studio/", "/frame/studio/")):
+                from brickcell.studio.server import handle_studio_get
+
+                res = handle_studio_get(_get_studio_engine(app), route, url.query)
+                if res is not None:
+                    code, ctype, data, extra_headers = res
+                    return self.send(code, ctype, data, extra_headers)
             if route == "/":
                 return self.static("index.html")
             if route.startswith("/static/"):
@@ -685,6 +811,23 @@ def make_handler(app: Dashboard):
 
         def do_POST(self):
             route = urlparse(self.path).path
+            if route.startswith(("/api/so101/", "/api/studio/")):
+                from brickcell.studio.server import handle_studio_post
+
+                length = int(self.headers.get("Content-Length") or 0)
+                if length < 0 or length > MAX_BODY:
+                    return self.send_json(
+                        400, {"error": f"Body must be 0..{MAX_BODY} bytes of JSON"}
+                    )
+                try:
+                    raw_body = json.loads(self.rfile.read(length) if length > 0 else b"{}")
+                except (ValueError, TypeError) as exc:
+                    return self.send_json(400, {"error": str(exc)})
+                res = handle_studio_post(_get_studio_engine(app), route, raw_body)
+                if res is not None:
+                    code, payload = res
+                    return self.send_json(code, payload)
+                return self.send_json(404, {"error": "Not found"})
             target = {"/api/anomalies": app.anomalies, "/api/focus": app.focus}.get(route)
             if target is None:
                 return self.send_json(404, {"error": "Not found"})
@@ -810,7 +953,6 @@ def main(argv: list[str] | None = None) -> None:
     if not args.cloud:
         args.cloud = [
             CloudSource("top", "overhead", "http://127.0.0.1:8094/points/top"),
-            CloudSource("plate", "side", "http://127.0.0.1:8094/points/plate"),
         ]
     app = Dashboard(args)
     app.start()

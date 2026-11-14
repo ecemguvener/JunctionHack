@@ -481,7 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Verify live camera Real2Sim + Frax IK + dashboard overlays with zero servo motion",
     )
-    p_dep.add_argument("--max-cycles", type=int, default=8)
+    p_dep.add_argument("--max-cycles", type=int, default=24)
     p_dep.add_argument(
         "--standby-seconds",
         type=float,
@@ -490,7 +490,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_dep.add_argument("--show-viewer", action="store_true")
     p_dep.add_argument("--dark-mark-threshold", type=float, default=16.0)
-    p_dep.add_argument("--openvino-config", default=None)
+    p_dep.add_argument(
+        "--rgbd-viewer-config",
+        default=str(REPO_ROOT / "configs" / "rgbd-viewer.json"),
+        help="Multi-camera Anomalib PatchCore config (top, plate, wrist RGB/depth OpenVINO models)",
+    )
+    p_dep.add_argument(
+        "--openvino-model",
+        "--openvino-config",
+        dest="openvino_model",
+        default=None,
+        help="Path to exported Anomalib OpenVINO model.xml or directory of per-camera models",
+    )
+    p_dep.add_argument(
+        "--require-anomalib",
+        action="store_true",
+        help="Require at least one real trained Anomalib OpenVINO model before deployment",
+    )
     p_dep.add_argument(
         "--output-dir",
         default=str(REPO_ROOT / "artifacts" / "block_inspector" / "hardware_deploy"),
@@ -512,7 +528,9 @@ def build_parser() -> argparse.ArgumentParser:
             daemon_standby_s=a.standby_seconds,
             show_twin_viewer=a.show_viewer,
             dark_mark_threshold=a.dark_mark_threshold,
-            openvino_config_path=a.openvino_config,
+            openvino_config_path=a.openvino_model,
+            rgbd_viewer_config_path=a.rgbd_viewer_config,
+            require_anomalib=a.require_anomalib,
             output_dir=a.output_dir,
         )
         print(json.dumps(res, indent=2), flush=True)

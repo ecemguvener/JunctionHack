@@ -1,5 +1,53 @@
 # Executed validation — 13 November 2026
 
+## Real2Sim 6D Pose & Mesh Inertia Alignment, Top-Depth + Plate-RGB Verification, and Tarot Card Dashboard Integration — 14 November 2026
+
+Updated `src/brickcell/block_inspector/{real2sim.py,twin.py,studio_vision.py}` and `dashboard/{server.py,static/app.js,static/index.html}` to align the live Real2Sim MuJoCo 4.0.1 scene with the physical overhead D415 depth + close-up Plate RGB cameras and expose live 3D HUD overlays on the Tarot Card Dashboard (`:8096`):
+
+- **Executed checks on the Intel workstation (`ssh intel`, `:18081` & `:8096`)**:
+  - Replaced the static `two_plate.xml` simulation service on `127.0.0.1:18081` (`/home/intel/brickcell-sim/run-sim.sh`) with the live headless `Real2SimPipeline` MuJoCo server (`python -m brickcell.block_inspector real2sim --headless --no-ssh-tunnel --live-depth-url http://127.0.0.1:8094 --armd-url http://127.0.0.1:8765 --duration-s 0`), exposing `/camera/overhead.png`, `/scene`, `/health`, and `/real2sim`.
+  - Fixed runtime visual mesh orientation corruption in `SO101InspectionTwin.sync_real2sim_scene` (`src/brickcell/block_inspector/twin.py`) by composing MuJoCo's compiled mesh principal-inertia offset and quaternion (`model.mesh_pos[mesh_id]`, `model.mesh_quat[mesh_id]`) into `geom_pos` and `geom_quat` whenever `geom_dataid` is swapped dynamically, and applying a $6.5\text{ mm} / 0.18\text{ rad}$ pose hysteresis deadband with $4\times$ velocity damping to eliminate physics jitter and inter-penetration.
+  - Added close-up Plate RGB (`GET /rgb/plate`) multi-view color/part verification (`_refine_bricks_with_plate_rgb`), upright vs. upside-down cavity height discrimination, side-lying stud-shelf yaw disambiguation, and pastel sorting-bowl wall subtraction in `src/brickcell/block_inspector/real2sim.py` so zero false green (`2302`) bricks are invented when no green brick is present.
+  - Updated `dashboard/server.py`, `dashboard/static/app.js`, and `dashboard/static/index.html` to project and render the 3D Real2Sim HUD (8-corner wireframes, part/color/pose tags, and 64-segment KALAS plate rings) onto both the 2D live camera feed and the 3D WebGL point cloud viewer. Verified `GET http://127.0.0.1:8096/api/status` returns `ok: true`, `sim.mode: "mujoco_real2sim_live"`, and `real2sim.ok: true` while rejecting intruding human arms (`category: "human_arm"`).
+- **Executed software checks (local Windows `arch-venv` & Node.js)**:
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest tests/test_block_inspector.py -q`: **17 passed** (including `test_three_plates_eight_clustered_mixed_duplo_blocks_openvino_sort` and all 4 `real2sim` tests).
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest dashboard/tests tests/test_station_audit.py -q`: **52 passed**.
+  - `node --test dashboard/tests/test_evidence.cjs`: **6 passed**.
+  - `.\artifacts\arch-venv\Scripts\ruff.exe check src tests scripts dashboard` and `.\artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts dashboard`: **passed**.
+- **Limitations**:
+  - Live Real2Sim mirroring on `:18081` and `:8096` is strictly read-only with respect to `armd` (`GET /arms/follower/state`); no physical robot motion or real defect-classification accuracy is claimed from this validation.
+
+## Physical AI Studio SO-101 Model-Based Pick-and-Place Architecture Integration — 14 November 2026
+
+Integrated the analytical SO-101 Pick-Inspect-Place / Spin-and-Sort architecture directly into Intel's Physical AI Studio (`open-edge-platform/physical-ai-studio`, deployed at `/home/intel/physical-ai-studio` on the Intel workstation and mirrored in `physical-ai-studio/` and `src/brickcell/studio/`):
+
+- **Executed checks on the Intel workstation (`ssh intel`, `127.0.0.1:7860`)**:
+  - Updated `/home/intel/physical-ai-studio/application/backend/src/so101_architecture/` (`engine.py`, `so101_calibration.py`, `so101_kinematics.py`, `ui_extension.js`, `SO-101.zip`, `assets/published_priors_verified.json`, `calibration/`), FastAPI router `application/backend/src/api/so101_architecture.py`, SPA index injector `application/backend/src/api/webui.py`, `application/backend/src/main.py`, React UI route `application/ui/src/routes/so101-architecture/index.tsx`, and `application/docker/docker-compose.override.yaml`.
+  - Recreated and verified `physical-ai-studio-xpu` on `http://127.0.0.1:7860`:
+    - `GET http://127.0.0.1:7860/api/health` returned `{"status":"healthy","restart_required":false}`.
+    - `GET http://127.0.0.1:7860/` served the Physical AI Studio SPA with `<script defer src="/api/so101/ui-extension.js"></script>` injected.
+    - `GET http://127.0.0.1:7860/api/so101/state` returned `studio_db.synced = true` (`/app/storage/data/physicalai.db`), automatically discovering project `white-block-picker` (`e97d7168-36bc-400a-9013-fc3c14b823f2`), `follower` (`SO101_Follower`, `/dev/ttyACM1`, serial `5B3D040991`, `unit: "normalized"`), `leader` (`SO101_Leader`, `/dev/ttyACM0`, serial `5AE7044736`, `unit: "normalized"`), and all 3 registered cameras (`top` D415 `350122060653`, `side` D415 `243622060450`, `wrist` USB2.0_CAM1 index `44`).
+- **Executed software checks (local Windows `arch-venv` & Node.js)**:
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest tests/test_studio.py -q`: **5 passed** (testing `normalized` `[-100, 100]` / `ticks` / `radians` / `degrees` unit conversions, $4\times 4$ $\text{SE}(3)$ FK, $6\times 5$ Jacobians, 5-DOF damped Gauss-Newton IK convergence, published CAD mass matrix $M(q)$ and gravity torque $g(q)$, Leader $\rightarrow$ Follower CAD posture mapping, reference tick alignment derivation, `physicalai.db` auto-discovery, and `/api/so101/*` HTTP handlers).
+  - `node --check physical-ai-studio/application/backend/src/so101_architecture/ui_extension.js` and `node --test dashboard/tests/test_evidence.cjs`: **6 passed**.
+  - Ruff lint and format checks (`ruff check` and `ruff format --check`) passed across `src`, `tests`, `scripts`, and `dashboard`.
+- **Limitations**:
+  - When live camera daemons or `armd` are offline or unreachable from the container, camera feeds and arm states fall back to explicitly labeled synthetic previews (`SYNTHETIC STUDIO PREVIEW`, `studio_virtual_emulator`). No physical defect-classification accuracy or VLA policy performance is claimed.
+
+## Multi-camera Anomalib wrapper, demonstrated physical grasp/spin parameters & depth-free 2D RGB localization — 14 November 2026
+
+Updated `src/brickcell/block_inspector/{armd_bridge.py,cogman.py,cli.py,hardware_cell.py}` to align physical deployment with the two recorded Physical AI Studio leader-follower demonstrations (`duplo-grasp-scan-sort-v1`), multi-camera Anomalib OpenVINO CPU inference, and depth-free 2D RGB + eye-in-hand wrist visual servoing:
+
+- **Executed software checks (local Windows `.venv` / `arch-venv`)**:
+  - Extracted calibrated physical grasp widths (`18%` narrow / `24%` wide pre-grasp, `3.5%` continuous hold squeeze without relaxing during lift/spin/transit, `5.2%` empty-jaw threshold for double pick confirmation + automatic retry), side-camera presentation pose (`[0.402, -0.090, 0.146] m` at `28°` pitch, sweeping Joint 5 across `[+0.45, +2.98] rad`), and full-360° yaw IK folding across 8 drop slots (`0/16` IK slot failures in offline kinematic verification).
+  - Wrapped `OpenVINODetector` (`src/brickcell/detector/runtime.py`) across `top`, `plate`, and `wrist` camera feeds (`load_anomalib_camera_detectors`, `RealCameraAnomalyInspector`), replacing the Lab dark-mark fallback whenever calibrated non-synthetic Anomalib models are present while keeping `Inspector` strictly isolated from robot commands and treating `Decision.REINSPECT` / `Decision.ERROR` as untrusted (`valid_view=False`).
+  - Added depth-free 2D RGB localization (`localize_plates_and_bricks_top_rgb`) tracking live movable XY positions of all three colored KALAS plates (`source`, `good`, `defective`) and segmenting multiple DUPLO bricks via specular-glare-immune chromatic segmentation + distance-transform watershed + `minAreaRect`, plus two-stage closed-loop inner-jaw corridor visual servoing (`detect_wrist_jaw_corridor`, `servo_grasp_with_jaw_corridor`, `refine_grasp_with_wrist_rgb`, `refine_plate_drop_with_wrist_rgb`) calibrated to the physical Sonix USB wrist camera (`SONIX_T_BODY3_CAM`, `f = 228.16 px` at `640x360`), while keeping RealSense D415 depth running in parallel strictly for the Real2Sim MuJoCo 3D twin.
+  - `.\artifacts\arch-venv\Scripts\pytest.exe tests/test_block_inspector.py -k "hardware_cell or anomalib_multicam" -q`: **2 passed** (`test_physical_hardware_cell_dry_run_and_safety_boundaries`, `test_anomalib_multicam_rgb_localization_and_movable_plates`).
+  - `.\artifacts\arch-venv\Scripts\pytest.exe tests/test_rgbd.py tests/test_rgbd_viewer.py -q`: **18 passed**.
+  - `.\artifacts\arch-venv\Scripts\ruff.exe check src tests scripts` and `.\artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts`: **passed** across all 107 files.
+- **Planned hardware work & limitations**:
+  - Live multi-block autonomous execution on the physical Intel SO-101 cell (`scripts/deploy_to_intel.ps1` -> `intel:/home/intel/brickcell-deploy`) and physical evaluation with the teammate's trained real Anomalib OpenVINO model(s) (`model.xml`) have not yet been executed in this step; unit tests above use synthetic RGB test frames and injected mock detectors, so no physical grasp rate or real defect-detection accuracy is claimed.
+
 ## Live Real2Sim mirror connected to the physical Intel cell — 14 November 2026
 
 Connected `Real2SimPipeline.run_live_real2sim_mirror` (`src/brickcell/block_inspector/real2sim.py` and `src/brickcell/block_inspector/twin.py`) to the physical Intel workstation (`intel-XPS-16-DA16260`) over a read-only SSH port-forward tunnel (`127.0.0.1:8094` -> `scripts/live_depth.py`, `127.0.0.1:8765` -> `armd`), defaulting to `--camera-mode top` (`350122060653`).

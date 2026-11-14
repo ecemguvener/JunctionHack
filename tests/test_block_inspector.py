@@ -1355,3 +1355,269 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
         assert exec_cell.sorted_counts == {"good": 0, "defective": 0}
     finally:
         exec_cell.close()
+
+
+def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
+    """Verify multi-camera Anomalib wrapper, clamping-overload tolerance, and movable-plate 2D RGB."""
+    import cv2
+
+    from brickcell.block_inspector.armd_bridge import ArmdFollowerBridge, ArmFaultError
+    from brickcell.block_inspector.frax_ik import SO101FraxIK
+    from brickcell.block_inspector.geometry import station_camera_rig
+    from brickcell.block_inspector.hardware_cell import (
+        RealCameraAnomalyInspector,
+        detect_wrist_jaw_corridor,
+        localize_plates_and_bricks_top_rgb,
+        refine_grasp_with_wrist_rgb,
+        refine_plate_drop_with_wrist_rgb,
+        servo_grasp_with_jaw_corridor,
+        solve_adaptive_grasp_pose,
+    )
+    from brickcell.block_inspector.real2sim import real_intel_camera_poses_world
+    from brickcell.detector.runtime import Prediction
+    from brickcell.inspection.threshold import Threshold
+
+    # 1. Gripper clamping overload while holding a rigid brick must NOT trigger emergency stop,
+    #    whereas any arm-joint overload MUST still trigger emergency_stop_hold().
+    emergency_calls: list[str] = []
+
+    def _mock_req(method: str, path: str, payload: dict | None = None) -> dict:
+        if path == "/arms/follower/stop" and method == "POST":
+            emergency_calls.append("stop")
+        return {"ok": True}
+
+    bridge = ArmdFollowerBridge(request_fn=_mock_req)
+    joint_names = (
+        "shoulder_pan",
+        "shoulder_lift",
+        "elbow_flex",
+        "wrist_flex",
+        "wrist_roll",
+        "gripper",
+    )
+    grip_overload_msg = {
+        "timestamp": "2026-11-14T18:00:00Z",
+        "joints": {
+            name: {
+                "position": 1490 if name == "gripper" else 2048,
+                "online": True,
+                "healthy": (name != "gripper"),
+                "errors": ["overload"] if name == "gripper" else [],
+            }
+            for name in joint_names
+        },
+    }
+    snap_ok = bridge.decode_state_message(grip_overload_msg, allow_gripper_overload=True)
+    assert snap_ok is not None and snap_ok.gripper_ticks == 1490
+    assert emergency_calls == []
+
+    arm_overload_msg = {
+        "timestamp": "2026-11-14T18:00:01Z",
+        "joints": {
+            name: {
+                "position": 2048,
+                "online": True,
+                "healthy": (name != "elbow_flex"),
+                "errors": ["overload"] if name == "elbow_flex" else [],
+            }
+            for name in joint_names
+        },
+    }
+    with pytest.raises(ArmFaultError, match="elbow_flex"):
+        bridge.decode_state_message(arm_overload_msg, allow_gripper_overload=True)
+    assert emergency_calls == ["stop"]
+
+    # 2. Multi-camera Anomalib wrapper replaces generic Lab heuristic across top, plate, and wrist.
+    thr_calib = Threshold(
+        value=0.50,
+        uncertainty_margin=0.04,
+        version="thr-test-v1",
+        calibration_manifest_sha256="a" * 64,
+        sample_count=40,
+    )
+
+    class _FakeAnomalibDetector:
+        def __init__(self, score: float, hotspot: bool = False) -> None:
+            self.threshold = thr_calib
+            self._score = score
+            self._hotspot = hotspot
+            self.calls = 0
+
+        def predict(self, rgb: np.ndarray) -> Prediction:
+            self.calls += 1
+            amap = np.full(rgb.shape[:2], 0.15, dtype=np.float32)
+            if self._hotspot:
+                h, w = amap.shape
+                amap[h // 3 : 2 * h // 3, w // 3 : 2 * w // 3] = 0.92
+            return Prediction(score=self._score, latency_ms=3.2, anomaly_map=amap)
+
+    top_det = _FakeAnomalibDetector(0.21)
+    plate_det = _FakeAnomalibDetector(0.28)
+    wrist_det = _FakeAnomalibDetector(0.84, hotspot=True)
+    reinspect_det = _FakeAnomalibDetector(0.49)  # within 0.04 uncertainty_margin of 0.50!
+
+    # Natural textured clean brick image (no dark mark for heuristic), yet wrist Anomalib flags defect!
+    rng = np.random.default_rng(7)
+    clean_rgb = np.clip(
+        np.full((360, 640, 3), [210, 175, 55], dtype=np.int16)
+        + rng.integers(-12, 13, size=(360, 640, 3)),
+        0,
+        255,
+    ).astype(np.uint8)
+    anomalib_insp = RealCameraAnomalyInspector(
+        dark_mark_threshold=16.0,
+        camera_detectors={
+            "top": {"rgb": top_det},
+            "plate": {"rgb": plate_det},
+            "wrist": {"rgb": wrist_det},
+        },
+    )
+    try:
+        assert anomalib_insp.has_anomalib_models is True
+        assert anomalib_insp.inspector_mode == "anomalib_openvino_cpu"
+        assert anomalib_insp.configured_cameras() == ["plate", "top", "wrist"]
+
+        r_top = anomalib_insp.evaluate_frame(
+            clean_rgb, None, [100, 80, 260, 220], camera_name="top"
+        )
+        assert r_top.valid_view and not r_top.flagged
+
+        r_wrist = anomalib_insp.evaluate_frame(
+            clean_rgb, None, [120, 90, 320, 250], camera_name="wrist"
+        )
+        assert r_wrist.valid_view and r_wrist.flagged
+        assert len(r_wrist.detections) >= 1
+        assert "anomalib wrist rgb" in r_wrist.detections[0]["label"]
+    finally:
+        anomalib_insp.close()
+
+    # Decision.REINSPECT must NOT produce a valid trusted view (`AGENTS.md` safety rule)
+    re_insp = RealCameraAnomalyInspector(
+        dark_mark_threshold=16.0,
+        camera_detectors={"plate": {"rgb": reinspect_det}},
+    )
+    try:
+        r_re = re_insp.evaluate_frame(clean_rgb, None, [100, 80, 260, 220], camera_name="plate")
+        assert r_re.valid_view is False
+        assert r_re.flagged is False
+        assert "reinspect" in r_re.reason
+    finally:
+        re_insp.close()
+
+    # 3. Depth-free 2D RGB localization tracks shifted/movable KALAS plates + bricks on source plate!
+    R_top, p_top, K_top = real_intel_camera_poses_world()["top"]
+    top_img = np.full((480, 640, 3), [128, 128, 126], dtype=np.uint8)  # neutral gray table
+
+    def _project_px(xyz_w: list[float]) -> tuple[int, int]:
+        pw = np.asarray(xyz_w, dtype=np.float64)
+        pc = R_top.T @ (pw - p_top)
+        u = int(round(K_top[0, 0] * (pc[0] / pc[2]) + K_top[0, 2]))
+        v = int(round(K_top[1, 1] * (pc[1] / pc[2]) + K_top[1, 2]))
+        return u, v
+
+    # Shift green and pink plates away from their nominal positions to prove live XY tracking!
+    shifted_source = [0.295, -0.028, 0.004]
+    shifted_good = [0.352, 0.132, 0.004]
+    shifted_def = [0.228, 0.158, 0.004]
+    cv2.circle(top_img, _project_px(shifted_source), 58, (25, 155, 195), -1)  # aquamarine RGB
+    cv2.circle(top_img, _project_px(shifted_good), 56, (85, 205, 105), -1)  # green RGB
+    cv2.circle(top_img, _project_px(shifted_def), 56, (225, 105, 150), -1)  # pink RGB
+
+    # Draw two distinct DUPLO bricks (yellow + red) inside the aquamarine source plate
+    b1_uv = _project_px([0.272, -0.052, 0.016])
+    b2_uv = _project_px([0.320, 0.002, 0.016])
+    cv2.circle(top_img, _project_px(shifted_source), 72, (25, 155, 195), -1)  # full 19 cm plate
+    cv2.rectangle(
+        top_img, (b1_uv[0] - 11, b1_uv[1] - 11), (b1_uv[0] + 11, b1_uv[1] + 11), (235, 195, 40), -1
+    )
+    cv2.rectangle(
+        top_img, (b2_uv[0] - 16, b2_uv[1] - 9), (b2_uv[0] + 16, b2_uv[1] + 9), (220, 45, 45), -1
+    )
+
+    plates_2d, bricks_2d = localize_plates_and_bricks_top_rgb(top_img, R_top, p_top, K_top)
+    assert set(plates_2d.keys()) == {"source", "good", "defective"}
+    assert np.linalg.norm(plates_2d["good"][:2] - shifted_good[:2]) < 0.025
+    assert np.linalg.norm(plates_2d["defective"][:2] - shifted_def[:2]) < 0.025
+    assert len(bricks_2d) == 2
+
+    # 4. Eye-in-hand Wrist RGB visual servoing (pick + movable plate drop)
+    ik = SO101FraxIK()
+    rig = station_camera_rig()
+    pre_sol, _ = solve_adaptive_grasp_pose(
+        ik,
+        np.array([0.282, -0.042, 0.105], dtype=np.float64),
+        jaw_yaw_world=0.2,
+    )
+    wrist_pick_img = np.full((360, 640, 3), [25, 155, 195], dtype=np.uint8)  # aquamarine background
+    cv2.rectangle(
+        wrist_pick_img, (285, 145), (365, 215), (235, 195, 40), -1
+    )  # yellow brick near center
+    refined_p, refined_yaw, w_box = refine_grasp_with_wrist_rgb(
+        wrist_pick_img,
+        q_pre=pre_sol.q_grasp,
+        p_tcp_nominal=np.array([0.282, -0.042, 0.026], dtype=np.float64),
+        jaw_yaw_nominal=0.2,
+        ik=ik,
+        wrist_cam=rig.wrist,
+    )
+    assert w_box is not None and len(w_box) == 4
+    assert np.linalg.norm(refined_p[:2] - np.array([0.282, -0.042])) <= 0.030
+    assert math.isfinite(refined_yaw)
+
+    drop_sol, _ = solve_adaptive_grasp_pose(
+        ik,
+        np.array([0.352, 0.132, 0.135], dtype=np.float64),
+        jaw_yaw_world=1.9,
+        pitches_deg=(72.0, 62.0, 52.0, 42.0, 34.0),
+    )
+    wrist_drop_img = np.full((360, 640, 3), [128, 128, 126], dtype=np.uint8)
+    cv2.circle(wrist_drop_img, (335, 185), 95, (85, 205, 105), -1)  # green bowl slightly offset
+    refined_drop_xy = refine_plate_drop_with_wrist_rgb(
+        wrist_drop_img,
+        pile="good",
+        q_above=drop_sol.q_grasp,
+        target_xy_nominal=np.array([0.352, 0.132], dtype=np.float64),
+        slot_offset_xy=(0.0, 0.0),
+        ik=ik,
+        wrist_cam=rig.wrist,
+    )
+    assert np.linalg.norm(refined_drop_xy - np.array([0.352, 0.132])) <= 0.045
+
+    # 5. Inner-jaw purple gripper corridor tracker + specular-glare-immune brick servoing
+    jaw_servo_img = np.full((360, 640, 3), [135, 95, 55], dtype=np.uint8)  # wood table
+    cv2.circle(jaw_servo_img, (324, 175), 118, (65, 190, 238), -1)  # glossy aquamarine plate
+    # Bright ceiling specular glare streak (V=252, S=0) that must NOT merge plate into brick!
+    cv2.line(jaw_servo_img, (370, 110), (392, 165), (252, 252, 252), thickness=6)
+    # Off-center white 2x4 brick (`RGB=[200, 205, 198]`) sitting near left jaw tip
+    cv2.rectangle(jaw_servo_img, (268, 198), (336, 232), (200, 205, 198), -1)
+    # Two bottom-anchored royal-purple gripper jaws (`u_left_pad=284`, `u_right_pad=364` -> `u_pinch=324`)
+    cv2.fillPoly(
+        jaw_servo_img,
+        [np.array([[185, 359], [284, 359], [284, 240], [262, 240]], dtype=np.int32)],
+        (48, 36, 108),
+    )
+    cv2.fillPoly(
+        jaw_servo_img,
+        [np.array([[364, 240], [386, 240], [455, 359], [364, 359]], dtype=np.int32)],
+        (48, 36, 108),
+    )
+    corridor = detect_wrist_jaw_corridor(jaw_servo_img)
+    assert corridor is not None
+    assert abs(corridor.u_left_pad - 284.0) <= 3.0
+    assert abs(corridor.u_right_pad - 364.0) <= 3.0
+    assert abs(corridor.u_pinch - 324.0) <= 2.0
+    assert abs(corridor.gap_px - 80.0) <= 4.0
+
+    p_srv, yaw_srv, srv_box, straddle_ok, srv_info = servo_grasp_with_jaw_corridor(
+        jaw_servo_img,
+        q_pose=pre_sol.q_grasp,
+        p_tcp_nominal=np.array([0.282, -0.042, 0.021], dtype=np.float64),
+        jaw_yaw_nominal=0.2,
+        ik=ik,
+        wrist_cam=rig.wrist,
+    )
+    assert srv_info["status"] == "ok"
+    assert srv_box is not None and (srv_box[2] - srv_box[0]) < 140  # brick only, not whole plate!
+    assert straddle_ok is False  # off-center brick correctly triggers trim before plunge
+    assert np.linalg.norm(p_srv[:2] - np.array([0.282, -0.042])) > 0.004
+    assert math.isfinite(yaw_srv)
