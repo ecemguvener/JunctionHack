@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tarot Card · Station twin</title>
+<link rel="stylesheet" href="/static/style.css">
+<body class="src-sim">
+<header>
+  <span class="brand">Tarot Card</span><span>Station twin</span><span class="sp"></span>
+  <span class="live" data-bind="health">Connecting</span><span data-bind="real-fps">– fps</span><span data-bind="clock"></span>
+</header>
+<main>
+  <section data-panel="cam">
+    <div class="bar">
+      <span class="title">Top camera</span>
+      <div class="seg"><button data-src="sim">Sim</button><button data-src="real">Real</button></div>
+      <kbd>T</kbd>
+      <button class="icon" data-zoom title="Zoom (Z)"><span data-bind="zoom"></span></button>
+      <button class="icon" data-fs data-icon="fullscreen" data-icon-size="20" data-icon-stroke="2" title="Full screen"></button>
+    </div>
+    <div class="stage">
+      <img class="cam-sim" alt="MuJoCo sim render of the Top camera">
+      <img class="cam-real" alt="Real Top camera">
+      <canvas class="cam-overlay"></canvas>
+      <div class="nosignal"><div>No signal<small data-bind="cam-error"></small></div></div>
+    </div>
+    <div class="foot"><b data-bind="src-long"></b><span data-bind="cam-detail"></span><span data-bind="cam-age"></span></div>
+  </section>
+  <section data-panel="depth">
+    <div class="bar">
+      <span class="title">Depth · point cloud</span>
+      <div class="seg"><button data-color="rgb">RGB</button><button data-color="sensor">Sensor</button></div>
+      <button class="icon" data-fs data-icon="fullscreen" data-icon-size="20" data-icon-stroke="2" title="Full screen"></button>
+    </div>
+    <div class="stage">
+      <canvas class="cloud"></canvas><canvas class="cloud-labels"></canvas>
+      <div class="nosignal"><div>No depth<small data-bind="cloud-error"></small></div></div>
+    </div>
+    <div class="nav">
+      <canvas class="gizmo"></canvas>
+      <div class="tools"><button data-drag="orbit" data-icon="orbit" data-icon-size="22" data-icon-stroke="2" title="Orbit (drag)"></button><button data-drag="pan" data-icon="pan" data-icon-size="22" data-icon-stroke="2" title="Pan (drag)"></button><button data-drag="zoom" data-icon="zoom" data-icon-size="22" data-icon-stroke="2" title="Zoom (drag)"></button></div>
+      <div class="views"><button data-view="cam">CAM<span class="k">0</span></button><button data-view="top">TOP<span class="k">7</span></button><button data-view="front">FRONT<span class="k">1</span></button><button data-view="right">RIGHT<span class="k">3</span></button><button data-proj><span data-bind="proj"></span><span class="k">5</span></button></div>
+    </div>
+    <div class="hint fs-only"><b>Drag</b> orbit · <b>Shift + drag</b> pan · <b>Wheel</b> zoom<br>Pivot: plates · <b>Esc</b> exit</div>
+    <div class="foot"><b data-bind="view"></b><span data-bind="proj"></span><span data-bind="cloud-detail"></span><span data-bind="dist"></span></div>
+  </section>
+  <aside class="options">
+    <h3>Overlay · sim / real</h3>
+    <div class="opt">
+      <button class="toggle" data-opt="defects">Defects <span class="sw"></span></button>
+      <div class="only-defects"><div class="seg"><button data-scope="all">All visible</button><button data-scope="focus">Focus only</button></div></div>
+      <div class="stub" data-stub="anomalies">Not connected<br><span data-bind="anomalies-reason"></span></div>
+      <small><b data-bind="defect-count">0</b> shown · score = raw distance, not a probability</small>
+    </div>
+    <div class="opt">
+      <button class="toggle" data-opt="focus">Focus block <span class="sw"></span></button>
+      <div class="stub" data-stub="focus">Not connected<br><span data-bind="focus-reason"></span></div>
+      <small>The block the arm selected to pick and inspect</small>
+    </div>
+    <dl>
+      <dt>Focus</dt><dd data-bind="focus-label">–</dd>
+      <dt>Sim</dt><dd data-bind="sim-state">–</dd>
+      <dt>Cloud</dt><dd data-bind="cloud-points">–</dd>
+      <dt>View</dt><dd data-bind="src"></dd>
+    </dl>
+    <div class="keys"><kbd>T</kbd>Sim / real<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>Esc</kbd>Exit full screen</div>
+  </aside>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
