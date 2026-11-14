@@ -1,0 +1,224 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="so101_leader_calibrated_kinematics">
+  <link name="Body5_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_5">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="driven_hub_5">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Body1_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_4">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="driven_hub_4">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Group 1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="driven_hub_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Body1_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_6">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Group 1_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="driven_hub_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Body3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="drive_hub_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="driven_hub_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <link name="Body5_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+  </link>
+  <joint name="Revolute_1_2" type="fixed">
+    <origin xyz="-0.000253348 -0.028782272 0.028933142" rpy="3.141592654 0 1.574769826" />
+    <parent link="Body5_1" />
+    <child link="drive_hub_5" />
+  </joint>
+  <joint name="Revolute_2_2" type="fixed">
+    <origin xyz="-0.000253348 -0.028782272 -0.002143257" rpy="3.141592654 0 1.570796327" />
+    <parent link="Body5_1" />
+    <child link="driven_hub_5" />
+  </joint>
+  <joint name="Revolute_1" type="revolute">
+    <origin xyz="1.3877787807814457e-17 2.7105054312137611e-20 -0.004500000000000004" rpy="2.9058221181713907e-32 -9.4228876430808742e-32 -0.22305671823353215" />
+    <parent link="drive_hub_5" />
+    <child link="Body1_2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.6919808090378623" upper="1.6919808090378623" effort="inf" velocity="inf" />
+  </joint>
+  <joint name="Revolute_1_3" type="fixed">
+    <origin xyz="-0.0306 -0.014251399 -0.05415" rpy="1.570796327 -1.545656396 3.141592654" />
+    <parent link="Body1_2" />
+    <child link="drive_hub_4" />
+  </joint>
+  <joint name="Revolute_2_3" type="fixed">
+    <origin xyz="-0.0306 0.016825 -0.05415" rpy="0 -1.570796327 -1.570796327" />
+    <parent link="Body1_2" />
+    <child link="driven_hub_4" />
+  </joint>
+  <joint name="Revolute_2" type="revolute">
+    <origin xyz="4.9960036108132044e-16 4.9960036108132044e-16 -0.00450000000000003" rpy="9.7266425733066432e-15 -6.3550258017058898e-15 -0.020344056540053931" />
+    <parent link="drive_hub_4" />
+    <child link="Group 1" />
+    <axis xyz="5.3959294790795391e-19 -4.8296759867567025e-19 1" />
+    <limit lower="-1.8070293681292853" upper="1.8070293681292853" effort="inf" velocity="inf" />
+  </joint>
+  <joint name="Revolute_1_4" type="fixed">
+    <origin xyz="-0.112569978 -0.02795 0.005548601" rpy="0 0 2.644035919" />
+    <parent link="Group 1" />
+    <child link="drive_hub_2" />
+  </joint>
+  <joint name="Revolute_2_4" type="fixed">
+    <origin xyz="-0.112569978 -0.02795 0.036625" rpy="0 0 1.570796327" />
+    <parent link="Group 1" />
+    <child link="driven_hub_2" />
+  </joint>
+  <joint name="Revolute_3" type="revolute">
+    <origin xyz="-8.6736173798840355e-16 -4.9960036108132044e-16 -0.0045000000000001272" rpy="-1.7089451235927938e-15 -6.9305358774888419e-15 -1.1923368974919166" />
+    <parent link="drive_hub_2" />
+    <child link="Body1_3" />
+    <axis xyz="4.3058830634752499e-18 9.3353435656437173e-19 1" />
+    <limit lower="-1.688145857068148" upper="1.688145857068148" effort="inf" velocity="inf" />
+  </joint>
+  <joint name="Revolute_1_5" type="fixed">
+    <origin xyz="-0.134899815 0.0052 0.0044" rpy="0 0 -0.248740266" />
+    <parent link="Body1_3" />
+    <child link="drive_hub_6" />
+  </joint>
+  <joint name="Revolute_2_5" type="revolute">
+    <origin xyz="-0.13489981467321596 0.0051999999999997881 0.0354763988144461" rpy="1.0325262401847151e-15 -5.9777496482517643e-16 0.013908092476829921" />
+    <parent link="Body1_3" />
+    <child link="Group 1_2" />
+    <axis xyz="1.1031694411991901e-18 7.0516519433987612e-19 1" />
+    <limit lower="-1.748738098189631" upper="1.748738098189631" effort="inf" velocity="inf" />
+  </joint>
+  <joint name="Revolute_1_6" type="fixed">
+    <origin xyz="-0.056698138 0.000459496 -0.016274999" rpy="1.570796327 1.400248601 1.562692252" />
+    <parent link="Group 1_2" />
+    <child link="drive_hub_1" />
+  </joint>
+  <joint name="Revolute_2_6" type="fixed">
+    <origin xyz="-0.02562276 0.000207653 -0.016274999" rpy="0 -1.570796327 3.133488578" />
+    <parent link="Group 1_2" />
+    <child link="driven_hub_1" />
+  </joint>
+  <joint name="Revolute_4" type="revolute">
+    <origin xyz="-6.9388939039072284e-18 -2.7755575615628914e-17 -0.0045000000000000318" rpy="-2.4039582175860739e-17 2.6609954631348109e-17 1.3631280880157091" />
+    <parent link="drive_hub_1" />
+    <child link="Body3" />
+    <axis xyz="-1.3877787807814457e-17 -1.214306433183765e-17 1" />
+    <limit lower="-3.1408256631958502" upper="3.1408256631958502" effort="inf" velocity="inf" />
+  </joint>
+  <joint name="Revolute_1_7" type="fixed">
+    <origin xyz="0.0202 0.0144 -0.0234" rpy="-1.570796327 0.943475049 3.141592654" />
+    <parent link="Body3" />
+    <child link="drive_hub_3" />
+  </joint>
+  <joint name="Revolute_2_7" type="fixed">
+    <origin xyz="0.0202 -0.016676399 -0.0234" rpy="-1.570796327 0 -3.141592654" />
+    <parent link="Body3" />
+    <child link="driven_hub_3" />
+  </joint>
+  <joint name="Revolute_5" type="fixed">
+    <origin xyz="0 0 -0.0045" rpy="3.141592654 0 0" />
+    <parent link="drive_hub_3" />
+    <child link="Body5_2" />
+  </joint>
+</robot>

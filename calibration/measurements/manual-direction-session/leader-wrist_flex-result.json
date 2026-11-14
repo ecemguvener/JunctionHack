@@ -1,0 +1,26 @@
+{
+  "arm": "leader",
+  "joint": "wrist_flex",
+  "accepted": true,
+  "before": "before-leader-wrist-flex-02.json",
+  "after": "after-leader-wrist-flex-02.json",
+  "physical_direction_tested": "tilt whole gripper motor housing upward, forearm fixed and finger gap unchanged",
+  "physical_direction_for_increasing_value": "tilt whole gripper assembly downward, forearm fixed",
+  "encoder_delta_ticks": -963,
+  "encoder_delta_degrees": -84.638671875,
+  "all_leader_delta_ticks": {
+    "shoulder_pan": 1,
+    "shoulder_lift": -4,
+    "elbow_flex": 0,
+    "wrist_flex": -963,
+    "wrist_roll": 1,
+    "gripper": 5
+  },
+  "follower_excluded_by_user": true,
+  "cad_motion_sign": -1,
+  "cad_sign": 1,
+  "cad_direction_check": {
+    "forward_axis_point_height_derivative_m_per_positive_cad_rad_at_extended_reference": -0.14119999999714916
+  },
+  "cad_at_zero_rad": null
+}

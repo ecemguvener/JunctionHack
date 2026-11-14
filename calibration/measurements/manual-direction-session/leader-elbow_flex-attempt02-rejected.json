@@ -1,0 +1,27 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": false,
+  "before": "before-leader-elbow-02.json",
+  "after": "after-leader-elbow-02.json",
+  "reason": "Multiple non-target joints changed on both arms beyond 3 degrees",
+  "non_target_violations_encoder_degrees": {
+    "leader/shoulder_lift": -21.005859375,
+    "leader/wrist_flex": 60.99609375
+  },
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": -1,
+    "follower/shoulder_lift": 1,
+    "follower/elbow_flex": 0,
+    "follower/wrist_flex": 0,
+    "follower/wrist_roll": 0,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": -15,
+    "leader/shoulder_lift": -239,
+    "leader/elbow_flex": 117,
+    "leader/wrist_flex": 694,
+    "leader/wrist_roll": 1,
+    "leader/gripper": 2
+  },
+  "cad_sign_recorded": null
+}

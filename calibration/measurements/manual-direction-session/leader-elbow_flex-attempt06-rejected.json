@@ -1,0 +1,22 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": false,
+  "before": "before-leader-elbow-06.json",
+  "after": "after-leader-elbow-06.json",
+  "reason": "Shoulder lift exceeded 3 degree isolation tolerance; wrist isolation improved",
+  "non_target_violations_encoder_degrees": {
+    "shoulder_lift": -5.44921875
+  },
+  "all_leader_delta_ticks": {
+    "shoulder_pan": -10,
+    "shoulder_lift": -62,
+    "elbow_flex": 218,
+    "wrist_flex": 1,
+    "wrist_roll": 0,
+    "gripper": -3
+  },
+  "follower_excluded_by_user": true,
+  "candidate_cad_sign_not_confirmed": 1,
+  "cad_sign_recorded": null
+}

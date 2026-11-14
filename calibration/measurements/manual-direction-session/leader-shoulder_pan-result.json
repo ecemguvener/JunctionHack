@@ -1,0 +1,33 @@
+{
+  "arm": "leader",
+  "joint": "shoulder_pan",
+  "accepted": true,
+  "before": "before-leader-pan-01.json",
+  "after": "after-leader-pan-01.json",
+  "physical_direction_tested": "counter-clockwise viewed from above",
+  "physical_direction_for_increasing_value": "clockwise viewed from above",
+  "encoder_delta_ticks": -180,
+  "encoder_delta_degrees": -15.8203125,
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": 0,
+    "follower/shoulder_lift": 0,
+    "follower/elbow_flex": 0,
+    "follower/wrist_flex": 0,
+    "follower/wrist_roll": 0,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": -180,
+    "leader/shoulder_lift": -5,
+    "leader/elbow_flex": 11,
+    "leader/wrist_flex": 7,
+    "leader/wrist_roll": 0,
+    "leader/gripper": 0
+  },
+  "cad_axis_base": [
+    1.1171619185290614e-15,
+    -8.881832811297888e-16,
+    -1.0
+  ],
+  "cad_motion_sign": -1,
+  "cad_sign": 1,
+  "cad_at_zero_rad": null
+}

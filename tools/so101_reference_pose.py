@@ -62,7 +62,9 @@ def main():
     solution = least_squares(residual, np.deg2rad([170, -160, 0]),
                              xtol=1e-13, ftol=1e-13, gtol=1e-13)
     assert solution.success and np.linalg.norm(solution.fun) < 1e-8
-    cad_roll = ref['user_pose_observations']['wrist_roll_cad_degrees']
+    nominal_roll = ref['user_pose_observations']['wrist_roll_cad_degrees']
+    correction = ref['user_pose_observations'].get('display_wrist_roll_correction_degrees', 0)
+    cad_roll = nominal_roll+correction
     # Zero jaw articulation retains the CAD geometry's existing clearance. It
     # is not inferred from gripper percent, nor certified as contact closure.
     display = [0, *np.rad2deg(solution.x).tolist(), cad_roll, 0]
@@ -73,11 +75,13 @@ def main():
         'calibration_sha256': cal.fingerprint,
         'encoder_radians': dict(zip(MOTOR_NAMES, q_encoder.tolist())),
         'cad_display_degrees': dict(zip((*MOTOR_NAMES, 'gripper'), display)),
+        'original_wrist_roll_reference_degrees': nominal_roll,
+        'user_requested_display_correction_degrees': correction,
         'assumptions': [
             'Shoulder pan is zero only to choose a display orientation; actual CAD yaw is unknown.',
             'The principal axes of the upper-arm and forearm meshes are approximated as level, extended toward CAD -Y.',
             'The wrist-roll axis is approximated as horizontal.',
-            'Wrist-roll CAD -90 degrees is the user-supplied approximate reference.',
+            f'Original wrist-roll reference {nominal_roll} degrees, with user-requested display correction {correction} degrees; candidate display is {cad_roll} degrees.',
             'CAD gripper angle remains zero; geometry clearance is not a measured contact model.',
         ],
         'wrist_roll_zero_offset_hypotheses_rad': {

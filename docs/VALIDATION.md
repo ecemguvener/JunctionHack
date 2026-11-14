@@ -187,3 +187,69 @@ git switch -c codex/physical-ai-prototype
 ```
 
 No hosted deployment is required to share the feature branch. The next useful work is reviewed data, meaningful learned-policy rollouts, a verified five-face presentation plan, and real station data/adapter integration. See `POLICY_LAB.md` and `TEAM_HANDOFF.md`.
+
+## SO-101 manual geometric alignment on Intel — 14 November 2026
+
+Executed on the team's Ubuntu Intel computer through authorized SSH access,
+using Python 3.12.16. Raw acquisition used the existing LeRobot/servo-SDK uv
+environment; independent kinematic checks used installed Frax 0.2.0 with JAX
+64-bit precision. No root environment or Mac CPU dependency pins were changed.
+
+Both arms' five direction signs were recorded as +1, and increasing gripper
+values were observed to open the jaw. Before/after raw snapshots, rejected
+isolation attempts and accepted results are retained under
+`calibration/measurements/manual-direction-session/`. The leader elbow sign was
+explicitly accepted by the user despite shoulder co-movement; it is not labelled
+as a strict-isolation pass.
+
+The user manually matched each arm by eye to the fixed CAD target
+`[0, 93.1, -89.5, 1.5, 90]` degrees. A read-only capture derived the per-arm
+encoder-zero offsets, preserving both original LeRobot calibration files and
+their hashes. Both alignment flags are confirmed for this **manual visual
+method**, whose physical uncertainty is unquantified. See
+[`calibration/ALIGNMENT_REPORT.md`](../calibration/ALIGNMENT_REPORT.md).
+
+Generated `models/so101-{leader,follower}-calibrated.urdf` contain five bounded
+arm coordinates and fixed CAD hub/gripper coordinates. They are massless
+kinematics-only models; effort/velocity, TCP and camera mounting transforms
+were not measured. They are not contact-dynamics models or validated motor
+command limits.
+
+Executed checks:
+
+- Both actual aligned models: Frax FK/Jacobian agreement, central-difference
+  Jacobian checks and per-arm position-bound checks at 10 configurations each.
+  Numerical errors were below 2e-8; this is software consistency, not measured
+  physical pose accuracy. Machine-readable reports are in `models/`.
+- Calibration/kinematics unit checks: **8 passed, 1 skipped** in each of the two installed interpreters.
+  Each optional backend is tested where installed; the other backend is skipped
+  in that interpreter. This includes rejection of stale calibration and CAD
+  model bindings, angle-unit conversions, and Jacobians with TCP offsets.
+- Latest upstream core software tests in an isolated uv environment on Intel:
+  **69 passed, 5 skipped**, 2.28 seconds. Four skips require trained model assets;
+  one requires a live simulator. Neither was started for this task.
+- `ruff check src tests scripts` and `ruff format --check src tests scripts`
+  passed (47 files). These files were the incoming prototype revision, not
+  modifications to the detector/controller during calibration.
+
+The core checks used a temporary source archive and minimal test dependencies
+to preserve the working Intel XPU environment: pytest 9.2.0, Ruff 0.17.5,
+NumPy 2.5.4, Pillow 13.0.0, PyYAML 6.0.3, OpenCV headless 5.0.0.93,
+scikit-learn 1.9.1 and SciPy 1.18.1. Initial collection omitted scikit-learn;
+adding that declared dependency resolved collection and the suite passed.
+This was not a reinstallation or validation of the complete locked anomaly
+model stack on Intel.
+
+Reproducible arm checks:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tools -p 'test_so101_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 ~/frax/.venv/bin/python -m unittest discover -s tools -p 'test_so101_*.py' -v
+JAX_ENABLE_X64=1 ~/frax/.venv/bin/python -B tools/so101_validate_alignment.py
+```
+
+All physical movements were made by people, with torque off. Acquisition sent
+only READ instructions; no homing, limit, torque or goal-position registers
+were written and no robot services were started/stopped. No automatic physical
+pose command, grasp, inspection or sorting success was tested. A subsequent
+supervised physical pose/TCP check is still needed to measure the alignment error.
