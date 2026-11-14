@@ -1,5 +1,33 @@
 # Executed validation — 13 November 2026
 
+## Read-only deployed inspection audit — 14 November 2026
+
+On branch `codex/inspection-handoff`, added the standalone stdlib
+`scripts/audit_station.py`, offline HTML/JSON replay, a proposed provenance check,
+and `tests/test_station_audit.py`. No remote service, detector, arm settings or
+hardware commands were changed. SSH initially failed because the local alias
+had no known-host entry. Strict verification against repository-pinned keys
+succeeded; host verification was never disabled.
+
+Executed the collector through SSH stdin on Intel against existing HTTP services:
+four samples, four unique Top frames, four unique Plate frames. Replayed locally
+to `artifacts/station-audit/review-01/index.html`; raw captures remain Git-ignored.
+Observed missing result/frame provenance and an unchanged anomaly payload whose
+receive age reset. Read deployed source to verify cached-payload keepalives and
+Plate-score-to-Top-object-box publication. See `STATION_AUDIT.md` for evidence,
+limits and the proposed handoff. No classification accuracy or physical success
+was established by this audit.
+
+Focused audit/provenance tests: **24 passed**. Full-suite collection in the core
+environment is blocked by the existing optional `test_block_inspector.py`
+import of unavailable `mujoco`; this is not a failure of the new audit tests.
+No optional simulator dependencies were added to the core environment.
+The remaining suite (`pytest --ignore=tests/test_block_inspector.py`) completed:
+**164 passed, 5 skipped** (four opt-in model tests and one live simulator test).
+Repository Ruff lint, formatting (104 files) and diff whitespace checks passed.
+Checks used the existing environment with `uv run --locked --no-sync`; an initial
+automatic editable rebuild could not download Hatchling through sandbox DNS.
+
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
 Implemented `RGBDInspector` with separate modality models and explicit serial,
@@ -1229,7 +1257,41 @@ Extended the simulated cell to three IKEA KALAS plates (`source` aquamarine blue
 - All 8-block clutter perception, contact-friction grasps, OpenVINO raw-distance evaluations, `Supervisor` cycles, and multi-node BabyROS runs above use **synthetic MuJoCo 4.0.1 simulation data**, not physical defect-detection accuracy, physical grasp reliability, or Intel GPU/NPU/XPU hardware benchmarks.
 - Physical bench connection (`ssh.md` / `hardware.md` / `arm-api.md`), real STS3215 servo motion, physical RealSense D415 / Sonix camera capture, and remote cloud training/inference were intentionally not executed prior to starting the hardware phase.
 
+## Live station twin dashboard — 14 November 2026
 
+`dashboard/` adds a read-only page (user service `twin-dashboard`, Intel `127.0.0.1:8096`):
+the Top camera as MuJoCo sim render or real D415 frames, the fused Top + Plate D415 point
+cloud in the robot base frame, and focus-block / anomaly overlays. See `dashboard/README.md`.
+
+Executed:
+
+- `pytest dashboard/tests` (uv, Python 3.12, numpy, OpenCV headless): 13 passed. Fake
+  upstream services; covers camera-to-world maths, packing, crop, table levelling, overlay
+  validation/expiry, stale depth, a dead source, frame long-poll, gzip cloud, MJPEG.
+- `ruff check dashboard` and `ruff format --check dashboard`: passed.
+- Deployed to Intel with `dashboard/deploy.sh`. Only the new service was added; the live depth
+  service (8094), the sim server (18081/19091/19092), armd and camui were not changed.
+- Live end-to-end in a browser through an SSH tunnel: real Top frames, sim `overhead` renders
+  and both D415 clouds (about 14k points each) updated. Measured over Wi-Fi: sim 3.9 fps
+  (source 4), real 5.5 fps (source 12, tunnel-limited), cloud 2.1 Hz, first frame 84 ms after
+  `T`. Checked sim/real toggle, 1×/2× zoom, full screen and `Esc`, depth presets
+  (`0 7 1 3`, `Ctrl`), orthographic `5`, drag orbit/pan, wheel zoom, gizmo click and the
+  bottom-left tool buttons.
+- Overlay stubs: posted labelled TEST boxes to `/api/anomalies` and `/api/focus`; the page drew
+  them, *Focus only* filtered to one, and they expired 5 s after the posts stopped.
+- Failure paths with a second local instance: a dead real source showed *No signal* with the
+  error and *Degraded*; a stopped server showed *Server unreachable* and removed all overlays;
+  the page recovered without reload.
+
+Found and limits:
+
+- The sim scene camera poses no longer match the table: the live table fit gives about 4° tilt
+  for Top and about 7° and 5 cm for Plate. The dashboard levels each cloud on the table, but the
+  Top and Plate clouds still disagree horizontally (duplicate plate rims), and the sim render
+  uses the same stale poses. A new camera calibration is needed.
+- The sim is not twin-synced; its bricks and arm do not follow the real station.
+- Focus block and anomaly detection are not integrated; the page shows *Not connected*.
+- Not measured: frame rate on the Intel display itself (no tunnel), or a long-run soak test.
 
 ## Deployed inspection validity fix — 2026-11-14
 
@@ -1268,3 +1330,8 @@ or physical camera/arm was exercised. Conservative evidence thresholds still
 need real Plate-camera validation. A depth-supported crop is not proof of a
 successful grasp, object identity, complete surface coverage or physical sorting.
 Merging this branch alone does not patch the running Intel controller.
+
+After main advanced during review, merged `daadfa4` (dashboard PR #10 and
+evidence recorder PR #12), preserving both validation entries. Re-ran the core
+regression: **213 passed, 5 skipped**; Ruff passed for 107 Python files. The
+inspection patch remains isolated from those incoming implementations.
