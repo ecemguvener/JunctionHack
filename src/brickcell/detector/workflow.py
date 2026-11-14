@@ -62,8 +62,8 @@ def load_checkpoint(config: ModelConfig, checkpoint: Path | None = None):
     checkpoint = checkpoint or config.output_dir / "model.ckpt"
     if sha256(checkpoint) != metadata["checkpoint_sha256"]:
         raise ValueError("Checkpoint hash differs from calibrated model")
-    for field in ("image_size", "backbone", "layers", "num_neighbors"):
-        expected = metadata["config"][field]
+    for field in ("image_size", "backbone", "layers", "num_neighbors", "sensor_contract"):
+        expected = metadata["config"].get(field)
         actual = getattr(config, field)
         if isinstance(actual, tuple):
             actual = list(actual)
@@ -86,6 +86,7 @@ def torch_predict(model, rgb: np.ndarray, size: tuple[int, int]):
 
 def verify_dataset_snapshot(config: ModelConfig, manifest: Manifest) -> None:
     """Detect changed image bytes even if the JSON manifest itself is unchanged."""
+    verify_sensor_manifest(config)
     provenance = json.loads((config.output_dir / "data_provenance.json").read_text())
     recorded = {row["image_id"]: row for row in provenance["images"]}
     if set(recorded) != {sample.image_id for sample in manifest.samples}:
@@ -94,6 +95,13 @@ def verify_dataset_snapshot(config: ModelConfig, manifest: Manifest) -> None:
         row = recorded[sample.image_id]
         if row["split"] != sample.split or row["sha256"] != sha256(manifest.image_path(sample)):
             raise ValueError(f"Dataset changed since training: {sample.image_id}")
+
+
+def verify_sensor_manifest(config: ModelConfig):
+    recorded = json.loads(config.manifest.read_text()).get("sensor_contract")
+    if recorded != config.sensor_contract:
+        raise ValueError("Dataset sensor contract differs from configured model")
+    return recorded
 
 
 def train(config: ModelConfig) -> dict:
@@ -105,6 +113,7 @@ def train(config: ModelConfig) -> dict:
 
     manifest = load_manifest(config.manifest)
     report = require_valid(manifest)
+    sensor_contract = verify_sensor_manifest(config)
     if (config.output_dir / "model.ckpt").exists():
         raise ValueError(
             "Output already contains a checkpoint; use a new output_dir to preserve provenance"
@@ -181,6 +190,7 @@ def train(config: ModelConfig) -> dict:
             "score_type": threshold.score_type,
             "preprocessing": "EXIF transpose; RGB; Pillow bilinear resize; NCHW float32 /255; embedded ImageNet normalization once",
             "synthetic": any(s.synthetic for s in manifest.samples),
+            "sensor_contract": sensor_contract,
             "backbone": config.backbone,
             "pretrained": config.pre_trained,
             "backbone_pretrained_config": getattr(

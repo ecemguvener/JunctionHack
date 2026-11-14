@@ -171,6 +171,8 @@ class Bench:
                 if camera not in CAMERAS:
                     raise ValueError("Unknown model camera")
                 detector = OpenVINODetector(Path(settings["model"]))
+                if (detector.metadata.get("sensor_contract") or {}).get("modality") == "depth":
+                    raise ValueError("Depth model cannot be used in the RGB-only camera bench")
                 if detector.metadata.get("synthetic", True) or detector.threshold is None:
                     raise ValueError("Each camera needs a calibrated real-image model")
                 self.models[camera] = detector, settings["crop"]

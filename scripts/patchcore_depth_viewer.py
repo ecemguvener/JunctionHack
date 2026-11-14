@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image
 
 from brickcell.detector.runtime import OpenVINODetector
-from brickcell.inspection.rgbd import RGBDInspector, RGBInspector, encode_depth
+from brickcell.inspection.rgbd import RGBDInspector, RGBInspector, decode_snapshot, encode_depth
 
 PAGE = """<!doctype html><meta charset=utf-8><title>PatchCore + depth review</title>
 <style>body{background:#0b1422;color:#e6f0ff;font:17px system-ui;margin:30px}article{display:inline-block;vertical-align:top;background:#17263b;border:1px solid #3d5677;border-radius:12px;padding:20px;width:44%;margin:1%}img{width:48%}pre{white-space:pre-wrap;font:14px monospace}iframe{width:100%;height:700px;border:0}input,button{padding:8px;font:inherit}@media(max-width:800px){article{width:90%}}</style>
@@ -32,22 +32,6 @@ def png(image):
     stream = io.BytesIO()
     Image.fromarray(image).save(stream, format="PNG")
     return base64.b64encode(stream.getvalue()).decode()
-
-
-def decode_snapshot(packet):
-    if packet.get("synthetic") is not False or packet.get("aligned_to") != "color":
-        raise ValueError("Require real depth aligned to color")
-    rgb = np.asarray(
-        Image.open(io.BytesIO(base64.b64decode(packet["rgb_jpeg_b64"], validate=True))).convert(
-            "RGB"
-        )
-    )
-    depth = np.asarray(
-        Image.open(io.BytesIO(base64.b64decode(packet["depth_png_b64"], validate=True)))
-    )
-    if depth.ndim != 2 or depth.dtype != np.uint16:
-        raise ValueError("Expected lossless uint16 depth PNG")
-    return rgb, depth
 
 
 def read_rgb_frame(source):

@@ -13,7 +13,14 @@ from pathlib import Path
 from brickcell.util import save_json, sha256, versions
 
 
-def fit(references: Path, output: Path, object_id: str, session_id: str, crop: list[int]) -> dict:
+def fit(
+    references: Path,
+    output: Path,
+    object_id: str,
+    session_id: str,
+    crop: list[int],
+    camera: str = "side",
+) -> dict:
     import torch
     from anomalib.engine import Engine
     from lightning import seed_everything
@@ -44,7 +51,7 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
                 "train",
                 object_id=object_id,
                 session_id=session_id,
-                view_id="side",
+                view_id=camera,
             )
             for i, path in enumerate(paths)
         ],
@@ -58,7 +65,7 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
             "scope": "reference-only pilot; no val/test partitions or accuracy evaluation",
             "object_id": object_id,
             "session_id": session_id,
-            "camera": "side",
+            "camera": camera,
             "crop": crop,
             "references": [{"path": str(p), "sha256": h} for p, h in zip(paths, hashes)],
         },
@@ -82,7 +89,7 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
         "synthetic": False,
         "object_id": object_id,
         "session_id": session_id,
-        "camera": "side",
+        "camera": camera,
         "crop": crop,
         "reference_count": len(paths),
         "checkpoint_sha256": sha256(checkpoint),
@@ -150,12 +157,15 @@ def main():
     fitting.add_argument("--object-id", required=True)
     fitting.add_argument("--session-id", required=True)
     fitting.add_argument("--crop", nargs=4, type=int, required=True)
+    fitting.add_argument(
+        "--camera", default="side", choices=["side", "top", "plate", "overhead", "wrist"]
+    )
     scoring = commands.add_parser("score")
     scoring.add_argument("--pilot", type=Path, required=True)
     scoring.add_argument("--images", type=Path, nargs="+", required=True)
     args = parser.parse_args()
     result = (
-        fit(args.references, args.output, args.object_id, args.session_id, args.crop)
+        fit(args.references, args.output, args.object_id, args.session_id, args.crop, args.camera)
         if args.command == "fit"
         else score(args.pilot, args.images)
     )

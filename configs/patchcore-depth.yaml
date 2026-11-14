@@ -1,0 +1,22 @@
+manifest: ../data/rgbd-prepared/depth-manifest.json
+output_dir: ../artifacts/models/patchcore-depth-v1
+seed: 42
+image_size: [128, 128]
+batch_size: 4
+num_workers: 0
+torch_threads: 4
+backbone: resnet18.tv_in1k
+layers: [layer2, layer3]
+pre_trained: true
+coreset_sampling_ratio: 0.1
+num_neighbors: 3
+uncertainty_fraction: 0.02
+sensor_contract:
+  serial: '243622060450'
+  crop: [320, 30, 410, 125]
+  modality: depth
+  depth_encoding:
+    near_m: 0.15
+    far_m: 1.5
+    invalid_value: 0
+    channels: repeat3

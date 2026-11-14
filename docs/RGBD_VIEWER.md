@@ -80,9 +80,10 @@ must declare:
 ```
 
 For RGB omit `depth_encoding` and set `modality` to `rgb`. Do not relabel a
-synthetic or RGB model as a depth-trained model. The current core export flow
-does not automatically populate this camera/depth contract; producing real
-depth-trained assets with trustworthy provenance is subsequent training work.
+synthetic or RGB model as a depth-trained model. The model config and prepared
+dataset must declare the same contract. Training records it from those checked
+inputs; export carries it into the model JSON. Checkpoint loading, parity and
+evaluation reject a mismatched contract.
 
 ## Depth representation and calibration
 
@@ -115,7 +116,63 @@ performed by starting this viewer. RGB and depth raw distances are not averaged.
   implemented here. Native inference may block a request; other requests report
   busy and cannot reuse an old image/result as current.
 
-## Verification limits
+## Preparing depth for real identification
+
+Use `scripts/prepare_rgbd.py` to derive paired RGB and encoded-depth training
+inputs from saved `/snapshot/<camera>` JSON packets. The earlier `/points`
+packets are subsampled clouds and cannot substitute for full aligned depth.
+Prepare one camera/crop per index; use the exact same object/session/split
+assignments for both modalities. A minimal collection index is:
+
+```json
+{
+  "serial": "243622060450",
+  "crop": [320, 30, 410, 125],
+  "min_depth_fraction": 0.6,
+  "captures": [
+    {
+      "snapshot": "captures/plate-001.json",
+      "object_id": "brick-002",
+      "session_id": "capture-002-a",
+      "view_id": "plate-front",
+      "label": "good",
+      "split": "unsplit"
+    }
+  ]
+}
+```
+
+```bash
+uv run python scripts/prepare_rgbd.py --index data/rgbd-index.json --output data/rgbd-prepared
+```
+
+The preparer preserves source hashes, source depth scale, exact versions and
+group identity. It rejects duplicate encoded images, invalid depth, mismatched
+cameras, defective training inputs and overlapping object/session partitions.
+It never invents splits or labels. It writes separate `rgb-manifest.json` and
+`depth-manifest.json`, with input contracts attached. The normal grouped splitter
+preserves that metadata. If starting unsplit, freeze one group assignment and
+apply it identically to both manifests; never tune splits independently per
+modality. Training requires all five partition/class combinations used by the
+existing core validator, with only good images in train.
+
+After sufficient independent real groups exist and both manifests validate,
+use `configs/patchcore-depth.yaml` (edit camera/crop to match the actual dataset):
+
+```bash
+uv run python -m brickcell train --config configs/patchcore-depth.yaml
+uv run python -m brickcell export --config configs/patchcore-depth.yaml
+uv run python -m brickcell parity --config configs/patchcore-depth.yaml
+```
+
+Freeze model/threshold after validation, then run held-out `evaluate` once. Add
+the exported depth model path under the camera's `models.depth` in the viewer
+config. Train RGB separately with the RGB manifest and matching RGB contract.
+The depth score then affects the per-camera combined identification decision.
+Missing RGB/depth models or thresholds still prevent acceptance. The RGB-only
+legacy inspector rejects depth models rather than feeding them color images.
+
+## Executed versus pending verification
 
 Unit tests use injected predictions and artificial frames for contracts, separate
 modality inputs, depth encoding, gating, thresholds, alignment and decoder checks.

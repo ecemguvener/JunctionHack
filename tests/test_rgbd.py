@@ -143,6 +143,20 @@ def test_snapshot_decoder_preserves_metric_depth_and_rejects_wrong_alignment():
         decode(packet)
 
 
+def test_depth_changes_combined_identification_while_rgb_stays_identical():
+    class DepthDetector(Detector):
+        def predict(self, image):
+            return Prediction(float(image[:, :, 0].mean() / 255), 1, None)
+
+    service = inspector(dict(rgb=Detector("rgb"), depth=DepthDetector("depth")))
+    unchanged, _ = inspect(service)
+    changed, _ = inspect(service, np.full((64, 64), 1000, np.uint16))
+    assert unchanged["decision"] == "GOOD"
+    assert changed["decision"] == "DEFECTIVE"
+    assert unchanged["channels"]["rgb"]["score"] == changed["channels"]["rgb"]["score"]
+    assert unchanged["channels"]["depth"]["score"] != changed["channels"]["depth"]["score"]
+
+
 @pytest.mark.parametrize(
     ("score", "calibrated", "expected"),
     [(0.1, True, "GOOD"), (0.8, True, "DEFECTIVE"), (0.1, False, "REINSPECT")],

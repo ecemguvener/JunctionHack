@@ -21,8 +21,12 @@ class ModelConfig:
     coreset_sampling_ratio: float = 0.05
     num_neighbors: int = 3
     uncertainty_fraction: float = 0.02
+    sensor_contract: dict | None = None
 
     def __post_init__(self) -> None:
+        from brickcell.inspection.rgbd import validate_sensor_contract
+
+        validate_sensor_contract(self.sensor_contract)
         if len(self.image_size) != 2 or min(self.image_size) < 64:
             raise ValueError("image_size must contain two dimensions >=64")
         if self.batch_size < 1 or self.num_workers < 0 or self.torch_threads < 1:

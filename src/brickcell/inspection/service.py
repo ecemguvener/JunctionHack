@@ -17,6 +17,9 @@ class InspectionService:
         quality: QualityConfig | None = None,
         map_dir: Path | None = None,
     ) -> None:
+        contract = getattr(detector, "metadata", {}).get("sensor_contract") or {}
+        if contract.get("modality") == "depth":
+            raise ValueError("Depth models require aligned depth inputs via RGBDInspector")
         self.detector, self.quality, self.map_dir = detector, quality or QualityConfig(), map_dir
 
     def inspect(self, frame: Frame) -> InspectionResult:

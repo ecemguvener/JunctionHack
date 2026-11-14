@@ -196,7 +196,8 @@ def split_manifest(source: Path, output: Path, seed: int = 42) -> dict:
                     manifest.path.parent / sample.mask_path, output.resolve().parent
                 )
             rows.append(row)
-    save_json(output, {"schema_version": 1, "split_seed": seed, "samples": rows})
+    metadata = json.loads(source.read_text())
+    save_json(output, {**metadata, "schema_version": 1, "split_seed": seed, "samples": rows})
     return require_valid(load_manifest(output))
 
 

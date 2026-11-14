@@ -1,14 +1,58 @@
 """Depth-aware PatchCore review with explicit per-modality input contracts."""
 
+import base64
+import io
 import math
 import time
 
 import numpy as np
+from PIL import Image
 
 from brickcell.inspection.images import QualityConfig, check_view
 from brickcell.inspection.types import Decision
 
 DEPTH_ENCODING = dict(near_m=0.15, far_m=1.5, invalid_value=0, channels="repeat3")
+
+
+def decode_snapshot(packet):
+    if packet.get("synthetic") is not False or packet.get("aligned_to") != "color":
+        raise ValueError("Require real depth aligned to color")
+    rgb = np.asarray(
+        Image.open(io.BytesIO(base64.b64decode(packet["rgb_jpeg_b64"], validate=True))).convert(
+            "RGB"
+        )
+    )
+    depth = np.asarray(
+        Image.open(io.BytesIO(base64.b64decode(packet["depth_png_b64"], validate=True)))
+    )
+    if depth.ndim != 2 or depth.dtype != np.uint16 or depth.shape != rgb.shape[:2]:
+        raise ValueError("Expected lossless uint16 aligned depth PNG matching RGB")
+    return rgb, depth
+
+
+def validate_sensor_contract(contract):
+    if contract is None:
+        return
+    if not isinstance(contract, dict):
+        raise ValueError("Sensor contract must be an object")
+    if contract.get("modality") not in ("rgb", "depth") or not contract.get("serial"):
+        raise ValueError("Sensor contract needs serial and rgb/depth modality")
+    crop = contract.get("crop")
+    if (
+        not isinstance(crop, list)
+        or len(crop) != 4
+        or any(type(x) is not int for x in crop)
+        or not (0 <= crop[0] < crop[2] and 0 <= crop[1] < crop[3])
+        or min(crop[2] - crop[0], crop[3] - crop[1]) < 16
+    ):
+        raise ValueError("Sensor contract needs explicit crop of at least 16x16")
+    expected = {"serial", "crop", "modality"}
+    if contract["modality"] == "depth":
+        expected.add("depth_encoding")
+        if contract.get("depth_encoding") != DEPTH_ENCODING:
+            raise ValueError("Depth training must use the fixed viewer depth encoding")
+    if set(contract) != expected:
+        raise ValueError("Unexpected sensor contract fields")
 
 
 def encode_depth(depth, scale, encoding=DEPTH_ENCODING):

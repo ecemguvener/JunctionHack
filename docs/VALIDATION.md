@@ -1,5 +1,166 @@
 # Executed validation — 13 November 2026
 
+## Actual PatchCore clean-reference training on brick-002 — 14 November 2026
+
+Executed `scripts/train_line_pilot.py` on saved top-camera RGB captures, crop
+`[225,220,272,272]`. Used the first six clean images only as fitting references;
+scored six later clean images and twelve operator-confirmed line-mark images
+after saving and reloading the checkpoint. All images share one physical
+object and capture session; this is explicitly a reference-only pilot, not a
+formal train/val/test split or independent accuracy evaluation. No threshold
+was fitted, no production model was overwritten, and no robot sorting occurs.
+
+Training used Anomalib 2.7.0 PatchCore, pretrained ResNet-18, layer2/layer3,
+128×128 input, seed 42, CPU PyTorch and 5% coreset (75 features). Saved inputs,
+source/crop hashes, checkpoint hash, exact versions, anomaly maps and distances
+under ignored `artifacts/pilots/brick-002-line-v1/`. Extended the earlier pilot
+utility with an explicit camera argument to record top-camera provenance
+correctly rather than the previous side-camera default.
+
+Clean-repeat distances: 1.26035–1.48185, median 1.34577. Marked distances:
+1.47729–1.63439, median 1.58614. Ranges overlap slightly; higher marked median
+does not establish a validated decision threshold or isolate the line from
+other appearance changes. This model uses RGB; depth is not its input. Updated
+the existing HTML with actual training results, keeping the earlier reference-
+comparison red box clearly separate from PatchCore outputs.
+
+Software checks: **145 passed, 5 optional integration tests skipped**; Ruff
+lint/format and diff whitespace checks passed. In addition, actual CPU fit,
+checkpoint reload and inference completed. OpenVINO export, independent
+calibration and held-out evaluation remain pending. No commit or push occurred.
+
+## RGB reference localization of brick-002 line — 14 November 2026
+
+At the operator's instruction to focus on identifying the line, added a
+reference-based dark-mark localizer. This is explicitly NOT a PatchCore-trained
+result or a calibrated production defect decision. It uses first-six clean
+top RGB crops as a temporal-median reference, estimates dark-residual noise
+from the remaining six clean crops, and applies a brightness-compensated
+reference threshold with a 12 Lab-L floor. It adjusts small image translation
+using blue-mask centroids and rejects larger shifts. Its blue segmentation
+and fixed ROI are specific to this demonstration.
+
+On the twelve saved marked top images, the temporal-median candidate contains
+8 dark pixels in crop box `[18,16,23,20]`, or clean-reference full-image box
+`[243,236,248,240]`. Threshold: 14.125 Lab-L; peak darkening: 29. The marked
+sequence produces at least one candidate in 11/12 frames. This is same-object
+recurrence, NOT defect recall or independent accuracy. Visual review shows the
+box overlapping the operator-confirmed dark line. Saved overlays, source RGB
+hashes, versions and result JSON under ignored
+`artifacts/brick-002-line-detection/`. Updated the existing HTML to foreground
+this RGB localization and clearly label its method rather than implying the
+depth comparison or PatchCore found it.
+Software checks: **145 passed, 5 optional integration tests skipped**; Ruff
+lint/format and diff whitespace checks passed. HTML and the result image
+returned HTTP 200. Changes remain local and uncommitted; no push occurred.
+
+## Confirmed top-facing brick-002 mark — 14 November 2026
+
+Operator clarified that the defect is on the surface facing the top camera.
+Re-examined enlarged temporal-median top RGB crops and observed a dark mark
+in the changed crop absent from the clean crop. Updated the human label to
+defective, with the top-facing location and separate geometric-verification
+flag false. This is an annotation/visual observation, not a trained prediction.
+
+Executed `scripts/compare_top_depth.py`: fixed ROI `[225,220,272,272]`, blue
+reference-region heuristic eroded one pixel and at least ten valid frames in
+each 12-frame sequence. There are 617 supported interior pixels. Median signed
+depth change is 0 mm; 95th-percentile absolute median-depth change is 3 mm;
+RGB mean-absolute change median is 7/255. Blue-mask centroid shifts approximately
+(-0.76,+0.65) pixels. Direct pixels are not registered geometry, and the mask
+may omit defect regions. Changes cannot yet be separated from noise and
+edge/pose effects. Larger plate-view framing change excludes that camera from
+direct comparison. Saved plot/report and updated the existing HTML to foreground
+the top-facing mark, explicitly distinguishing measurement from model heatmaps.
+No depth-only detection success, geometry defect, calibrated threshold or real
+accuracy is inferred.
+
+## Brick-002 raised-change capture with comparison confound — 14 November 2026
+
+Captured 12 unique matched RGB/depth snapshots per D415 under ignored
+`artifacts/brick-002-full-raised-01/`, same physical object/session group.
+Kept human label REVIEW rather than inferring a verified defective label from
+the operator's cue. First/last RGB show the brick remains present; the plate
+view and board have shifted substantially relative to the clean sequence.
+The added material is not clearly identifiable visually, so its location/type
+is pending operator confirmation. No defect decision or training eligibility
+was assigned. The top view appears approximately aligned: a direct median-depth
+pixel comparison over `[234,227,263,264]` gave 0 mm median signed and 4 mm
+95th-percentile absolute difference, but edge shifts and camera/object pose
+remain confounders. No detection success or threshold is inferred.
+No core source changed, and no commit/push occurred.
+
+## Accepted full brick-002 clean baseline — 14 November 2026
+
+Repeated the full capture into ignored `artifacts/brick-002-full-baseline-02/`:
+12 unique matched RGB/uint16-depth snapshots per D415, with source hashes,
+frame IDs, source time/scale, versions and the same brick-002/session group.
+First/last RGB review confirms the clean stud-facing brick stays visible;
+background human/arm movement outside the brick ROI occurs in the top view.
+Accepted it as a clean reference, not a trained detector or assigned partition.
+
+Plate face ROI `[360,52,403,90]` has 99.95% in-range valid depth across the
+sequence, with 95th-percentile adjacent absolute depth difference approximately
+1 mm. Top ROI `[225,209,272,262]` has 99.70% valid depth and 2 mm at the same
+percentile. These are same-object repeat diagnostics, not measured defect
+accuracy or calibrated thresholds. Updated the existing HTML to confirm the
+baseline is saved, display its actual photo and mark a suggested stud for the
+operator's next raised-change experiment. No source code changed in this retry;
+no commit or push was performed.
+
+## Full RGB/depth baseline attempt rejected — 14 November 2026
+
+Added `scripts/capture_rgbd_sequence.py` to collect unique-frame matched RGB/
+uint16-depth snapshots from both D415s concurrently, preserving camera IDs,
+source frame timestamps, individual file hashes and versions. Captured twelve
+snapshots per camera for brick-002 under ignored
+`artifacts/brick-002-full-baseline-01/`. Each camera's RGB/depth is from the
+same frameset; cameras are not hardware synchronized.
+
+The preflight RGB showed the brick, but saved plate frames 000, 004, 008 and 011
+all visibly show an empty board. Rejected the sequence as `rejected_empty_scene`,
+`baseline_accepted: false`, `eligible_for_training: false`. It is NOT a clean
+brick reference or evidence of brick depth repeatability. Operator GOOD labels
+remain annotations and are not inspection results. Updated the existing HTML
+with the rejected example and explicit leave-in-place instruction. The recorder
+marks all new sequences pending image review by default.
+Software checks after this recorder change: **142 passed, 5 optional integration
+tests skipped**; Ruff lint/format and diff whitespace checks passed. Nothing
+was committed or pushed.
+
+## Depth input training and identification contract — 14 November 2026
+
+Added paired RGB/depth preparation from real aligned snapshot JSON packets,
+using the exact `encode_depth` representation consumed by `RGBDInspector`.
+Each prepared modality manifest carries the camera/crop/modality contract;
+source hashes, real depth scale, versions and shared object/session partitions
+are retained. Preparation rejects duplicate encoded inputs, invalid depth,
+wrong camera identity, defective training rows and object/session split overlap.
+No capture is assigned to a partition automatically, and existing outputs are
+not overwritten. Normal grouped splitting preserves the sensor metadata.
+
+Added `sensor_contract` to model configuration and training metadata. Training
+checks it against the dataset; checkpoint restore/export and dataset-snapshot
+verification prevent accidental modality/crop changes. Export retains it in
+the OpenVINO model JSON, enabling the depth viewer to load a genuinely depth-
+trained PatchCore model without manually relabeling an RGB model. Legacy RGB
+inspection and the RGB camera bench reject depth models.
+
+Added an injected test holding RGB constant while changing only measured depth:
+the depth channel score and combined decision change. This proves the software
+input/decision path, not real detection accuracy. Additional tests verify paired
+encoding equality, source provenance, duplicate/leakage rejection, contract
+preservation during split, and depth rejection by RGB-only inspection.
+
+Executed `uv sync --locked`; full suite: **138 passed, 5 optional integration
+tests skipped**. Ruff lint/format and diff whitespace checks passed; preparer
+CLI help ran. No new real camera capture, real depth model fit/export, threshold
+calibration or held-out evaluation was performed in this change. Configured
+model slots remain empty until adequate independent clean and confirmed
+defective validation/test groups are collected. Earlier subsampled point-cloud
+captures cannot be substituted for full aligned depth snapshot packets.
+Changes remain local and uncommitted at the user's request; no push occurred.
+
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
 Implemented `RGBDInspector` with separate modality models and explicit serial,
@@ -887,3 +1048,31 @@ Push verification: checked the isolated arm-camera commit contents against HEAD
 without other workspace changes: **140 passed, 5 optional tests skipped**;
 Ruff lint passed and formatting passed for all 81 committed Python files.
 The 154-pass result above includes other pre-existing local work.
+
+## Versioned local review pages — 14 November 2026
+
+Preserved the exact current HTML snapshots for brick-001 reconstruction audit,
+brick-001 composite review and brick-002 orientation/training review under
+`scripts/review_pages/`. Added `scripts/restore_review_pages.py` to restore
+those HTML files into the original local artifact paths, and
+`docs/LOCAL_REVIEW_PAGES.md` mapping all requested URLs to tracked sources.
+The orientation query strings refer to the same HTML, not separate versions.
+Live depth and RGB/depth viewer code was already tracked. Included the pending
+paired RGB/depth preparation and capture tools, sensor-contract enforcement,
+top-change comparison and line-training pilot sources used by these workflows.
+
+Executed `uv sync --locked`; `uv run pytest` completed with **154 passed,
+5 skipped** (four trained-model tests and one live simulator integration test
+without their required configuration/services). Ruff lint passed and formatting
+passed for 89 Python files. Executed the restore command into a temporary
+directory and verified SHA-256 equality between all three original artifact HTML
+files, tracked snapshots and restored copies. Diff whitespace checks passed.
+
+No cameras, arm service or SSH servers were accessed; no hardware service was
+started or deployed. The port-18096 HTTP server was unavailable during an earlier
+read attempt; these snapshots were read directly from the local artifact files.
+No rendered browser verification was performed for this preservation change.
+Captured datasets, photographs, point clouds, binary models and generated result
+files remain excluded from Git. Thus a fresh checkout has the page code and
+historical text, but its media/report links need the original local artifact tree.
+No new training, physical success or defect accuracy is claimed by this push.
