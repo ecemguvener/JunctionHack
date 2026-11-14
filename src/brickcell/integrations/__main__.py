@@ -7,7 +7,16 @@ from pathlib import Path
 
 from brickcell.integrations.core import Context, HTTP, Outbox, case_id, validate
 
-PROVIDERS = {"cloudinary", "gemini", "elevenlabs", "tigerdata", "aiven", "mongodb", "gemma", "verda"}
+PROVIDERS = {
+    "cloudinary",
+    "gemini",
+    "elevenlabs",
+    "tigerdata",
+    "aiven",
+    "mongodb",
+    "gemma",
+    "verda",
+}
 
 
 def main():
@@ -31,7 +40,9 @@ def main():
             run = importlib.import_module("brickcell.integrations." + provider).run
             receipt = outbox.deliver(case, provider, context, run)
             failed |= "error_type" in receipt
-            (args.output / f"{case_id(case)}-{provider}.json").write_text(json.dumps(receipt, indent=2))
+            (args.output / f"{case_id(case)}-{provider}.json").write_text(
+                json.dumps(receipt, indent=2)
+            )
             print(json.dumps(receipt))
         if failed:
             raise SystemExit(1)

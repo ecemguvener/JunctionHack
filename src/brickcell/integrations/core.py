@@ -96,9 +96,13 @@ class NoRedirect(HTTPRedirectHandler):
 class HTTP:
     def request(self, url, payload=None, headers=None, raw=None, timeout=20):
         parts = urlsplit(url)
-        if parts.username or parts.password or not (
-            parts.scheme == "https"
-            or (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost"))
+        if (
+            parts.username
+            or parts.password
+            or not (
+                parts.scheme == "https"
+                or (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost"))
+            )
         ):
             raise IntegrationError("Use HTTPS or a loopback development endpoint")
         headers = dict(headers or {})
@@ -170,7 +174,11 @@ class Outbox:
             encoded, status = canonical(receipt), "done"
         except Exception as exc:
             # Exception text can contain database URLs or provider secrets.
-            receipt = {"provider": provider, "case_id": identifier, "error_type": type(exc).__name__}
+            receipt = {
+                "provider": provider,
+                "case_id": identifier,
+                "error_type": type(exc).__name__,
+            }
             encoded, status = canonical(receipt), "failed"
         with self.db:
             self.db.execute(
