@@ -52,12 +52,12 @@ cameras:
     height: 256
 
   # Real camera "Top" (RealSense D415, serial 350122060653).
-  # MEASURED 2026-11-14 04:44 UTC (cameras moved; second measurement). Method: depth frame, table plane and SO-101 model fit at the servo joint angles; median error 5 mm.
+  # MEASURED 2026-11-14 05:09 UTC (arm base moved 0.22 m; cameras not moved). Method: depth frame, table plane and SO-101 model fit at the servo joint angles; median error 8 mm.
   # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
   overhead:
     enabled: true
-    pos: [0.5832, 0.1327, 0.7576]
-    rotation_cv: [[-0.68683, 0.60650, -0.40053], [0.72465, 0.61393, -0.31300], [0.05606, -0.50523, -0.86116]]
+    pos: [0.6635, 0.2946, 0.7542]
+    rotation_cv: [[-0.62857, 0.64572, -0.43353], [0.77507, 0.56631, -0.28027], [0.06454, -0.51218, -0.85645]]
     fx: 603.94
     fy: 603.02
     cx: 313.15
@@ -66,12 +66,12 @@ cameras:
     height: 480
 
   # Real camera "Plate" (RealSense D415, serial 243622060450).
-  # MEASURED 2026-11-14 04:44 UTC (cameras moved; second measurement). Method: the four board labels A-D (3D from the Top camera) and PnP; reprojection 4-7 px, depth check 1-15 mm.
+  # MEASURED 2026-11-14 05:09 UTC (arm base moved 0.22 m; cameras not moved). Method: pose relative to the Top camera from the board labels A-D (04:44 UTC), moved into the new base frame.
   # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
   side:
     enabled: true
-    pos: [0.3555, -0.6510, 0.2199]
-    rotation_cv: [[0.99765, 0.02339, -0.06446], [0.06458, -0.63661, 0.76847], [-0.02306, -0.77083, -0.63663]]
+    pos: [0.3699, -0.4686, 0.2189]
+    rotation_cv: [[0.99932, -0.03461, -0.01292], [-0.01203, -0.63553, 0.77199], [-0.03493, -0.77130, -0.63551]]
     fx: 607.79
     fy: 606.97
     cx: 320.07
