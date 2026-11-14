@@ -1,5 +1,24 @@
 # Executed validation — 13 November 2026
 
+## Live D415 point-cloud review — 14 November 2026
+
+Added and deployed `scripts/live_depth.py` as a separate Intel SDK process on
+loopback port 8094, forwarded to Mac loopback port 18094. It owns both D415s
+while the RGB bench on 8092 is stopped; the wrist helper and teammate UI are
+untouched. Each camera produces aligned RGB/depth at requested 640×480/15 fps;
+the review API subsamples every fourth pixel and retains depths 0.15–1.5 m.
+SDK point coordinates are displayed in separate rotatable canvas views; they
+are not registered or merged. Packets include camera serial, intrinsics, depth
+scale and software timestamps; absent/stale (>3 s) packets return HTTP 503.
+No robot or detector integration exists in this viewer. Browser visual layout
+and interaction have not been verified by automation.
+
+The new physical orange/gray checkerboard was visible in both RGB previews,
+but exhaustive OpenCV SB searches for 3–8 inner corners per dimension detected
+no full pattern in either view. Square counts/size are pending operator input.
+No camera transform was estimated. The board appears to have uneven squares;
+this observation alone does not establish the cause of failed detection.
+
 ## Brick-001 matched raised/clean experiment — 14 November 2026
 
 Captured the operator-confirmed raised change and then its clean reference
