@@ -1,0 +1,16 @@
+{
+  "object_id": "SYNTHETIC-demo-brick",
+  "session_id": "SYNTHETIC-demo-session",
+  "frame_id": "demo-1",
+  "camera_id": "top",
+  "captured_at": 1794657600,
+  "inference_latency_ms": 12.5,
+  "model_version": "MOCK-no-trained-model",
+  "threshold_version": null,
+  "is_valid_view": false,
+  "decision": "REINSPECT",
+  "score": null,
+  "reason": "Synthetic workflow fixture, not a real inspection",
+  "synthetic": true,
+  "assets": []
+}
