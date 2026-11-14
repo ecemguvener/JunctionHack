@@ -141,3 +141,54 @@ def test_snapshot_decoder_preserves_metric_depth_and_rejects_wrong_alignment():
     packet["aligned_to"] = "depth"
     with pytest.raises(ValueError, match="aligned"):
         decode(packet)
+
+
+@pytest.mark.parametrize(
+    ("score", "calibrated", "expected"),
+    [(0.1, True, "GOOD"), (0.8, True, "DEFECTIVE"), (0.1, False, "REINSPECT")],
+)
+def test_arm_rgb_inspection_without_depth(score, calibrated, expected):
+    from brickcell.inspection.rgbd import RGBInspector
+
+    detector = Detector("rgb", score, calibrated)
+    service = RGBInspector(
+        "cam",
+        [0, 0, 64, 64],
+        {"rgb": detector},
+        quality=QualityConfig(min_laplacian_variance=0, max_outside_fraction=1),
+    )
+    rgb, _ = frame()
+    result, previews = service.inspect(rgb, 100, "cam", "wrist-1", now=101)
+    assert result["decision"] == expected
+    assert set(result["channels"]) == {"rgb"}
+    assert result["depth_used_for_anomaly_score"] is False
+    assert set(previews) == {"rgb", "rgb_map"}
+    np.testing.assert_array_equal(detector.inputs[0], rgb)
+
+
+def test_arm_rejects_wrong_camera_stale_frames_and_depth_models():
+    from brickcell.inspection.rgbd import RGBInspector
+
+    detector = Detector("rgb")
+    service = RGBInspector("cam", [0, 0, 64, 64], {"rgb": detector})
+    rgb, _ = frame()
+    for timestamp, serial, frame_id in [(95, "cam", "id"), (100, "other", "id"), (100, "cam", "")]:
+        result, _ = service.inspect(rgb, timestamp, serial, frame_id, now=101)
+        assert result["decision"] == "ERROR"
+    assert not detector.inputs
+    with pytest.raises(ValueError):
+        RGBInspector("cam", [0, 0, 64, 64], {"depth": Detector("depth")})
+
+
+def test_arm_missing_model_or_crop_and_out_of_bounds_crop():
+    from brickcell.inspection.rgbd import RGBInspector
+
+    rgb, _ = frame()
+    for crop in [None, [0, 0, 64, 64], [0, 0, 1920, 1080]]:
+        service = RGBInspector(
+            "cam",
+            crop,
+            quality=QualityConfig(min_laplacian_variance=0, max_outside_fraction=1),
+        )
+        result, _ = service.inspect(rgb, 100, "cam", "id", now=101)
+        assert result["decision"] == ("ERROR" if crop and crop[2] == 1920 else "REINSPECT")

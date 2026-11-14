@@ -852,3 +852,38 @@ learned motion still need station validation. Static reports suit small pilot
 batches; they embed every preview frame and are not a large-dataset streaming UI.
 See `WORKBENCH.md` and `STATION_COLLECTION.md` for the reproducible workflow and
 operator handoff.
+
+## Arm camera input in the RGB/depth viewer — 14 November 2026
+
+Added a configured `wrist` RGB-only input beside top and plate, with an arm/wrist
+card, native-resolution crop, separate real RGB model contract, calibrated
+threshold decision and anomaly overlay. RGB-only inspection does not fabricate
+or require depth. D415 inspection still requires both RGB and depth channels.
+The existing remote Sonix helper remains the sole camera owner.
+
+Executed locally with Python 3.12.16 and the locked environment:
+
+- `uv sync --locked` completed; no dependency changes.
+- `uv run pytest`: 154 passed, 5 skipped. Four trained-model tests require
+  `BRICKCELL_MODEL_CONFIG`; one live simulator test requires its running service.
+- `uv run ruff check src tests scripts`: passed.
+- `uv run ruff format --check src tests scripts`: passed (88 files).
+
+Tests use artificial frames, injected detectors and HTTP responses/handlers.
+They cover RGB-only good/defective/uncalibrated decisions, missing models/crops,
+wrong camera identity, stale frames, rejecting depth models for wrist, unchanged
+RGB pixels, 1920×1080 crop handling and missing acquisition metadata blocking
+inference while retaining preview. Existing depth preparation/decoder tests pass.
+
+Not executed: SSH deployment, camera access, remote helper changes, live browser
+review, wrist model training/calibration, real OpenVINO inference or physical
+sorting. The default wrist model mapping is empty. The legacy `/frame.jpg` source
+needs acquisition-time `X-Frame-Time`, `X-Frame-Id` and `X-Camera-Serial` headers
+before trusted wrist inference is enabled; arrival time is not capture time.
+Without these headers it is preview-only/REINSPECT. No real defect accuracy or
+cross-camera identity/coverage is established by these software checks.
+
+Push verification: checked the isolated arm-camera commit contents against HEAD
+without other workspace changes: **140 passed, 5 optional tests skipped**;
+Ruff lint passed and formatting passed for all 81 committed Python files.
+The 154-pass result above includes other pre-existing local work.
