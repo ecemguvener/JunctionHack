@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -85,8 +84,9 @@ def true_corners() -> np.ndarray:
 
 def board_outline(pose: C.Pose) -> np.ndarray:
     """Pixel polygon of the board pattern (like the board_roi setting)."""
-    xy = board_to_world([[COLS[0], ROWS[0]], [COLS[-1], ROWS[0]], [COLS[-1], ROWS[-1]],
-                         [COLS[0], ROWS[-1]]])
+    xy = board_to_world(
+        [[COLS[0], ROWS[0]], [COLS[-1], ROWS[0]], [COLS[-1], ROWS[-1]], [COLS[0], ROWS[-1]]]
+    )
     return pose.project(np.column_stack((xy, np.full(4, BOARD_HEIGHT))), INTR)
 
 
@@ -178,8 +178,9 @@ def test_two_camera_board_fit_recovers_the_side_pose():
         ("side", side_guess, side, index[:, 1] >= 2, (1, -2)),
     ):
         pixels = real.project(corners[keep], INTR) + rng.normal(0, 0.3, (keep.sum(), 2))
-        det = C.BoardDetection(name, pixels, index[keep] + offset, [[], []], (0.0, 1.0),
-                               np.zeros((480, 640), bool))
+        det = C.BoardDetection(
+            name, pixels, index[keep] + offset, [[], []], (0.0, 1.0), np.zeros((480, 640), bool)
+        )
         dets[name] = det
         worlds[name] = C.corner_world(det, INTR, pose, board_plane(pose))
     pairs, shift, rms, second = C.match_corners(
@@ -200,7 +201,9 @@ def test_two_camera_board_fit_recovers_the_side_pose():
 
 def test_write_scene_poses_keeps_other_text(tmp_path):
     path = tmp_path / "sim-scene.yaml"
-    shutil.copy(REPO / "configs/sim-scene.yaml", path)
+    # Start from a file with no REFINED comment (the real file can already have one).
+    text = (REPO / "configs/sim-scene.yaml").read_text().splitlines()
+    path.write_text("\n".join(line for line in text if "# REFINED" not in line) + "\n")
     before = path.read_text().splitlines()
     poses = {
         "overhead": C.Pose(C.rot_z(0.1) @ np.diag([1.0, -1.0, -1.0]), np.array([0.6, 0.3, 0.75])),
@@ -219,8 +222,10 @@ def test_write_scene_poses_keeps_other_text(tmp_path):
         cam = scene.cameras[name]
         assert np.allclose(cam.pos, pose.position, atol=1e-4)
         assert np.allclose(cam.rotation_cv(), pose.rotation, atol=2e-5)
-    assert scene.cameras["wrist"].pos == load_scene_config(REPO / "configs/sim-scene.yaml") \
-        .cameras["wrist"].pos
+    assert (
+        scene.cameras["wrist"].pos
+        == load_scene_config(REPO / "configs/sim-scene.yaml").cameras["wrist"].pos
+    )
     # A second write replaces the comment line, it does not add another one.
     C.write_scene_poses(path, poses, "second note")
     again = path.read_text().splitlines()

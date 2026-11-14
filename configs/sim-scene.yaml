@@ -54,10 +54,11 @@ cameras:
   # Real camera "Top" (RealSense D415, serial 350122060653).
   # MEASURED 2026-11-14 05:09 UTC (arm base moved 0.22 m; cameras not moved). Method: depth frame, table plane and SO-101 model fit at the servo joint angles; median error 8 mm.
   # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
+  # REFINED 2026-11-14T06:13:01Z by brickcell.twin.calibrate from fixture-001: table planes + board corners (2D rigid fit on the levelled poses); see artifacts/twin-dev/calibration/report.json.
   overhead:
     enabled: true
-    pos: [0.6635, 0.2946, 0.7542]
-    rotation_cv: [[-0.62857, 0.64572, -0.43353], [0.77507, 0.56631, -0.28027], [0.06454, -0.51218, -0.85645]]
+    pos: [0.6639, 0.2938, 0.7538]
+    rotation_cv: [[-0.62853, 0.64542, -0.43403], [0.77501, 0.56683, -0.27941], [0.06568, -0.51199, -0.85647]]
     fx: 603.94
     fy: 603.02
     cx: 313.15
@@ -68,10 +69,11 @@ cameras:
   # Real camera "Plate" (RealSense D415, serial 243622060450).
   # MEASURED 2026-11-14 05:09 UTC (arm base moved 0.22 m; cameras not moved). Method: pose relative to the Top camera from the board labels A-D (04:44 UTC), moved into the new base frame.
   # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
+  # REFINED 2026-11-14T06:13:01Z by brickcell.twin.calibrate from fixture-001: table planes + board corners (2D rigid fit on the levelled poses); see artifacts/twin-dev/calibration/report.json.
   side:
     enabled: true
-    pos: [0.3699, -0.4686, 0.2189]
-    rotation_cv: [[0.99932, -0.03461, -0.01292], [-0.01203, -0.63553, 0.77199], [-0.03493, -0.77130, -0.63551]]
+    pos: [0.3604, -0.4708, 0.2307]
+    rotation_cv: [[0.99336, -0.03458, -0.10970], [0.06078, -0.65193, 0.75584], [-0.09765, -0.75749, -0.64550]]
     fx: 607.79
     fy: 606.97
     cx: 320.07
