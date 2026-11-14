@@ -17,6 +17,7 @@ PROVIDERS = {
     "gemma",
     "verda",
     "oxylabs",
+    "contextdev",
 }
 
 
