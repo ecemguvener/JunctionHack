@@ -1,5 +1,18 @@
 # Executed validation — 13 November 2026
 
+## Brick-002 opposite side and collection pause — 14 November 2026
+
+Saved fresh RGB previews/subsampled point packets under ignored
+`artifacts/brick-002-other-side-review/`. The plate view shows studs in profile
+on the right, versus left in the prior side view, supporting a distinct opposite
+side observation. Both views are unobstructed. Recorded the same object/session
+and source hashes, with no model decision, partition or camera transform.
+Five clean poses are now visually reviewed for brick-002 (studs up, studs
+toward plate, hollow underside, side, opposite side); this is not verified
+complete geometry or five independent objects. Updated all existing review
+pages to a saved-photo gallery and next-brick studs-up diagram. No core source
+changed.
+
 ## Brick-002 accepted narrow side — 14 November 2026
 
 Saved fresh RGB previews and subsampled point packets under ignored
