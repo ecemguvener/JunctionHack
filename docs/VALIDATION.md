@@ -887,3 +887,346 @@ Push verification: checked the isolated arm-camera commit contents against HEAD
 without other workspace changes: **140 passed, 5 optional tests skipped**;
 Ruff lint passed and formatting passed for all 81 committed Python files.
 The 154-pass result above includes other pre-existing local work.
+
+## Follower API reference command — 14 November 2026
+
+Executed over SSH on Intel using the existing real-hardware armd environment.
+Started the previously stopped API in its dedicated tmux session; both arms
+reported online and follower servos reported no errors before motion.
+Commanded the saved upright reference raw ticks through `POST
+/arms/follower/positions`: pan 1970, lift 2396, elbow 1984, wrist flex 1759,
+wrist roll 3220, speed 100 ticks/s, acceleration 10, tolerance 10 ticks,
+timeout 20 seconds. No targets were clamped; gripper was omitted.
+
+The API returned `reached: false`. Final ticks before stop were respectively
+1919, 2395, 2024, 1779, 3222 (errors -51, -1, +40, +20, +2 ticks).
+Sent `/stop` with `mode: hold`; no automatic retry or torque-off was sent.
+The hold endpoint also enabled gripper torque at its current 1462 ticks.
+Stopped the task-started API with its configured `on_shutdown: hold` behavior.
+Human visual comparison remains pending; this attempt does not establish
+finished calibration or measured physical pose accuracy. No software was changed;
+pytest, model tests and Ruff were not run for this hardware-only operation.
+
+### Supervised elbow correction trial
+
+The user reported the follower visually matched, with joint 3 approximately
+2 degrees low, and requested alternative angle commands. Tried one upward
+elbow correction from fresh position 2027 to 2004 ticks (approximately -2.02
+degrees; increasing ticks lowers the forearm). API speed 80 ticks/s,
+acceleration 10, tolerance 5 ticks, timeout 5 seconds. Target was not clamped,
+but `reached` was false and the final encoder remained 2027 ticks. Sent hold
+and ended the run without another motion attempt. Stopped the task-started
+armd session, preserving torque under `on_shutdown: hold`. This trial did not
+produce a new achieved pose for visual ranking; the cause of the lack of
+movement is undiagnosed. No calibration values or software were changed;
+software/model tests and Ruff were not run for this hardware-only trial.
+
+Read-only follow-up: opened the unowned follower port with the existing armd
+SDK and issued only register reads, then closed it. All five arm servos read
+P=16, D=32, I=0, both directional deadbands=1 tick, minimum startup force=16,
+maximum torque=1000, runtime torque limit=1000, position mode=0 and torque
+enabled=1. Thus a configured 23-tick deadband does not explain the failed
+small move. Weak correction under friction/load remains a hypothesis, not a
+confirmed cause. The earlier stop overwrote the goal register, so these reads
+cannot establish whether the original 2004-tick goal reached the servo.
+The API wait implementation returns false when encoder error stays outside
+tolerance until its deadline; the recorded HTTP response was 200, not a
+network timeout. No new motion or setting writes were made during diagnosis.
+
+### Elbow goal-readback diagnostic
+
+At the user's request, repeated a bounded small upward command through the
+real API, with fresh feedback before and after. Initial elbow position was
+2029 ticks; target 2006 ticks, speed 80 ticks/s, acceleration 10, unclamped,
+`wait: false`. Eleven fresh samples over 5.051 seconds showed goal=2006 and
+position=2029 throughout, speed=0, torque enabled, position mode, no errors,
+12.2 V and 31 degrees C. By 0.510 seconds reported load changed from -2.0%
+to -10.4% and current from 0 to 39 mA, then settled at 32.5 mA.
+The goal readback confirms successful goal delivery for this trial; the
+unchanged encoder explains why a wait with 5-tick tolerance would time out.
+Corrective effort without displacement is consistent with friction/load and
+controller tuning, but does not identify a unique physical cause. Sent hold
+at 2029 ticks and stopped the task-started armd session with hold-on-shutdown.
+No retries, calibration changes or gain/torque-setting changes were made.
+No software changed; pytest, model tests and Ruff were not run.
+
+### Supervised elbow proportional-gain trial
+
+The user authorized the proposed modest P-gain trial. With armd stopped and
+the follower port unowned, backed up elbow registers 3–39 and all joint
+feedback using the existing SDK. The initial pre-check stopped without any
+writes because EEPROM lock register 55 was already 0 (unlocked), rather than
+the assumed 1. Evidence: `calibration/measurements/elbow-p20-trial-20261114-01.json`.
+
+For the actual trial, set the lock to 1, set a present-position hold goal,
+changed only elbow P from 16 to 20 and verified readback. I=0, D=32 and
+calibration offsets were unchanged. Commanded 2033 to 2010 ticks at speed
+80 ticks/s and acceleration 10. All 51 fresh samples across 5.047 seconds
+read position 2033 with goal 2010; the 5-tick target tolerance was not met.
+Reported speed remained zero, no faults were reported, voltage was 12.2 V,
+temperature 31 degrees C, current peaked at 58.5 mA, and final trial load
+was -12.6%. Increased P produced more effort but no measured displacement;
+this does not distinguish friction/load from other servo-control causes.
+
+Issued a hold at 2033, restored P=16, restored original lock=0, and verified
+P/D/I, deadband, mode and lock readbacks matched the backup. Final feedback
+showed position=goal=2033, speed=0, moving=false, torque enabled, no faults.
+No EEPROM unlock was issued; persistence across a power cycle was not tested.
+Evidence: `calibration/measurements/elbow-p20-trial-20261114-02.json`.
+Removed temporary remote scripts/logs after copying both evidence records.
+No software changed; pytest, model tests and Ruff were not run.
+
+### Supervised elbow integral-gain trial
+
+The user authorized a small I-term test. With armd stopped and the follower
+port unowned, backed up register bytes 3–39 and all joint feedback. Verified
+P=16, D=32, I=0, position mode and original lock=0. Set lock=1 for the trial,
+issued a present-position hold, set I=1 and verified readback, then commanded
+elbow position 2023 to 2000 ticks at speed 80 ticks/s, acceleration 10.
+Recorded 51 fresh samples over approximately 5.05 seconds with bounded
+position/current/load monitoring. First sample within 5 ticks of target was
+at 4.44 seconds (position 2002). Final trial position was 2002, a 21-tick
+movement (approximately 1.85 degrees) and 2-tick residual (0.18 degrees).
+No fault or monitoring-limit violation occurred. This short test supports
+integral action as helpful in this pose, but does not validate gains across
+loads/poses, sustained holding, or physical calibration accuracy.
+
+Issued hold at 2002 and restored I=0 and original lock=0. Readback verified
+P=16, D=32, I=0 and unchanged deadbands/mode/lock. Final feedback showed
+position=goal=2002, speed=0, moving=false, torque enabled and no faults.
+Calibration offsets were unchanged. Evidence:
+`calibration/measurements/elbow-i1-trial-20261114-01.json`.
+Removed the temporary remote trial script/log/evidence copy after preserving
+the local evidence. No software changed; pytest, model tests and Ruff were
+not run for this hardware operation.
+
+### Persistent follower I=2 and supervised pose adjustment
+
+The user confirmed the I=1 corrected pose looked better, then explicitly
+requested permanent I=2 on all joints, a slightly higher joint-3 target,
+and joint 1 approximately 8 degrees more clockwise. Applied this to all six
+follower servos, including gripper; leader was untouched. Interpreted the
+elbow adjustment as another 2 degrees upward from the fresh held position.
+
+With armd stopped and the follower port unowned, backed up register bytes
+3–39 and state for every servo. All six originally read P=16, D=32, I=0,
+lock=0. Set present-position hold goals, then wrote I=2 with EEPROM unlocked
+and relocked each servo (lock=1). Verified every register byte 3–39 matched
+its backup except the intended I register. Monitored the new gains holding
+for two seconds before issuing a sync position command to joints 1 and 3.
+
+Motion start was pan=1919, elbow=2003 ticks. Targets were pan=2010 (+91
+ticks, approximately +8 degrees clockwise viewed from above) and elbow=1980
+(-23 ticks, approximately 2 degrees upward). Speed=80 ticks/s, acceleration=10.
+After five seconds, measured pan=2011 and elbow=1983, within the 5-tick
+tolerance. Measured movement was +92 ticks (8.09 degrees clockwise) and
+-20 ticks (1.76 degrees upward). Other four joints stayed at their hold goals.
+Monitoring of all six joints reported no fault or limit violation.
+
+Issued final holds at achieved positions. Final feedback showed every joint
+stationary with torque enabled and no faults. Readback verified P=16, D=32,
+I=2 and lock=1 on all six. Gain writes were made with EEPROM unlocked for
+persistence; power-cycle persistence has not been experimentally tested.
+Calibration offsets, mechanical limits and leader settings were unchanged.
+This short supervised test does not validate gains for all poses/loads or
+long-duration stability. Evidence and original settings are retained in
+`calibration/measurements/follower-i2-persistent-20261114-01.json`.
+Temporary remote scripts/logs were removed after preserving evidence.
+No software changed; pytest, model tests and Ruff were not run.
+
+## SO-101 sourced inertials and trajectory identification — 14 November 2026
+
+Executed on Intel in the separate `dynamics/` Python 3.12.16 environment,
+with `uv sync --locked`: MuJoCo 4.0.0, Frax 0.2.0, JAX/JAXlib 0.12.0.1,
+NumPy 2.5.4, SciPy 1.18.1 and trimesh 4.12.2. Full manifests are retained in
+`artifacts/dynamics/{physics,armd}-packages.txt`. Core anomalib pin and the
+existing Intel core/LeRobot environments were preserved.
+
+### Real acquisition
+
+The final user-requested trajectory was 40 degrees peak-to-peak (±20 degrees),
+one of five arm joints at a time. Gripper opening was fixed. Used the existing
+localhost armd API and its configured nonzero 300 ticks/s default, acceleration
+10. Firmware safety registers and armd fault/motion/position checks were not
+disabled. The task-specific API launcher selected its existing individually
+addressed read fallback without changing deployed armd source/configuration.
+
+At the user's explicit direction, extra recorder-level speed, current, load,
+voltage and temperature cutoffs were removed. Recorder position envelopes,
+fresh/available position data, actual goal readbacks, finite duration and
+return-to-center checks remain. Earlier aborted sessions are retained on
+Intel as incomplete records and are rejected by fitting. Stops included a
+conservative thermal gate, transient reported speed/temperature readings,
+266.5 mA current and a 10.8 V reading without a servo fault. Their exact
+electrical/telemetry origin was not established. With the arm explicitly
+supported by the user, torque was turned off once for cooldown and verified;
+it was re-enabled at present-position goals when the user requested resumption.
+
+Completed fitting capture: `fit-session-10.json`, **1,278 fresh samples over
+64.985 s**, 12 s cycles. Actual encoder spans, joints 1–5: **38.67, 39.38,
+38.85, 38.41, 37.62 degrees**. Separate validation capture:
+`val-session-01.json`, **1,085 samples over 54.956 s**, 10 s cycles; spans
+**38.76, 37.18, 38.32, 37.27, 38.76 degrees**. Both completed and held.
+PID readback remained P=16/D=32/I=2 with the expected homing offsets; no
+gain or calibration changes were made during dynamics collection. Final
+feedback showed all six joints stationary, torque enabled and no faults.
+The task-started API was then stopped with its hold-on-shutdown behavior.
+
+### Published mass and inertia inputs
+
+Replaced initial heuristic inertials with the official Robot Studio SO101
+URDF, pinned to `a758567c3978dfeefe282ede0500085a48fe8f78`, SHA-256
+`3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c`.
+Source files, license, asset hashes and URLs are cached under ignored
+`artifacts/dynamics/upstream/`.
+
+Published physical group masses: base 147 g, shoulder 100.006 g, upper arm
+103 g, lower arm 104 g, wrist 79 g, gripper plus jaw 99 g; total **632.006 g
+including fixed base**. An earlier conversational total of 732 g was an
+addition error; the imported numbers and model use 632.006 g.
+
+COM and full 3x3 inertia tensors were transformed into the existing calibrated
+local body frames using axis-constrained surface registration. Jaw inertia
+was combined using the parallel-axis theorem; fixed subpart mass is consolidated
+into rigid owners. Incoming moving-joint axes are preserved exactly. The four
+moving-body outgoing axis-line mismatches were at most **0.332 mm**, axis
+angle mismatch at most **0.395 degrees**. Surface-sampling RMS was 2.14–2.82 mm;
+this is model registration, not measured physical accuracy. The fixed base's
+registration has separate residuals in the input JSON. Kinematic calibration
+files and encoder offsets were unchanged.
+
+Menagerie commit `370c43965323c0944b433b202aac5058b5f907a9` provides explicit
+simulation assumptions for joint armature 0.028 kg m², damping 0.60,
+frictionloss 0.052 and torque cap 2.94 Nm. BAM's pinned Feetech model was also
+retrieved, but its 7.4 V/variant conditions were not established as equivalent
+to this follower's 12 V hardware. Its constants were not labelled a measured
+current-to-torque calibration for this arm.
+
+### Forward dynamics, optimization and visible replay
+
+Native MuJoCo affine P/D feedback is evaluated inside each 1 ms physics step;
+the integral/reference update is 100 Hz with clamping and estimated initial
+gravity equilibrium. An earlier explicit derivative-torque hold created
+artificial wrist oscillation; a regression test now covers this failure.
+Masses/COMs/tensors stay frozen at published CAD values while effective SI
+actuator gains and training-selected command delay are fitted. SI gains are
+not firmware register values and are never written to the real servos.
+
+Final sourced-model fit converged (`ftol`): training RMS error **0.3515 degrees**;
+separate validation RMS **0.4360 degrees**, down from **3.0229 degrees** with
+the same sourced model's initial gains. Per-joint validation RMS:
+**0.275, 0.574, 0.473, 0.363, 0.435 degrees** (consult the machine-readable
+report for exact values). Maximum validation error across all joints/frames:
+**2.4899 degrees**. Several effective gains reach bounds; numerical Jacobian
+rank does not establish unique physical motor constants. The earlier heuristic
+inertial fit reached 0.4962 degrees validation RMS and is retained as development
+evidence, not the final inertial model.
+
+Final assets: `model-published-verified/`, `published_priors_verified.json`,
+`published-fit/fit_report.json` and `phantom-published.html` under
+`artifacts/dynamics/` on Intel, with local copies. Input/model hashes, parameter
+history and exact package versions are recorded. The HTML autoplays real
+encoder FK against simulated motion and exposes initial/intermediate/fitted
+stages plus physical-group masses, COMs and full tensors. It was rendered
+inline and its geometry/playback smoke check passed. This is recorded encoder
+motion, not live camera tracking.
+
+Executed checks on the sourced model: Frax/MuJoCo maximum rigid mass-matrix
+difference **2.326e-11**, gravity-vector difference **2.871e-10** over five
+configurations; positive mass-matrix eigenvalues. Frax's fixed gravity was
+rescaled from 9.81 to 9.80665; MuJoCo armature was removed for the rigid-matrix
+comparison. Timestep halving changed joint positions by at most
+**7.511e-5 rad**. Numerical freefall error was 0.490 mm after 0.1 s; a sphere
+settled at 24.981 mm against its 25 mm radius with one contact.
+
+Optional pipeline tests: **15 passed**; Ruff check and format passed (all pipeline
+files). Full core `uv sync --locked`, `uv run --locked pytest` on an isolated
+copy on Intel: **69 passed, 5 skipped**; all 47 core files passed
+`ruff check src tests scripts` and `ruff format --check src tests scripts`.
+Four skips need trained model assets; one needs the live two-bowl simulator.
+Neither was started for this task. Temporary core test checkout was removed
+after preserving its log.
+
+Limits: published CAD nominals are not per-unit weighings, and real trajectories
+do not uniquely identify free masses and uncalibrated actuator torque scale.
+No external link/TCP metrology or final frozen test across payloads was done.
+The model fixes jaw pose and lacks identified backlash/thermal/electrical
+dynamics. **Contact identification is outside the requested scope**; numerical
+contact fixtures do not establish real contact/material parameters. No Intel
+GPU/NPU benchmark or physical grasp/sort claim follows from this work.
+
+## Autonomous 3D DUPLO localization & 8-corner inspection architecture (Windows local) — 14 November 2026
+
+Implemented locally on Windows (`win32` / `AMD64`) without SSH connections, physical robot commands, real camera capture, or paid cloud execution. Root `pyproject.toml` (`anomalib==2.7.0`) and `uv.lock` were left untouched; the local development environment was provisioned separately under ignored `artifacts/arch-venv/` (`Python 3.12.14`) and snapshotted in `configs/arch-local-requirements.txt`:
+
+- Core versions verified: `mujoco==4.0.1` (`mujoco-core==4.0.1`, `mujoco-studio==4.0.1`, `mujoco-menagerie==2026.9.4`), `frax==0.2.0`, `elastiqp==0.2.1`, `jax==0.12.0.1`, `jaxlib==0.12.0.1`, `babyros==0.1.10`, `eclipse-zenoh==1.10.2`, `openvino==2026.4.1`, `modal==1.6.4`, `qualia-cli==0.3.0rc16`, `qualia-sdk==0.8.0rc16`, `scipy==1.18.1`, `scikit-learn==1.9.1`, `trimesh==5.2.1`, `opencv-python-headless==5.0.0.93`, `pytest==9.2.0`, `ruff==0.17.5`.
+- Extracted official LDraw CC-BY-4.0 LEGO DUPLO meshes (`3437` 2x2, `3011` 2x4, `76371` 1x2x2, `2302` 2x3 curved top) into `assets/duplo/`.
+- Implemented `src/brickcell/block_inspector/` (`geometry.py`, `ledger.py`, `frax_ik.py`, `perception.py`, `cogman.py`, `twin.py`, `runtime_bus.py`, `armd_bridge.py`, `camera_adapters.py`, `policy_skills.py`, `cli.py`), edge/container manifests (`wendy.json`, `docker-compose.intel-local.yaml`, `services/*`), Qualia task definition (`configs/qualia/inspection_task.json`), Modal cloud orchestration (`cloud/modal_app.py`), and `tests/test_block_inspector.py`. VLM inference is intentionally omitted per task scope while keeping `target_selector_fn` and Qualia manifest hooks ready for camera-world integration.
+
+### Executed checks and simulation evidence
+
+- Full repository pytest suite (`artifacts\arch-venv\Scripts\pytest.exe -q`): **77 passed, 5 skipped, 0 failed** in 46.43s (`69` existing Brickcell software tests + `8` new tests in `tests/test_block_inspector.py`; the `5` skips are the existing opt-in `model` and `two-bowl` live-simulator markers).
+- Standalone suites: `arm-api/tests/test_arm.py` (**29 passed** in 1.16s) and `tools/test_so101_*.py` with Frax 0.2.0 `JAX_ENABLE_X64=1` (**8 passed, 1 skipped** in 4.75s).
+- Lint & formatting: `ruff check src tests scripts` and `ruff format --check src tests scripts` passed across all 61 Python files.
+- Manifest & Frax asset validation (`python -m brickcell.block_inspector validate`): exit code 0; exported `artifacts/block_inspector/frax/{so101_follower_frax.urdf,so101_spheres.yaml}` and validated `wendy.json`, `configs/qualia/inspection_task.json`, and all 4 DUPLO STL assets.
+- Synchronized station cameras & verified dynamics (`14 November 2026` update):
+  - Loaded measured station camera poses and pinhole intrinsics from `configs/sim-scene.yaml` (`origin/sim/station-twin`: `"Top"` `overhead` D415 `640x480`, low `"Plate"` `side` D415 `640x480` at `[0.3699, -0.4686, 0.2189]`, and `"Gripper"` `wrist` `640x360` mapped onto `Body3` via `registrations["Body3"]`).
+  - Wired `artifacts/dynamics/published_priors_verified.json` directly into the MuJoCo 4.0.1 cell (`T_WORLD_BASE[2, 3] = 0.02932887 m`, `damping=0.6`, `armature=0.028`, `frictionloss=0.052`, `motor_torque_limit_nm=2.94`, and `632.006 g` consolidated CAD link inertials with zero synthetic hub masses).
+  - Replaced `mujoco.studio` (which lacks a software OpenGL 4.1 driver on Windows and drops `gfx=""` targets in Filament) and browser dashboards with MuJoCo 4.0.1's native C++ desktop `Simulate` application (`mujoco.viewer.launch_passive(..., show_left_ui=True, show_right_ui=True)`), verified visible via Win32 `IsWindowVisible=True`.
+  - Streamlined default CogMan & BC skill pipeline (`plate_spin_sort`): pure-contact top-down `PickBlock` -> `PresentAndSpinAtPlateCamera` (`+338 deg` counter-clockwise sweep of Joint 5 `Revolute_4` in front of the low `"Plate"` `side` camera, capturing `17` valid views while polling anomaly messages/raw distances) -> `SortBlockToPile` (`good` green KALAS plate at `[0.10, -0.22]` when clean; `defective` pink KALAS plate at `[0.10, +0.22]` when an anomaly message arrives; refuses to sort on missing thresholds, detector exceptions, or invalid views). Strict `_forbid_teleport` anti-cheat assertions pass across both branches in `tests/test_block_inspector.py`.
+  - Live native MuJoCo 4.0.1 desktop demonstration collection, BC training, and closed-loop rollout (`collect-and-train --part duplo_2x2_3437 --episodes 4 --hold-viewer-seconds 300`): recorded `4` episodes (`1,226` frames + `overhead`/`side`/`wrist` RGB-D keyframes across clean and anomaly-flagged trajectories), trained Fourier-phase `ChunkedMLPPolicy` (`chunk_horizon=8`, `train_mse=0.000231`), and passed live closed-loop MuJoCo evaluation (`closed_loop_eval_sorted_on_plate=true`).
+
+### Limitations and unexecuted hardware/cloud work
+
+- All localization, pure-contact grasping, Joint-5 Plate-camera spin, and KALAS plate sorting metrics above are **synthetic MuJoCo 4.0.1 simulation results**, not physical robot or real defect-detection claims. Any anomaly score hooks use raw distances, never probabilities.
+- Live bench execution on the physical Intel cell (`armd` follower, RealSense D415s, Sonix gripper camera), VLM target selection / Qualia cloud checks, WendyOS container builds, Intel GPU/NPU/XPU inference benchmarks, and Modal A100/H100 training jobs were not executed in this local task.
+
+## Real-time lightweight Real2Sim point-cloud pipeline & closed-loop execution (Windows local) — 14 November 2026
+
+Extracted teammates' 15 depth-perception and multi-camera fusion modules from `origin/line-mark-test` (`fd8de45`) and `origin/main` (`554020e`) (`scripts/live_depth.py`, `scripts/realsense_depth_capture.py`, `scripts/merge_brick_preview.py`, `scripts/board_alignment_pilot.py`, `scripts/align_pose_preview.py`, `scripts/compare_depth_scans.py`, `scripts/patchcore_depth_viewer.py`, `scripts/detect_brick_line.py`, `scripts/orange_corners.py`, `scripts/reconstruction_audit.py`, `scripts/reconstruction_review.html`, `configs/rgbd-viewer.json`, `src/brickcell/reconstruction.py`, `src/brickcell/inspection/rgbd.py`, `src/brickcell/inspection/line_reference.py`) together with `assets/duplo/stable_poses.json` from `origin/sim/station-twin`.
+
+Implemented `src/brickcell/block_inspector/real2sim.py` (`Real2SimPipeline`, `Real2SimSceneTracker`, `perceive_bricks_and_reject_clutter`, `localize_and_subtract_support_surfaces`, `filter_robot_arm_points`, `ingest_teammate_depth_packet`, `fuse_teammate_top_and_plate_packets`, `decode_live_depth_snapshot`, `load_point_cloud_file`, `save_point_cloud_ply`, `synthesize_cluttered_scene_point_cloud`) and wired it into `SO101InspectionTwin` (`sync_real2sim_scene`, `initial_T_world_block`, `plate_positions`, and `viewer.user_scn` distractor overlay) and the `python -m brickcell.block_inspector real2sim` CLI subcommand.
+
+### Executed checks and simulation evidence
+
+- **Multi-source ingestion**: Tested ingestion of Dual-D415 RGB-D frames, teammate `live_depth.py` / `realsense_depth_capture.py` JSON packets (`top-points.json`, `plate-points.json`, `provisional-transform.json`), `/snapshot/{top,plate}` base64 JPEG + 16-bit PNG packets, ASCII `.ply`, and RealSense SDK `binary_little_endian` `.ply` files in viewer coordinates `(x, -y, -z)`.
+- **5-Gate distractor rejection & 6D asset localization** (`python -m brickcell.block_inspector real2sim --perceive-only --headless --fast --num-blocks 4`):
+  - Localized all 4 official LEGO DUPLO brick assets (`duplo_2x2_3437`, `duplo_2x4_3011`, `duplo_1x2x2_76371`, `duplo_2x3_curved_top_2302`) across their `stable_poses.json` resting poses with `1.15–2.64 mm` surface ICP RMSE (`0.986–1.000` fitness, `< 0.20 mm` mean centroid replication error) and localized the 3 IKEA KALAS plates (`source`, `good`, `defective`) in `~129–180 ms` per 94,002-point fused cloud on CPU.
+  - Filtered out and ignored 100% of injected non-target distractors: `human_arm` (463-point reaching forearm/hand cluster), `wire` (2 tabletop USB/power cable clusters, 123 & 145 points), `trash` (3 clusters: crumpled white/grey cup, brown cardboard scrap, and orange calibration board fragment), and `robot_arm` (`3,162` points masked via calibrated SO-101 forward kinematics and camera housing OBBs).
+- **Closed-loop MuJoCo 4.0.1 Desktop replication & policy/planner execution**:
+  - `CogManInspectionAgent` closed-loop run (`real2sim --fast --num-blocks 2 --controller cogman_planner`): replicated the perceived bricks and plates in MuJoCo 4.0.1 Desktop (`IsWindowVisible=True`, `mean_replication_pos_err_mm=0.17`), picked the perceived brick via pure contact physics, spun Joint 5 counter-clockwise in front of the low Plate camera, detected the surface defect blemish (`surface_blemish_detected_in_plate_cam`), and sorted it into the pink `defective` KALAS plate (`plate_xy_err_mm=8.06`).
+  - `ChunkedMLPPolicy` closed-loop run (`real2sim --headless --fast --num-blocks 1 --controller chunked_mlp_policy`): replicated the perceived scene (`mean_replication_pos_err_mm=0.13`), trained an action-chunked behavioral cloning policy (`policy_train_mse=0.0011254`), reset to the perceived initial state, and rolled out the learned policy closed-loop into the target KALAS plate (`execution_succeeded=true`).
+- **Automated test suite & linting**:
+  - `tests/test_block_inspector.py -k "real2sim"`: **3 passed** in 20.57s (`test_real2sim_distractor_rejection_and_6d_brick_localization`, `test_real2sim_teammate_depth_packets_and_ply_ingestion`, `test_real2sim_closed_loop_replication_and_policy_rollout`).
+  - `ruff check src tests scripts` and `ruff format --check src tests scripts` passed across all 79 Python files.
+
+### Limitations
+
+- All point-cloud synthesis, distractor injection, MuJoCo 4.0.1 Desktop scene replication, and closed-loop policy/planner executions above were run locally in simulation on Windows (`AMD64` CPU); no physical robot commands, SSH connections, or live RealSense hardware captures were performed during this task.
+
+## Three-plate 8-block cluttered simulation & complete pre-hardware architecture (Windows local) — 14 November 2026
+
+Extended the simulated cell to three IKEA KALAS plates (`source` aquamarine blue `[0.28, 0.82, 0.80]` at `[0.23, 0.00, 0.0]`, `good` pastel green `[0.62, 0.86, 0.76]` at `[0.10, -0.22, 0.0]`, and `defective` pastel pink `[0.90, 0.72, 0.78]` at `[0.10, +0.22, 0.0]`) populated with 8 randomly generated mixed DUPLO blocks (`duplo_2x2_3437`, `duplo_2x4_3011`, `duplo_1x2x2_76371`, `duplo_2x3_curved_top_2302`) settled under MuJoCo 4.0.1 contact physics inside the aquamarine `source` plate, and completed all remaining simulation-capable architecture layers (`openvino_anomaly.py`, `cell_adapter.py`, `runtime_nodes.py`, `services/*`, `policy_skills.py`, `cloud/modal_app.py`).
+
+### Executed checks and simulation evidence
+
+- **Unified repository pytest suite** (`artifacts\arch-venv\Scripts\pytest.exe -q`): **83 passed, 5 skipped, 0 failed** in 306.41s (`69` core Brickcell tests + `14` end-to-end tests in `tests/test_block_inspector.py`; the `5` skips remain the opt-in `BRICKCELL_MODEL_CONFIG` and `BRICKCELL_SIMULATION_URL` markers).
+- **Lint, formatting & manifests**:
+  - `artifacts\arch-venv\Scripts\ruff.exe check src tests scripts services cloud` -> `All checks passed!`.
+  - `artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts` -> `79 files already formatted`.
+  - `artifacts\arch-venv\Scripts\python.exe -m brickcell.block_inspector validate` -> exit code 0 (`wendy_manifest_valid=true`, `qualia_manifest_valid=true`, `duplo_assets_verified=true`).
+- **OpenVINO 2026.4.1 CPU Plate-camera anomaly detector (`openvino_anomaly.py` + `OpenVINODetector`)**:
+  - Explicit leakage-checked partitions rendered from MuJoCo 3D Plate-camera (`realsense_2`) depth-isolated crops with disjoint `object_id` and `session_id` groups: `train/good: 32` (trained strictly on `good` views), `val/good: 8`, `val/defective: 8`, `test/good: 8`, `test/defective: 8`.
+  - Exported OpenVINO 2026.4.1 IR (`plate_anomaly_detector.xml`/`.bin`/`.json`, `model_version = plate-patch-ov-8e1a4280c747`), calibrated raw patch-distance threshold on `val` (`threshold_value = 0.520599`, `method = validation_max_f1_ties_favor_recall`), and evaluated once on held-out `test`: **`TP=8, TN=8, FP=0, FN=0`** (`test_min_raw_distance = 0.3055`, `test_max_raw_distance = 0.7417`). All scores are raw patch distances, never probabilities.
+- **3-plate 8-block cluttered singulation & OpenVINO sorting (`clear_source_plate`)**:
+  - Verified in `test_three_plates_eight_clustered_mixed_duplo_blocks_openvino_sort` with `_forbid_teleport` anti-cheat guard active: segmented all 8 clustered mixed DUPLO bricks in `plate_source` (with conical KALAS rim masking and `stride=1` empty-plate verification), peeled the cluster outside-in via `select_clutter_safe_topdown_grasp`, picked **8/8** bricks purely by jaw contact friction, spun Joint 5 (`Revolute_4`) counter-clockwise in front of the low Plate camera, scored depth-isolated foreground crops via `OpenVINODetector`, and sorted **8/8** bricks (`4` clean -> `plate_good`, `4` synthetic-blemish -> `plate_defective`) across non-overlapping `PLATE_DROP_SLOT_OFFSETS_XY` ring slots via a `z = 16.5 cm` center-plate clearance waypoint.
+- **Core `Supervisor` boundaries & multi-node BabyROS / XPolicyLab integration**:
+  - `test_core_supervisor_boundaries_and_openvino_manifest_partitions`: ran `brickcell.controller.supervisor.Supervisor` end-to-end over `TwinRobotAdapter(RobotInterface)` (`mode = "mujoco_simulation_not_physical"`, non-blocking `ActionStatus.PENDING -> SUCCEEDED` slices), `TwinPlateFrameSource(FrameSource)`, and `InspectionService(OpenVINODetector)` (`completed_cycles = 1`, `errors = 0`, `physical_success_verified = False`).
+  - `test_multinode_babyros_runtime_graph_and_xpolicylab_checkpoint_roundtrip`: verified closed-loop multi-node communication across `CameraPubNode -> PerceptionAndAnomalyNode -> FraxMujocoTwinNode <-> CogManInspectorNode` over `InProcessRuntimeBus` (`so101/inspection/anomaly` raw-distance alerts; detector never commands robot), `ChunkedMLPPolicy` `.npz` checkpoint round-trip, `lerobot_v3` `meta/info.json` + SHA-256 `kept_episodes_manifest.json` export, and `RemoteXPolicyClient` <-> `LocalXPolicyWebSocketServer` msgpack-numpy action-chunk round-trip plus stationary-hold timeout/unreachable safety fallback.
+
+### Limitations and unexecuted hardware/cloud work
+
+- All 8-block clutter perception, contact-friction grasps, OpenVINO raw-distance evaluations, `Supervisor` cycles, and multi-node BabyROS runs above use **synthetic MuJoCo 4.0.1 simulation data**, not physical defect-detection accuracy, physical grasp reliability, or Intel GPU/NPU/XPU hardware benchmarks.
+- Physical bench connection (`ssh.md` / `hardware.md` / `arm-api.md`), real STS3215 servo motion, physical RealSense D415 / Sonix camera capture, and remote cloud training/inference were intentionally not executed prior to starting the hardware phase.
+
+
