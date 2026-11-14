@@ -1,6 +1,7 @@
 """Loopback live D415 point-cloud review; run in a separate Intel SDK environment."""
 
 import argparse
+import base64
 import json
 import threading
 import time
@@ -65,6 +66,7 @@ def main():
                 color, depth = frames.get_color_frame(), frames.get_depth_frame()
                 if not color or not depth:
                     continue
+                received_at = time.time()
                 rgb = np.asanyarray(color.get_data())
                 xyz = (
                     np.asanyarray(pc.calculate(depth).get_vertices())
@@ -77,10 +79,17 @@ def main():
                 ok, jpeg = cv2.imencode(".jpg", rgb)
                 if not ok:
                     raise RuntimeError("JPEG encoding failed")
+                ok, depth_png = cv2.imencode(
+                    ".png", np.asanyarray(depth.get_data()).astype(np.uint16)
+                )
+                if not ok:
+                    raise RuntimeError("Depth encoding failed")
                 intr = color.profile.as_video_stream_profile().get_intrinsics()
                 packet = dict(
                     points=points,
-                    time=time.time(),
+                    time=received_at,
+                    frame_id=f"{serial}-{depth.get_frame_number()}",
+                    depth_png=depth_png.tobytes(),
                     jpeg=jpeg.tobytes(),
                     serial=serial,
                     depth_scale_m=scale,
@@ -111,7 +120,12 @@ def main():
             )
             if route != "/":
                 parts = route.strip("/").split("/")
-                if len(parts) != 2 or parts[0] not in ("points", "rgb") or parts[1] not in names:
+                if (
+                    len(parts) != 2
+                    or parts[0] not in ("points", "rgb", "snapshot")
+                    or parts[1] not in names
+                    or (parts[0] == "snapshot" and parts[1] == "merged")
+                ):
                     self.send_error(404)
                     return
                 with lock:
@@ -149,8 +163,22 @@ def main():
                     body = json.dumps({"error": p.get("error", "Stale camera frame")}).encode()
                 elif parts[0] == "rgb":
                     kind, body = "image/jpeg", p["jpeg"]
+                elif parts[0] == "snapshot":
+                    snapshot = {
+                        key: p[key]
+                        for key in ["time", "frame_id", "serial", "depth_scale_m", "intrinsics"]
+                    }
+                    snapshot.update(
+                        rgb_jpeg_b64=base64.b64encode(p["jpeg"]).decode(),
+                        depth_png_b64=base64.b64encode(p["depth_png"]).decode(),
+                        age_s=age,
+                        aligned_to="color",
+                        synthetic=False,
+                    )
+                    kind, body = "application/json", json.dumps(snapshot, allow_nan=False).encode()
                 else:
                     p.pop("jpeg")
+                    p.pop("depth_png", None)
                     p["age_s"] = age
                     kind, body = "application/json", json.dumps(p, allow_nan=False).encode()
             self.send_response(status)

@@ -1,0 +1,6 @@
+{
+  "cameras": {
+    "top": {"serial": "350122060653", "crop": null, "models": {}, "min_depth_fraction": 0.6},
+    "plate": {"serial": "243622060450", "crop": null, "models": {}, "min_depth_fraction": 0.6}
+  }
+}
