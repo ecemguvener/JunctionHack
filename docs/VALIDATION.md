@@ -1,5 +1,168 @@
 # Executed validation — 13 November 2026
 
+## Timed five-face capture — 14 November 2026
+
+Ran the operator-assisted sequence on Intel for `red-brick-001`, session
+`clean-sequence-001`, with faces `front right back left top` at 30-second
+intervals using the side D415. All five fresh bursts completed and the sequence
+record was written at `/tmp/brickcell-multicam/data/face-capture-runs/` on Intel.
+Each result was REINSPECT because no real defect model/calibration is configured;
+this is expected. Face labels are operator supplied and require image review.
+No robot movement or automatic defect decision occurred.
+
+Added `scripts/capture_faces.py`, a timed operator-assisted face sequence. It
+requires explicit object/session IDs, face order, camera and label, captures at
+the configured interval (default 30 seconds), and never commands the robot or
+makes defect decisions.
+
+## Real-image reference-only PatchCore pilot — 14 November 2026
+
+Taped capture `21d2b3935a874fb4b60a229b5a70dc00` clearly shows the gray patch.
+The frozen `red-fixed-v1` checkpoint scored it **2.485419**, versus fitting
+reference **2.230126** and clean repeat **2.273086**. The brick was turned
+upright and partly clipped relative to the lying-down fitting pose. This
+confounds pose/framing and patch effects; no defect-specific accuracy or
+calibrated decision is claimed. Maps and comparison JSON were saved.
+
+After recentering, visually verified clean capture
+`1c47f4b1c90d4892af2d20705b5bab9b` at crop `[280,360,365,465]` (85×105).
+Fitted a separate clean-only reference checkpoint at
+`artifacts/pilots/red-fixed-v1/`, with explicit object/session/crop provenance.
+Scored its fitting image **2.230126** and a fresh same-pose clean repeat
+**2.273086**. Visually verified both contain the clean brick. This is a
+same-object repeatability diagnostic, not validation or test accuracy. A taped
+capture matching this new camera pose is still needed. Tests remained
+**80 passed / 5 optional integration tests skipped**, with Ruff checks passing.
+
+Clean recapture `39dbc2ac3ab1440397e6ed270440176b` failed visual review:
+the camera viewpoint had changed, the crop contained tabletop and the brick
+was partially outside the full-frame right edge. Moved the image to review
+locally and remotely, excluded it from training, and did not fit a new model.
+The taped lying-down capture still lacks a matched clean reference.
+
+Capture `cc5b203826114bf780baf55b033d7f4b` visibly shows a rectangular gray
+patch on the lying-down red brick's front face. Saved and visually checked the
+80×95 raw crop `[265,350,345,445]`. This pose/crop differs from the original
+upright clean reference; a matched clean capture is required before attributing
+any score difference to the patch. No new accuracy result was claimed.
+
+Follow-up capture `e8f03aa228bc421bbf0938aac35df303` scored **2.327533**
+with the same frozen reference checkpoint. The brick had rotated relative to
+the clean reference and a dark mark was still not visually identifiable. Kept
+this image in the review collection, not verified defective data. No threshold
+or defect-detection success is inferred from its distance.
+
+Added `scripts/appearance_pilot.py` for an explicitly uncalibrated same-object
+appearance experiment, separate from the formal train/val/test workflow. Fitted
+Anomalib 2.7.0 PatchCore on the real clean red-brick crop using CPU, ResNet-18,
+128×128 input, layer2/layer3, seed 42 and 5% coreset. One fitting reference
+produced 11 coreset features. Saved the checkpoint hash, image hashes, versions
+and no threshold in ignored `artifacts/pilots/red-reference-v1/`.
+
+Reloaded the checkpoint and executed real image inference: fitting reference
+distance **2.060604**, later unverified capture **2.407176**. Saved anomaly maps
+and overlays. No dark mark was visually identifiable in the later capture, so
+it was moved from the labeled defective collection into a review collection.
+Its report retains the human label and adds an UNVERIFIED review note. It is
+not a verified defective test image. Pose/lighting variation can explain score
+changes; these two scores establish neither defect detection nor accuracy.
+
+This pilot has no calibration, no held-out evaluation, and no GOOD/DEFECTIVE
+decision or robot integration. Both captures retain the same physical object
+ID; they must not be split across formal train/val/test partitions. The normal
+dataset validation and production calibration paths were not weakened.
+
+Executed `uv run --locked pytest -q`: **80 passed, 5 optional integration tests
+skipped**; `uv run --locked ruff check src tests scripts` and format check passed.
+The new pilot additionally completed actual fit/checkpoint-reload/inference.
+
+## First real brick capture — 14 November 2026
+
+After the operator placed a clean blue brick in the side D415 view, visually
+verified it and set crop `[270,310,366,434]` in the 640×480 source. Added scoped
+single-camera collection without relaxing three-view acceptance requirements.
+Captured a fresh side-only burst and saved one unannotated 96×124 PNG as
+`blue-brick-001` / `side-session-001`, human label GOOD. Retrieved and visually
+verified the saved crop. Maximum adjacent-frame motion was 2.54 grayscale levels.
+The detector result remained REINSPECT because no real calibration exists.
+
+Executed tests: **80 passed, 5 optional integration tests skipped**. Ruff lint,
+format and diff whitespace checks passed. This is one human-labeled example,
+not a trained/evaluated dataset or evidence of real defect accuracy. The object
+ID must remain unchanged if this same brick is later marked.
+
+## Three-camera bench and burst fusion — 14 November 2026
+
+Deployed the loopback-only bench on Intel port 8092, forwarded locally to 18092.
+Both D415 feeds and the upright wrist feed returned fresh images. D415s reported
+640×480; the wrist source reported 1920×1080. Each preview JPEG endpoint returned
+HTTP 200 and JPEG bytes. Added a raw `/frame.jpg` endpoint to the existing wrist
+helper so focus text/rectangles do not enter collected images; increased its
+focus median window from 7 to 15 samples. No arm service was accessed.
+
+The bench reports a 15-frame median focus measure and median absolute deviation
+as jitter, using light Gaussian filtering for focus measurement only. One final
+status sample reported jitter of 2.06% overhead, 13.92% side and 1.27% wrist.
+These are scene-dependent diagnostics, not measured defect accuracy or a claim
+that sensor noise has been eliminated.
+
+Added object-scoped 10-frame fresh bursts, explicit crop/operator-confirmation
+requirements, capture timestamps, a provisional motion gate and per-camera
+calibrated decision fusion. Unit tests verify isolated spikes, sustained defects,
+missing/uncalibrated views, wrong/duplicate identities, same-batch RGB capture,
+and that a human GOOD label cannot become an uncalibrated GOOD prediction.
+The deployed service refused an unconfirmed capture with HTTP 400.
+
+Executed `.venv/bin/python -m pytest -q`: **79 passed, 5 optional integration tests
+skipped**. Ruff lint and format checks on `src tests scripts` passed. Browser
+automation was unavailable, so visual browser layout was not verified; live HTTP
+status and all three image endpoints were verified directly.
+
+No real defect model is configured. Real-model burst inference, calibration of
+the temporal/motion rules and real three-view defect accuracy remain untested.
+The combined live result cannot be GOOD until all required models/views qualify.
+Camera timestamps are receive times, not hardware synchronization, and object
+correspondence still requires operator confirmation. No training photos were
+captured from an unidentified scene during this verification. See `MULTICAMERA.md`.
+
+## Intel camera connectivity — 14 November 2026
+
+Connected to the pinned Intel SSH host and enumerated USB/video devices. Both
+D415s (`318123021715`, `344223025431`) returned 640×480 BGR frames through
+OpenCV/V4L2 using stable by-id paths; JPEGs were saved for visual review. The
+Sonix device was busy with an existing focus-assistance process. Its metrics
+reported 1920×1080 at 30 fps and one annotated JPEG was retrieved through the
+existing loopback MJPEG endpoint, without opening the device again. These
+snapshots were copied to ignored `artifacts/camera-check/brickcell-camera-check/`.
+
+Visual review confirmed overhead, side and upside-down wrist views respectively.
+No brick defect classification, depth capture, camera calibration, real-image
+training or robot movement was performed. No remote packages/services were
+installed or stopped. A local SSH tunnel exposes the existing focus preview at
+`127.0.0.1:18091`; its focus score is not a defect score.
+
+## Real-camera capture tooling — 14 November 2026
+
+Added explicit OpenCV camera capture with BGR-to-RGB conversion, checked pixel
+crops, unique PNGs, object/session/view identity and quality sidecars. Optional
+inspection uses the existing service and refuses synthetic-trained models.
+Added `configs/patchcore-real.yaml` and `docs/REAL_CAMERA.md` for collection,
+partitioning, real-image training and new-capture inspection.
+
+Executed `.venv/bin/python -m pytest -q`: **73 passed, 5 skipped** (four optional
+real-model tests and one live-simulator test). Ruff lint and format checks on
+`src tests scripts` passed. The capture module's `--help` ran successfully.
+Camera tests use injected frames: RGB channel/crop correctness, failure cleanup,
+dataset path validation and capture-to-manifest identity preservation.
+
+No physical camera capture or real-image training was performed. An attempted
+read-only station check failed because the `intel` SSH alias did not resolve;
+no remote configuration was changed. Camera device selection, OS permissions,
+focus/exposure, capture blocking behavior and quality thresholds require checks
+on the selected hardware. The capture utility is on demand, not a bounded-latency
+robot controller camera adapter. Existing simulated accuracy is not evidence of
+real defect accuracy.
+
 All results below were produced locally in this repository. No remote Intel server, SSH login, real camera, physical arm, or cloud training was used during implementation.
 
 ## Host and versions

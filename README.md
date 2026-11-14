@@ -105,6 +105,12 @@ Each run saves an event JSONL with a unique run ID plus `summary.json` in its ou
 
 ## Import real images
 
+For on-demand webcam/RGB capture, quality checks and real-model inspection,
+follow [the real-camera walkthrough](docs/REAL_CAMERA.md). Start with
+`uv run python -m brickcell.sources.camera --help`. This sends no robot commands.
+For the Intel laptop's two D415s and upright wrist camera together, see
+[three-camera capture and conservative decision fusion](docs/MULTICAMERA.md).
+
 Organize captures with globally stable physical object IDs and session IDs:
 
 ```text

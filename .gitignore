@@ -14,3 +14,4 @@ intel_junction_ed25519
 MUJOCO_LOG.TXT
 .env.*
 !.env.example
+/inspection/output/
