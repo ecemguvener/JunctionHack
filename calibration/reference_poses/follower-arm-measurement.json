@@ -20,6 +20,8 @@
     "gripper_closed_without_interpenetration": true,
     "gripper_closed_raw": 1339,
     "wrist_roll_cad_degrees": -90,
+    "display_wrist_roll_correction_degrees": 180,
+    "display_correction_source": "User reports the displayed end-effector is 180 degrees opposite the measurement. Apply +180 degrees to the candidate wrist-roll display; this does not establish encoder direction or confirmed mounting calibration.",
     "wrist_roll_cad_reference_confirmed_by_user": true,
     "wrist_roll_angle_is_approximate": true,
     "camera_parallel_to_ground": true

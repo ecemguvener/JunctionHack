@@ -1,0 +1,12 @@
+{
+  "arm": "follower",
+  "reference_method": "human-confirmed visual match to a specified CAD pose",
+  "measurement_uncertainty": "not quantified; this is not a metrology calibration",
+  "poses_checked": 10,
+  "max_frax_pose_entry_error": 9.588113428216083e-10,
+  "max_frax_jacobian_entry_error": 6.558374329723726e-10,
+  "max_finite_difference_jacobian_error": 1.409052874379313e-10,
+  "position_limits_match_calibration": true,
+  "physical_accuracy_measured": false,
+  "hardware_access_performed": false
+}

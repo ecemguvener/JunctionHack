@@ -7,6 +7,7 @@ These coordinates are not calibrated servo register values.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -155,7 +156,12 @@ class CalibratedSO101Kinematics(SO101Kinematics):
 
         super().__init__(archive)
         self.calibration = ServoCalibration(arm)
-        offsets, signs = self.calibration.alignment(alignment_path or ALIGNMENT_PATH)
+        alignment_file = alignment_path or ALIGNMENT_PATH
+        offsets, signs = self.calibration.alignment(alignment_file)
+        metadata = json.loads(Path(alignment_file).read_text(encoding='utf-8'))['arms'][arm]
+        model_hash = metadata.get('reference_model_sha256')
+        if model_hash and model_hash != hashlib.sha256(Path(archive).read_bytes()).hexdigest():
+            raise ValueError('Alignment reference does not match the CAD model archive')
         self.cad_at_zero = offsets
         self.cad_sign = signs
         updated = []

@@ -1,0 +1,59 @@
+{
+  "timestamp_utc": "2026-11-14T00:20:19.055567+00:00",
+  "read_only": true,
+  "units": {
+    "raw": "homed Present_Position ticks",
+    "arm_value": "LeRobot calibrated degrees",
+    "gripper_value": "calibration range percent; physical open direction unverified"
+  },
+  "arms": {
+    "leader": {
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE7044736-if00",
+      "calibration_sha256": "a56c52b11006fff6f6345d91db4a0a7bac73c727d83b3565c2e0a764f69c074e",
+      "joints": {
+        "shoulder_pan": {
+          "id": 1,
+          "raw": 2006,
+          "value": 15.384615384615385,
+          "raw_degrees": 176.30859375,
+          "torque_enabled": false
+        },
+        "shoulder_lift": {
+          "id": 2,
+          "raw": 2474,
+          "value": 42.02197802197802,
+          "raw_degrees": 217.44140625,
+          "torque_enabled": false
+        },
+        "elbow_flex": {
+          "id": 3,
+          "raw": 1602,
+          "value": -31.34065934065934,
+          "raw_degrees": 140.80078125,
+          "torque_enabled": false
+        },
+        "wrist_flex": {
+          "id": 4,
+          "raw": 2878,
+          "value": 67.34065934065934,
+          "raw_degrees": 252.94921875,
+          "torque_enabled": false
+        },
+        "wrist_roll": {
+          "id": 5,
+          "raw": 2091,
+          "value": 3.8241758241758244,
+          "raw_degrees": 183.779296875,
+          "torque_enabled": false
+        },
+        "gripper": {
+          "id": 6,
+          "raw": 2202,
+          "value": 71.12860892388451,
+          "raw_degrees": 193.53515625,
+          "torque_enabled": false
+        }
+      }
+    }
+  }
+}

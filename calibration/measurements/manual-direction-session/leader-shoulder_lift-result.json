@@ -1,0 +1,31 @@
+{
+  "arm": "leader",
+  "joint": "shoulder_lift",
+  "accepted": true,
+  "before": "before-leader-lift-01.json",
+  "after": "after-leader-lift-01.json",
+  "physical_direction_tested": "raise upper arm toward upright from the extended pose",
+  "physical_direction_for_increasing_value": "lower upper arm away from upright toward the extended pose",
+  "encoder_delta_ticks": -209,
+  "encoder_delta_degrees": -18.369140625,
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": 0,
+    "follower/shoulder_lift": 0,
+    "follower/elbow_flex": 0,
+    "follower/wrist_flex": 0,
+    "follower/wrist_roll": 0,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": 1,
+    "leader/shoulder_lift": -209,
+    "leader/elbow_flex": -27,
+    "leader/wrist_flex": 6,
+    "leader/wrist_roll": 6,
+    "leader/gripper": 0
+  },
+  "cad_motion_sign": -1,
+  "cad_sign": 1,
+  "cad_direction_check": {
+    "elbow_height_derivative_m_per_positive_cad_rad_at_extended_reference": -0.11218703772630788
+  },
+  "cad_at_zero_rad": null
+}

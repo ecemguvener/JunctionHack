@@ -1,0 +1,26 @@
+{
+  "arm": "follower",
+  "joint": "gripper",
+  "accepted": true,
+  "before": "before-follower-gripper-01.json",
+  "after": "after-follower-gripper-01.json",
+  "physical_direction_tested": "jaw opens",
+  "encoder_delta_ticks": 358,
+  "calibration_value_delta": 23.866666666666667,
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": -1,
+    "follower/shoulder_lift": -1,
+    "follower/elbow_flex": 0,
+    "follower/wrist_flex": 1,
+    "follower/wrist_roll": -1,
+    "follower/gripper": 358,
+    "leader/shoulder_pan": 0,
+    "leader/shoulder_lift": 0,
+    "leader/elbow_flex": 0,
+    "leader/wrist_flex": 0,
+    "leader/wrist_roll": 0,
+    "leader/gripper": 0
+  },
+  "gripper_open_raw_sign": 1,
+  "opening_increases_calibrated_value": true
+}
