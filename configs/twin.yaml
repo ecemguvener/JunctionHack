@@ -33,10 +33,11 @@ perception:
   plates:
     floor_z: 0.0031         # a brick on a plate stands at this height (sim collision floor)
     # One or more colours per plate name; the nearest wins. First the real KALAS plates
-    # (fixture-001, 2026-11-14), then the sim colours. Other colours (blue plate) = no name.
+    # (fixture-001, 2026-11-14), then the sim colours. Other colours = no name.
     colors:
       good: ["#17825c", [0.62, 0.86, 0.76]]
       defective: ["#c28fa1", [0.90, 0.72, 0.78]]
+      spare: ["#0296bf", "#0ab0d4"]   # blue plate (not a sort target)
     max_color_distance: 20.0
     min_arc_deg: 160.0      # degrees of plate wall that must be seen
   segment:
