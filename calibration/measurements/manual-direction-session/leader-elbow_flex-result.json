@@ -1,0 +1,28 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": true,
+  "isolation_passed": false,
+  "confirmed_by_user": true,
+  "confirmation_utc": "2026-11-14T00:32:13.215252+00:00",
+  "confirmation_instruction": "User explicitly requested: save it as confirmed",
+  "before": "before-leader-elbow-07.json",
+  "after": "after-leader-elbow-07.json",
+  "physical_direction_tested": "lower whole forearm and wrist/gripper at elbow",
+  "physical_direction_for_increasing_value": "lower forearm at elbow",
+  "cad_sign": 1,
+  "cad_motion_sign": 1,
+  "all_leader_delta_ticks": {
+    "shoulder_pan": 5,
+    "shoulder_lift": -53,
+    "elbow_flex": 309,
+    "wrist_flex": 8,
+    "wrist_roll": -1,
+    "gripper": 0
+  },
+  "non_target_violations_encoder_degrees": {
+    "shoulder_lift": -4.658203125
+  },
+  "quality_note": "User accepted sign +1 despite shoulder co-movement. Original rejected strict-isolation attempt retained. Zero offset is not yet measured.",
+  "cad_at_zero_rad": null
+}

@@ -1,0 +1,6 @@
+action_timeout_s: 5.0
+poll_interval_s: 0.01
+max_pick_retries: 1
+max_reinspections: 2
+max_release_retries: 1
+inspection_timeout_s: 30.0

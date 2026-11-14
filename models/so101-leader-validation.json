@@ -1,0 +1,12 @@
+{
+  "arm": "leader",
+  "reference_method": "human-confirmed visual match to a specified CAD pose",
+  "measurement_uncertainty": "not quantified; this is not a metrology calibration",
+  "poses_checked": 10,
+  "max_frax_pose_entry_error": 9.581303597738788e-10,
+  "max_frax_jacobian_entry_error": 6.551166276125286e-10,
+  "max_finite_difference_jacobian_error": 9.998835093227854e-11,
+  "position_limits_match_calibration": true,
+  "physical_accuracy_measured": false,
+  "hardware_access_performed": false
+}

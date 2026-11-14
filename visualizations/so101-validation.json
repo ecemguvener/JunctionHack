@@ -1,0 +1,8 @@
+{
+  "poses": 21,
+  "frames": 18,
+  "joints": 17,
+  "max_position_error_m": 1.3286267206011916e-09,
+  "max_rotation_entry_error": 1.0834644847967922e-09,
+  "display_triangles": 44829
+}

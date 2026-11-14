@@ -1,0 +1,26 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": false,
+  "before": "before-leader-elbow-01.json",
+  "after": "after-leader-elbow-01.json",
+  "reason": "Non-target joint exceeded the 3 degree isolation tolerance",
+  "non_target_violations_encoder_degrees": {
+    "leader/shoulder_lift": -5.537109375
+  },
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": -1,
+    "follower/shoulder_lift": 0,
+    "follower/elbow_flex": 0,
+    "follower/wrist_flex": 0,
+    "follower/wrist_roll": 0,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": -23,
+    "leader/shoulder_lift": -63,
+    "leader/elbow_flex": 389,
+    "leader/wrist_flex": 31,
+    "leader/wrist_roll": 0,
+    "leader/gripper": 0
+  },
+  "cad_sign_recorded": null
+}

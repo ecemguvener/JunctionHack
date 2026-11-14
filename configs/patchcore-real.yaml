@@ -1,0 +1,14 @@
+# Capture with the same camera, crop and framing for training and prediction.
+manifest: ../data/real-manifest.json
+output_dir: ../artifacts/models/patchcore-real-v1
+seed: 42
+image_size: [128, 128]
+batch_size: 4
+num_workers: 0
+torch_threads: 4
+backbone: resnet18.tv_in1k
+layers: [layer2, layer3]
+pre_trained: true
+coreset_sampling_ratio: 0.1
+num_neighbors: 3
+uncertainty_fraction: 0.02

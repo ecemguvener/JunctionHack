@@ -1,0 +1,22 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": false,
+  "before": "before-leader-elbow-07.json",
+  "after": "after-leader-elbow-07.json",
+  "reason": "Shoulder lift exceeded the isolation tolerance despite support; switch to measured reference-pose method",
+  "non_target_violations_encoder_degrees": {
+    "shoulder_lift": -4.658203125
+  },
+  "all_leader_delta_ticks": {
+    "shoulder_pan": 5,
+    "shoulder_lift": -53,
+    "elbow_flex": 309,
+    "wrist_flex": 8,
+    "wrist_roll": -1,
+    "gripper": 0
+  },
+  "follower_excluded_by_user": true,
+  "candidate_cad_sign_not_confirmed": 1,
+  "cad_sign_recorded": null
+}

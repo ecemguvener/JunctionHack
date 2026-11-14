@@ -1,0 +1,17 @@
+{
+  "arm": "leader",
+  "joint": "wrist_flex",
+  "accepted": false,
+  "before": "before-leader-wrist-flex-01.json",
+  "after": "after-leader-wrist-flex-01.json",
+  "reason": "ID4 wrist-flex did not change; ID6 gripper changed. Physical joint identification must be clarified.",
+  "all_leader_delta_ticks": {
+    "shoulder_pan": 1,
+    "shoulder_lift": -4,
+    "elbow_flex": 0,
+    "wrist_flex": 0,
+    "wrist_roll": -1,
+    "gripper": 815
+  },
+  "cad_sign_recorded": null
+}

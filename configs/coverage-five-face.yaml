@@ -1,0 +1,7 @@
+# Coverage requirement, not a claim that the current robot exposes these faces.
+required_faces: [front, right, back, left, top]
+excluded_faces: [bottom]
+bottom_assumption: outside_current_inspection_scope
+presentation_plan_verified: false
+# A camera name does not establish a visible face. Verify pose, grip occlusion,
+# focus and region coverage before assigning one of the face IDs above.

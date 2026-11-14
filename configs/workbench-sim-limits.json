@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "units": "radians",
+  "scope": "simulation_only",
+  "source": "Read from composed World.model on 2026-11-14; physicalai-mujoco-plugin 0.5.0, Menagerie 2026.9.4. Not physical calibration.",
+  "joints": {
+    "shoulder_pan": {"state": [-1.9198621771937616, 1.9198621771937634], "action": [-1.91986, 1.91986]},
+    "shoulder_lift": {"state": [-1.7453292519943224, 1.7453292519943366], "action": [-1.74533, 1.74533]},
+    "elbow_flex": {"state": [-1.69, 1.69], "action": [-1.69, 1.69]},
+    "wrist_flex": {"state": [-1.6580628494556928, 1.6580627293335335], "action": [-1.65806, 1.65806]},
+    "wrist_roll": {"state": [-2.7438472969992493, 2.841206309382605], "action": [-2.74385, 2.84121]},
+    "gripper": {"state": [-0.17453297762778586, 1.7453291995659765], "action": [-0.17453, 1.74533]}
+  }
+}

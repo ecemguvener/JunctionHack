@@ -1,0 +1,26 @@
+{
+  "arm": "leader",
+  "joint": "wrist_roll",
+  "accepted": true,
+  "before": "before-leader-wrist-roll-01.json",
+  "after": "after-leader-wrist-roll-01.json",
+  "physical_direction_tested": "clockwise viewed from behind gripper toward fingertips",
+  "physical_direction_for_increasing_value": "counter-clockwise viewed from behind gripper toward fingertips",
+  "encoder_delta_ticks": -647,
+  "encoder_delta_degrees": -56.865234375,
+  "all_leader_delta_ticks": {
+    "shoulder_pan": -1,
+    "shoulder_lift": -7,
+    "elbow_flex": 0,
+    "wrist_flex": 8,
+    "wrist_roll": -647,
+    "gripper": -2
+  },
+  "follower_excluded_by_user": true,
+  "cad_motion_sign": -1,
+  "cad_sign": 1,
+  "cad_direction_check": {
+    "cad_axis_dot_direction_toward_tool": -0.02340000000000091
+  },
+  "cad_at_zero_rad": null
+}
