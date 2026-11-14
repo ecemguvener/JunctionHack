@@ -48,7 +48,7 @@ class SimulationServer:
         self.viewer.gui.configure_theme(dark_mode=True, show_share_button=False)
         self.viewer.gui.main_panel.dock_right()
         self.viewer.gui.main_panel.set_width(250)
-        self.viewer.gui.add_markdown("## See → Detect → Sort\nTwo bowls · SO-101 · MuJoCo")
+        self.viewer.gui.add_markdown("## See → Detect → Sort\nTwo plates · SO-101 · MuJoCo")
         self.panel = self.viewer.gui.add_markdown(
             "Ready. Start the camera-driven inspection loop below."
         )
@@ -91,7 +91,7 @@ class SimulationServer:
 
         for name, pos in BOWLS.items():
             self.viewer.scene.add_label(
-                f"/labels/{name}", name.upper(), position=tuple(pos + [0, 0, 0.02])
+                f"/labels/{name}", name.upper(), position=(pos[0], pos[1], 0.06)
             )
         self.viewer.scene.add_label("/labels/inspection", "INSPECTION", position=(0.25, 0, 0.23))
 
@@ -194,7 +194,7 @@ class SimulationServer:
     def execute(self, path: str, payload: dict) -> dict:
         if path == "/action":
             op, obj = payload["operation"], payload["object_id"]
-            # Defense in depth: exact fresh camera result must authorize the bowl.
+            # Defense in depth: exact fresh camera result must authorize the plate.
             if op.startswith("move_"):
                 authorize_sort(self.inspected, op, obj)
             if op == "pick":
@@ -202,7 +202,7 @@ class SimulationServer:
                 self.inspected = self.last_capture = None
             self.panel.content = f"**{obj}** · {op.replace('_', ' ').upper()}"
             self.world.action(op, obj)
-            self.count_panel.content = f"Good: {self.world.counts['good']} · Defective: {self.world.counts['defective']}\n\nBowl occupancy is checked in simulation; physical success remains unverified."
+            self.count_panel.content = f"Good: {self.world.counts['good']} · Defective: {self.world.counts['defective']}\n\nPlate occupancy is checked in simulation; physical success remains unverified."
             return {"position": self.world.position(obj).tolist()}
         if path == "/capture":
             self.inspected = None

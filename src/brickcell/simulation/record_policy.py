@@ -10,17 +10,18 @@ import numpy as np
 from PIL import Image
 
 from brickcell.policy.data import CAMERAS, JOINTS, file_hash, validate_episode
-from brickcell.simulation.world import OBJECTS, World
+from brickcell.simulation.world import BRICKS, OBJECTS, World
 
 
 def prepare(world: World, seed: int) -> None:
     rng = np.random.default_rng(seed)
     for i, name in enumerate(OBJECTS):
         a = world.model.joint(f"{name}-joint").qposadr[0]
+        z = BRICKS[name].grip_z  # body origin is the grasp point
         world.data.qpos[a : a + 3] = (
-            [0.25 + rng.uniform(-0.004, 0.004), rng.uniform(-0.09, 0.09), 0.017]
+            [0.25 + rng.uniform(-0.004, 0.004), rng.uniform(-0.09, 0.09), z]
             if i == 0
-            else [2 + i, 0, 0.017]
+            else [2 + i, 0, z]
         )
     mujoco.mj_forward(world.model, world.data)
 
@@ -89,7 +90,7 @@ def record(output: Path, episodes: int, seed: int) -> None:
         teacher="scripted_IK_contact_physics",
         human_demonstrations=False,
         task="pick one separated brick and hold at inspection",
-        shape_family="synthetic_32mm_square",
+        shape_family=f"lego_{BRICKS['part-001'].mesh}",
         fps=50,
         joint_names=JOINTS,
         action_units="radians",

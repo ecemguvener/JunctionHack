@@ -18,9 +18,65 @@ from physicalai_mujoco_plugin.sim import place_home
 
 ASSETS = Path(__file__).resolve().parents[3] / "assets" / "duplo"
 
-# Sorting targets are IKEA KALAS plates (Ø186 x 23.5 mm). The z value is the TCP height for
-# release near the plate centre: a higher drop lets the opening jaw push the brick onto the rim.
-BOWLS = {"good": np.array([0.10, -0.22, 0.045]), "defective": np.array([0.10, 0.22, 0.045])}
+# All physical parameters in one place. Every value is an ESTIMATE until it is measured on the
+# real cell: weigh each brick on a kitchen scale, and do a tilt test for each pair (put a brick
+# on the surface, tilt it slowly, read the slip angle; mu = tan(angle)).
+#
+# Friction triples are MuJoCo (sliding, torsional [m], rolling [m]). MuJoCo has one coefficient
+# per contact (no static/kinetic split); the sliding values are the middle of the dry static
+# ranges in common engineering friction tables (e.g. The Engineering ToolBox, "Friction and
+# Friction Coefficients"; plastics supplier tribology sheets). Torsional ~= mu x contact patch
+# radius (~3 mm); rolling is near zero for hard plastic. How a pair gets its value: MuJoCo uses
+# the geom with the higher `priority`; on a tie it uses the larger friction. Bricks have priority
+# 0, the SO-101 jaws 1 (Menagerie default), plates and table 2. So brick-brick uses
+# "brick", brick-plate uses "plate", brick-table uses "table" and brick-jaw uses "jaw".
+PHYSICS = {
+    "gravity": (0.0, 0.0, -9.81),  # m/s^2
+    "timestep": 0.002,  # s; the scene option wins over the SO-101 profile (0.005)
+    "iterations": 30,
+    "ls_iterations": 50,
+    "integrator": "implicitfast",
+    "cone": "elliptic",
+    "impratio": 10,  # elliptic cones + impratio > 1 reduce slip in grasps
+    "friction": {
+        "brick": (0.35, 0.001, 0.0001),  # ABS on ABS, dry: 0.3-0.4
+        "plate": (0.30, 0.001, 0.0001),  # ABS on polypropylene (KALAS), dry: 0.25-0.35
+        "table": (0.40, 0.001, 0.0001),  # ABS on wood / laminate, dry: ~0.4 (assumed table)
+        # ABS on 3D-printed PLA jaws, dry: 0.3-0.5. Rubber pads on the jaws: use ~0.8.
+        "jaw": (0.40, 0.001, 0.0001),
+    },
+    "condim": 6,  # sliding + torsional + rolling friction
+    # Contact softness for every brick, plate, table and jaw contact. solref time constant must be
+    # >= 2 x timestep. Stiffer than the MuJoCo default (0.02) to limit penetration.
+    "solref": (0.004, 1.0),
+    "solimp": (0.95, 0.99, 0.001, 0.5, 2.0),
+    "margin": 0.0,
+    # Brick masses in kg: LDraw mesh volume x ABS density 1.05 g/cm^3 (6.08, 10.70, 7.04 and
+    # 7.21 cm^3). The LDraw meshes are not checked to be watertight, so weigh the real bricks.
+    "brick_mass": {"part-001": 0.0064, "part-002": 0.0112, "part-003": 0.0074, "part-004": 0.0076},
+}
+
+
+def _vec(values) -> str:
+    return " ".join(f"{v:g}" for v in values)
+
+
+def _contact(name: str, priority: int) -> str:
+    """Geom attributes for a contact surface, from PHYSICS."""
+    return (
+        f'friction="{_vec(PHYSICS["friction"][name])}" condim="{PHYSICS["condim"]}" '
+        f'priority="{priority}" solref="{_vec(PHYSICS["solref"])}" '
+        f'solimp="{_vec(PHYSICS["solimp"])}" margin="{PHYSICS["margin"]}"'
+    )
+
+
+# Sorting targets are IKEA KALAS plates (Ø186 x 23.5 mm; floor top 3.1 mm). The xy value is the
+# plate centre. The z value is the brick bottom height at release: a 6 mm drop onto the floor.
+BOWLS = {"good": np.array([0.10, -0.22, 0.009]), "defective": np.array([0.10, 0.22, 0.009])}
+# Release slots on a plate, in placement order: two rows along X, diagonal first, so that the
+# next brick does not land on an earlier one and the opening jaw does not touch a neighbour.
+SLOTS = [(-1, -0.024), (1, 0.024), (1, -0.024), (-1, 0.024)]
+RELEASE_GRIP = 0.3  # open the moving jaw only a little at release; full open after the lift
 PLATE_RGBA = {"good": "0.62 0.86 0.76 1", "defective": "0.90 0.72 0.78 1"}
 INSPECTION = np.array([0.25, 0.0, 0.15])
 
@@ -35,19 +91,27 @@ class Brick:
     half_x: float  # half length along world X; the +X face looks at the inspection camera
     body_height: float  # height without studs
     grip_z: float  # grasp point above the table
-    mass: float  # estimate; weigh the real bricks to confirm
+    mass: float  # from PHYSICS["brick_mass"]; weigh the real bricks to confirm
     rgba: tuple[float, float, float]
 
 
+_MASS = PHYSICS["brick_mass"]
 BRICKS = {
     "part-001": Brick(
-        "3437", "duplo_2x2_3437", 0.0, 0.016, 0.0192, 0.0105, 0.007, (0.80, 0.08, 0.08)
+        "3437", "duplo_2x2_3437", 0.0, 0.016, 0.0192, 0.0105, _MASS["part-001"], (0.80, 0.08, 0.08)
     ),
     "part-002": Brick(
-        "3011", "duplo_2x4_3011", 0.0, 0.032, 0.0192, 0.0105, 0.013, (0.05, 0.33, 0.80)
+        "3011", "duplo_2x4_3011", 0.0, 0.032, 0.0192, 0.0105, _MASS["part-002"], (0.05, 0.33, 0.80)
     ),
     "part-003": Brick(
-        "76371", "duplo_1x2x2_76371", np.pi / 2, 0.008, 0.0384, 0.017, 0.008, (0.97, 0.76, 0.05)
+        "76371",
+        "duplo_1x2x2_76371",
+        np.pi / 2,
+        0.008,
+        0.0384,
+        0.017,
+        _MASS["part-003"],
+        (0.97, 0.76, 0.05),
     ),
     "part-004": Brick(
         "2302",
@@ -56,7 +120,7 @@ BRICKS = {
         0.024,
         0.0192,
         0.0105,
-        0.009,
+        _MASS["part-004"],
         (0.10, 0.60, 0.28),
     ),
 }
@@ -107,9 +171,10 @@ def _quat(yaw: float, tilt: float) -> str:
 def plate_xml(name: str, pos: np.ndarray) -> str:
     """Visual mesh plus primitive collision: a floor disc and a ring of sloped wall boxes."""
     tilt = np.arctan2(91.3 - 79, 23.5 - 4.0)
+    contact = _contact("plate", 2)
     walls = "".join(
         f'<geom type="box" size=".001 .0092 .0116" quat="{_quat(a, tilt)}" '
-        f'pos="{0.0860 * np.cos(a):.5f} {0.0860 * np.sin(a):.5f} .0132" rgba="0 0 0 0"/>'
+        f'pos="{0.0860 * np.cos(a):.5f} {0.0860 * np.sin(a):.5f} .0132" rgba="0 0 0 0" {contact}/>'
         for a in np.linspace(0, 2 * np.pi, 32, endpoint=False)
     )
     return (
@@ -117,7 +182,7 @@ def plate_xml(name: str, pos: np.ndarray) -> str:
         f'<geom name="plate_{name}-visual" type="mesh" mesh="kalas_plate" '
         f'rgba="{PLATE_RGBA[name]}" contype="0" conaffinity="0"/>'
         f'<geom name="plate_{name}-floor" type="cylinder" size=".079 .00155" pos="0 0 .00155" '
-        f'rgba="0 0 0 0"/>{walls}</body>'
+        f'rgba="0 0 0 0" {contact}/>{walls}</body>'
     )
 
 
@@ -128,7 +193,7 @@ def brick_xml(index: int, name: str, b: Brick) -> str:
         f'<body name="{name}" pos=".25 {(index - 1.5) * 0.065} {b.grip_z}">'
         f'<freejoint name="{name}-joint"/>'
         f'<geom name="{name}-solid" type="mesh" mesh="{b.mesh}" pos="0 0 {-b.grip_z}" '
-        f'euler="0 0 {b.yaw}" mass="{b.mass}" friction="3 .01 .001" '
+        f'euler="0 0 {b.yaw}" mass="{b.mass}" {_contact("brick", 0)} '
         f'rgba="{b.rgba[0]} {b.rgba[1]} {b.rgba[2]} 1"/>'
         f'<geom name="{name}-mark" type="box" pos="{b.half_x + 0.0001} 0 {face_z:.5f}" '
         f'size=".0001 .007 {mark_z:.4f}" rgba=".015 .015 .015 0" contype="0" conaffinity="0" '
@@ -147,19 +212,36 @@ def scene_xml(directory: Path) -> str:
     )
     plates = "".join(plate_xml(name, pos) for name, pos in BOWLS.items())
     bricks = "".join(brick_xml(i, name, b) for i, (name, b) in enumerate(BRICKS.items()))
+    p = PHYSICS
     return f"""<mujoco model="Brickcell two plate inspection">
       <compiler angle="radian" autolimits="true"/>
-      <option timestep=".002" integrator="implicitfast" cone="elliptic" iterations="30" impratio="10"/>
+      <option timestep="{p["timestep"]}" gravity="{_vec(p["gravity"])}" integrator="{p["integrator"]}" cone="{p["cone"]}" iterations="{p["iterations"]}" ls_iterations="{p["ls_iterations"]}" impratio="{p["impratio"]}"/>
       <visual><global offwidth="640" offheight="480"/><headlight ambient=".4 .4 .4" diffuse=".5 .5 .5" specular="0 0 0"/></visual>
       <default><geom rgba=".9 .48 .08 1" condim="4" friction="1 .01 .001"/></default>
       <asset>{assets}</asset>
       <worldbody>
         <light pos=".4 -.3 1" dir="0 0 -1" diffuse=".7 .7 .7" castshadow="false"/>
-        <geom name="table" type="plane" size="1 1 .01" rgba=".15 .18 .22 1"/>
+        <geom name="table" type="plane" size="1 1 .01" rgba=".15 .18 .22 1" {_contact("table", 2)}/>
         {plates}{bricks}<frame name="robot_mount"/>
         <camera name="inspection" pos=".55 0 .24" xyaxes="0 1 0 -.287348 0 .957826" fovy="22"/>
         <camera name="overview" pos=".3 0 1.1" xyaxes="1 0 0 0 1 0" fovy="50"/>
       </worldbody></mujoco>"""
+
+
+def apply_jaw_physics(model: mujoco.MjModel) -> None:
+    """Give the colliding SO-101 jaw geoms the PHYSICS jaw friction and contact softness.
+
+    The jaws come from Menagerie, so they are set on the compiled model, not in scene_xml.
+    """
+    jaws = {model.body(name).id for name in ("gripper", "moving_jaw_so101_v1")}
+    for g in range(model.ngeom):
+        if model.geom_bodyid[g] in jaws and (model.geom_contype[g] or model.geom_conaffinity[g]):
+            model.geom_priority[g] = 1
+            model.geom_friction[g] = PHYSICS["friction"]["jaw"]
+            model.geom_condim[g] = PHYSICS["condim"]
+            model.geom_solref[g] = PHYSICS["solref"]
+            model.geom_solimp[g] = PHYSICS["solimp"]
+            model.geom_margin[g] = PHYSICS["margin"]
 
 
 class World:
@@ -169,6 +251,7 @@ class World:
         path.write_text(scene_xml(directory))
         composed = compose_scene(path, get_profile("so101"))
         self.model = composed.model
+        apply_jaw_physics(self.model)
         self.data = mujoco.MjData(self.model)
         for robot in composed.robots:
             place_home(self.model, self.data, robot)
@@ -253,18 +336,26 @@ class World:
             self.hold(0.5)
         elif operation in {"move_good", "move_defective"}:
             self.destination = operation.removeprefix("move_")
-            offset = self.ik.tcp(self.data) - self.position(object_id)
-            goal = BOWLS[self.destination].copy()
-            goal[:2] += offset[:2]
-            goal[0] += -0.02 if self.counts[self.destination] % 2 == 0 else 0.02
+            # Goal for the grasp point, converted to a TCP goal with the measured grasp offset.
+            brick = BRICKS[object_id]
+            side, y = SLOTS[self.counts[self.destination] % len(SLOTS)]
+            x = side * min(0.008 + brick.half_x, 0.062 - brick.half_x)
+            goal = BOWLS[self.destination] + [x, y, brick.grip_z]
+            goal += self.ik.tcp(self.data) - self.position(object_id)
             self.move(np.array([goal[0], goal[1], 0.18]))
-            self.move(goal)
+            self.move(goal, speed=0.06)
         elif operation == "release":
             if self.destination is None:
-                raise ValueError("Cannot release without a selected bowl")
+                raise ValueError("Cannot release without a selected plate")
+            # Open slowly and only a little, so the jaws do not push the brick, then lift clear.
+            start = self.grip
+            for i in range(1, 16):
+                self.grip = start + (RELEASE_GRIP - start) * i / 15
+                self.tick()
+            self.hold(0.5)
+            self.move(self.target + [0, 0, 0.05], speed=0.06)
             self.grip = 0.5
-            self.hold(1)
-            self.move(self.target + [0, 0, 0.05])
+            self.hold(0.3)
         elif operation == "verify_release":
             self.hold(0.5)
             p = self.position(object_id)
@@ -275,7 +366,7 @@ class World:
                 or p[2] > 0.08
                 or np.linalg.norm(self.data.qvel[velocity : velocity + 3]) > 0.01
             ):
-                raise RuntimeError("Simulated object is not settled inside the commanded bowl")
+                raise RuntimeError("Simulated object is not settled on the commanded plate")
             self.counts[self.destination] += 1
             self.active = None
         else:

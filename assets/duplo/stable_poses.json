@@ -1,0 +1,3043 @@
+{
+ "version": 1,
+ "units": "metres, degrees; quaternions wxyz; body frame = mesh frame (origin bottom centre); each pose yaw puts the long side of its footprint on world X",
+ "method": {
+  "com": "area-weighted centroid of the mesh triangles (uniform thin shell)",
+  "collision": "MuJoCo convex hull of each mesh",
+  "probability": "quasi-static: solid angle of hull facets seen from the COM",
+  "drops": "200 random orientations, 10-20 mm above the table, simulated to rest",
+  "verify": "5 s hold: drift < 0.5 mm, rotation < 1.0 deg, speed < 0.1 mm/s; plate = flat box with the KALAS floor geom values",
+  "marginal": "tipped after a 2.0 deg tilt in one of 12 directions on the table or the plate",
+  "grasp": "top-down parallel jaws closing horizontally; width 10-45 mm; flat parallel contact over +/-3 mm; no overhang above the grasp; height >= 8 mm, near half the part height; yaw = closing axis from world +X in the stored pose"
+ },
+ "physics": {
+  "world_physics_block": {
+   "gravity": [
+    0.0,
+    0.0,
+    -9.81
+   ],
+   "timestep": 0.002,
+   "iterations": 30,
+   "ls_iterations": 50,
+   "integrator": "implicitfast",
+   "cone": "elliptic",
+   "impratio": 10,
+   "friction": {
+    "brick": [
+     0.35,
+     0.001,
+     0.0001
+    ],
+    "plate": [
+     0.3,
+     0.001,
+     0.0001
+    ],
+    "table": [
+     0.4,
+     0.001,
+     0.0001
+    ],
+    "jaw": [
+     0.4,
+     0.001,
+     0.0001
+    ]
+   },
+   "condim": 6,
+   "solref": [
+    0.004,
+    1.0
+   ],
+   "solimp": [
+    0.95,
+    0.99,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "margin": 0.0,
+   "brick_mass": {
+    "part-001": 0.0064,
+    "part-002": 0.0112,
+    "part-003": 0.0074,
+    "part-004": 0.0076
+   }
+  },
+  "option": {
+   "timestep": "0.002",
+   "gravity": "0 0 -9.81",
+   "integrator": "implicitfast",
+   "cone": "elliptic",
+   "iterations": "30",
+   "ls_iterations": "50",
+   "impratio": "10"
+  },
+  "default_geom": {
+   "rgba": ".9 .48 .08 1",
+   "condim": "4",
+   "friction": "1 .01 .001"
+  },
+  "table": {
+   "type": "plane",
+   "friction": "0.4 0.001 0.0001",
+   "condim": "6",
+   "priority": "2",
+   "solref": "0.004 1",
+   "solimp": "0.95 0.99 0.001 0.5 2",
+   "margin": "0.0"
+  },
+  "plate_floor": {
+   "type": "cylinder",
+   "friction": "0.3 0.001 0.0001",
+   "condim": "6",
+   "priority": "2",
+   "solref": "0.004 1",
+   "solimp": "0.95 0.99 0.001 0.5 2",
+   "margin": "0.0"
+  },
+  "bricks": {
+   "part-001": {
+    "mass": 0.0064,
+    "friction": "0.35 0.001 0.0001",
+    "condim": "6",
+    "priority": "0",
+    "solref": "0.004 1",
+    "solimp": "0.95 0.99 0.001 0.5 2",
+    "margin": "0.0"
+   },
+   "part-002": {
+    "mass": 0.0112,
+    "friction": "0.35 0.001 0.0001",
+    "condim": "6",
+    "priority": "0",
+    "solref": "0.004 1",
+    "solimp": "0.95 0.99 0.001 0.5 2",
+    "margin": "0.0"
+   },
+   "part-003": {
+    "mass": 0.0074,
+    "friction": "0.35 0.001 0.0001",
+    "condim": "6",
+    "priority": "0",
+    "solref": "0.004 1",
+    "solimp": "0.95 0.99 0.001 0.5 2",
+    "margin": "0.0"
+   },
+   "part-004": {
+    "mass": 0.0076,
+    "friction": "0.35 0.001 0.0001",
+    "condim": "6",
+    "priority": "0",
+    "solref": "0.004 1",
+    "solimp": "0.95 0.99 0.001 0.5 2",
+    "margin": "0.0"
+   }
+  }
+ },
+ "bricks": {
+  "part-001": {
+   "part": "3437",
+   "mesh": "duplo_2x2_3437",
+   "mass": 0.0064,
+   "com_shell": [
+    0.0,
+    -0.0,
+    0.012236
+   ],
+   "com_hull_volume": [
+    0.0,
+    -0.0,
+    0.011413
+   ],
+   "hull": {
+    "vertices": 28,
+    "triangles": 52,
+    "facets": 26,
+    "stable_facets": 10
+   },
+   "drops": 200,
+   "drops_unsettled": 0,
+   "drops_off_facet": 0,
+   "poses": [
+    {
+     "id": "upside_down",
+     "description": "upside down on studs",
+     "quat": [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.0236,
+     "tilt": 180.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "probability": 0.2042,
+     "drop_frequency": 0.39,
+     "drop_count": 78,
+     "analytic_stable": true,
+     "tip_angle": 48.4,
+     "com_height": 0.01136,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0005,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       0.0,
+       -1.0,
+       -0.0
+      ],
+      "contact_length": 0.032,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.032,
+       "yaw": 0.0,
+       "height": 0.012,
+       "axis_body": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "contact_length": 0.032,
+       "faces": [
+        "+X",
+        "-X"
+       ],
+       "note": "flat parallel side walls"
+      }
+     ]
+    },
+    {
+     "id": "upright",
+     "description": "upright",
+     "quat": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": -0.0,
+     "tilt": 0.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "probability": 0.2173,
+     "drop_frequency": 0.225,
+     "drop_count": 45,
+     "analytic_stable": true,
+     "tip_angle": 52.59,
+     "com_height": 0.01224,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "contact_length": 0.032,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.032,
+       "yaw": 0.0,
+       "height": 0.012,
+       "axis_body": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "contact_length": 0.032,
+       "faces": [
+        "+X",
+        "-X"
+       ],
+       "note": "flat parallel side walls"
+      }
+     ]
+    },
+    {
+     "id": "side_ny",
+     "description": "on side, -Y face down",
+     "quat": [
+      0.707107,
+      0.707107,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "probability": 0.1162,
+     "drop_frequency": 0.105,
+     "drop_count": 21,
+     "analytic_stable": true,
+     "tip_angle": 23.52,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.016,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        -1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "-Z",
+        "+Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "side_nx",
+     "description": "on side, -X face down",
+     "quat": [
+      0.5,
+      0.5,
+      -0.5,
+      0.5
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1162,
+     "drop_frequency": 0.1,
+     "drop_count": 20,
+     "analytic_stable": true,
+     "tip_angle": 23.52,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       -1.0,
+       -0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        -1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "-Z",
+        "+Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "side_px",
+     "description": "on side, +X face down",
+     "quat": [
+      0.5,
+      -0.5,
+      0.5,
+      0.5
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1162,
+     "drop_frequency": 0.095,
+     "drop_count": 19,
+     "analytic_stable": true,
+     "tip_angle": 23.52,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       -1.0,
+       0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "side_py",
+     "description": "on side, +Y face down",
+     "quat": [
+      0.707107,
+      -0.707107,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "probability": 0.1162,
+     "drop_frequency": 0.075,
+     "drop_count": 15,
+     "analytic_stable": true,
+     "tip_angle": 23.52,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0035,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.016,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "stud_edge_py",
+     "description": "on stud edges and +Y top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.320869,
+      -0.630113,
+      -0.630113,
+      0.320869
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.0,
+      0.8087,
+      0.5882
+     ],
+     "probability": 0.0284,
+     "drop_frequency": 0.005,
+     "drop_count": 1,
+     "analytic_stable": true,
+     "tip_angle": 5.57,
+     "com_height": 0.01704,
+     "footprint": {
+      "x": 0.03603,
+      "y": 0.032,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.972
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.0185,
+      "axis_body": [
+       1.0,
+       -0.0,
+       0.0
+      ],
+      "contact_length": 0.02374,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "stud_edge_px",
+     "description": "on stud edges and +X top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.453778,
+      0.0,
+      0.891115,
+      0.0
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.8087,
+      0.0,
+      0.5882
+     ],
+     "probability": 0.0284,
+     "drop_frequency": 0.005,
+     "drop_count": 1,
+     "analytic_stable": true,
+     "tip_angle": 5.57,
+     "com_height": 0.01704,
+     "footprint": {
+      "x": 0.03603,
+      "y": 0.032,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.0185,
+      "axis_body": [
+       -0.0,
+       1.0,
+       0.0
+      ],
+      "contact_length": 0.02374,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "stud_edge_nx",
+     "description": "on stud edges and -X top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.453778,
+      -0.0,
+      -0.891115,
+      -0.0
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      -0.8087,
+      0.0,
+      0.5882
+     ],
+     "probability": 0.0284,
+     "drop_frequency": 0.0,
+     "drop_count": 0,
+     "analytic_stable": true,
+     "tip_angle": 5.57,
+     "com_height": 0.01704,
+     "footprint": {
+      "x": 0.03603,
+      "y": 0.032,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.972
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.0185,
+      "axis_body": [
+       -0.0,
+       1.0,
+       -0.0
+      ],
+      "contact_length": 0.02374,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "stud_edge_ny",
+     "description": "on stud edges and -Y top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.320869,
+      0.630113,
+      0.630113,
+      0.320869
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.0,
+      -0.8087,
+      0.5882
+     ],
+     "probability": 0.0284,
+     "drop_frequency": 0.0,
+     "drop_count": 0,
+     "analytic_stable": true,
+     "tip_angle": 5.57,
+     "com_height": 0.01704,
+     "footprint": {
+      "x": 0.03603,
+      "y": 0.032,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0058,
+       "rotation_deg": 0.0175,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 11,
+       "worst_error_deg": 53.973
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.0185,
+      "axis_body": [
+       1.0,
+       -0.0,
+       -0.0
+      ],
+      "contact_length": 0.02374,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    }
+   ]
+  },
+  "part-002": {
+   "part": "3011",
+   "mesh": "duplo_2x4_3011",
+   "mass": 0.0112,
+   "com_shell": [
+    -0.0,
+    0.0,
+    0.012551
+   ],
+   "com_hull_volume": [
+    0.0,
+    0.0,
+    0.011509
+   ],
+   "hull": {
+    "vertices": 28,
+    "triangles": 52,
+    "facets": 26,
+    "stable_facets": 8
+   },
+   "drops": 200,
+   "drops_unsettled": 0,
+   "drops_off_facet": 0,
+   "poses": [
+    {
+     "id": "upside_down",
+     "description": "upside down on studs",
+     "quat": [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.0236,
+     "tilt": 180.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "probability": 0.2719,
+     "drop_frequency": 0.46,
+     "drop_count": 92,
+     "analytic_stable": true,
+     "tip_angle": 49.2,
+     "com_height": 0.01105,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0028,
+       "rotation_deg": 0.0016,
+       "speed_mm_s": 0.00055,
+       "angular_speed_rad_s": 3e-05,
+       "vibration_mm_s": 0.5006
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.001,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.002
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       0.0,
+       -1.0,
+       -0.0
+      ],
+      "contact_length": 0.064,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "upright",
+     "description": "upright",
+     "quat": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.0,
+     "tilt": 0.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "probability": 0.2616,
+     "drop_frequency": 0.275,
+     "drop_count": 55,
+     "analytic_stable": true,
+     "tip_angle": 51.89,
+     "com_height": 0.01255,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "contact_length": 0.064,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "long_side_ny",
+     "description": "on long side, -Y face down",
+     "quat": [
+      0.707107,
+      0.707107,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "probability": 0.1488,
+     "drop_frequency": 0.12,
+     "drop_count": 24,
+     "analytic_stable": true,
+     "tip_angle": 22.57,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0026,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0026,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.0236,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "contact_length": 0.0576,
+      "faces": [
+       "-Z",
+       "+Z"
+      ],
+      "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "long_side_py",
+     "description": "on long side, +Y face down",
+     "quat": [
+      0.707107,
+      -0.707107,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "probability": 0.1488,
+     "drop_frequency": 0.105,
+     "drop_count": 21,
+     "analytic_stable": true,
+     "tip_angle": 22.57,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0026,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0026,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.0236,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "contact_length": 0.0576,
+      "faces": [
+       "+Z",
+       "-Z"
+      ],
+      "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "end_px",
+     "description": "on end, +X face down",
+     "quat": [
+      0.5,
+      -0.5,
+      0.5,
+      0.5
+     ],
+     "rest_height": 0.032,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.0406,
+     "drop_frequency": 0.015,
+     "drop_count": 3,
+     "analytic_stable": true,
+     "tip_angle": 11.74,
+     "com_height": 0.032,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.064
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0032,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0032,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.032,
+      "axis_body": [
+       0.0,
+       -1.0,
+       0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.032,
+       "axis_body": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "end_nx",
+     "description": "on end, -X face down",
+     "quat": [
+      0.5,
+      0.5,
+      -0.5,
+      0.5
+     ],
+     "rest_height": 0.032,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.0406,
+     "drop_frequency": 0.015,
+     "drop_count": 3,
+     "analytic_stable": true,
+     "tip_angle": 11.74,
+     "com_height": 0.032,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.064
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0032,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0032,
+       "rotation_deg": 0.0039,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.004
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.032,
+      "axis_body": [
+       0.0,
+       -1.0,
+       -0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.032,
+       "axis_body": [
+        0.0,
+        0.0,
+        -1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "-Z",
+        "+Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "stud_edge_py",
+     "description": "on stud edges and +Y top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.453778,
+      -0.891115,
+      -0.0,
+      -0.0
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.0,
+      0.8087,
+      0.5882
+     ],
+     "probability": 0.0438,
+     "drop_frequency": 0.01,
+     "drop_count": 2,
+     "analytic_stable": true,
+     "tip_angle": 4.77,
+     "com_height": 0.01685,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.03603,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0069,
+       "rotation_deg": 0.0218,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.007,
+       "rotation_deg": 0.0218,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 9,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 9,
+       "worst_error_deg": 53.972
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": false,
+      "width": 0.0,
+      "yaw": 0.0,
+      "height": 0.0,
+      "axis_body": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0,
+      "faces": [
+       "",
+       ""
+      ],
+      "note": "no flat parallel jaw contact 10-45 mm wide"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "stud_edge_ny",
+     "description": "on stud edges and -Y top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.453778,
+      0.891115,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.0,
+      -0.8087,
+      0.5882
+     ],
+     "probability": 0.0438,
+     "drop_frequency": 0.0,
+     "drop_count": 0,
+     "analytic_stable": true,
+     "tip_angle": 4.77,
+     "com_height": 0.01685,
+     "footprint": {
+      "x": 0.064,
+      "y": 0.03603,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0069,
+       "rotation_deg": 0.0218,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.007,
+       "rotation_deg": 0.0218,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 9,
+       "worst_error_deg": 53.973
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 9,
+       "worst_error_deg": 53.974
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": false,
+      "width": 0.0,
+      "yaw": 0.0,
+      "height": 0.0,
+      "axis_body": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0,
+      "faces": [
+       "",
+       ""
+      ],
+      "note": "no flat parallel jaw contact 10-45 mm wide"
+     },
+     "alternative_grasps": []
+    }
+   ]
+  },
+  "part-003": {
+   "part": "76371",
+   "mesh": "duplo_1x2x2_76371",
+   "mass": 0.0074,
+   "com_shell": [
+    0.0,
+    0.0,
+    0.021063
+   ],
+   "com_hull_volume": [
+    0.0,
+    0.0,
+    0.020794
+   ],
+   "hull": {
+    "vertices": 26,
+    "triangles": 48,
+    "facets": 26,
+    "stable_facets": 6
+   },
+   "drops": 200,
+   "drops_unsettled": 0,
+   "drops_off_facet": 0,
+   "poses": [
+    {
+     "id": "wide_side_py",
+     "description": "on wide side (32 mm face), +Y face down",
+     "quat": [
+      0.5,
+      -0.5,
+      -0.5,
+      0.5
+     ],
+     "rest_height": 0.008,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "probability": 0.3309,
+     "drop_frequency": 0.345,
+     "drop_count": 69,
+     "analytic_stable": true,
+     "tip_angle": 63.43,
+     "com_height": 0.008,
+     "footprint": {
+      "x": 0.0428,
+      "y": 0.032,
+      "height": 0.016
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.008,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0384,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0428,
+       "yaw": 0.0,
+       "height": 0.008,
+       "axis_body": [
+        0.0,
+        -0.0,
+        -1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "-Z",
+        "+Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "wide_side_ny",
+     "description": "on wide side (32 mm face), -Y face down",
+     "quat": [
+      0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "rest_height": 0.008,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "probability": 0.3309,
+     "drop_frequency": 0.335,
+     "drop_count": 67,
+     "analytic_stable": true,
+     "tip_angle": 63.43,
+     "com_height": 0.008,
+     "footprint": {
+      "x": 0.0428,
+      "y": 0.032,
+      "height": 0.016
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.008,
+      "axis_body": [
+       1.0,
+       0.0,
+       -0.0
+      ],
+      "contact_length": 0.0384,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0428,
+       "yaw": 0.0,
+       "height": 0.008,
+       "axis_body": [
+        0.0,
+        -0.0,
+        1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "narrow_side_nx",
+     "description": "on narrow side (16 mm face), -X face down",
+     "quat": [
+      0.707107,
+      0.0,
+      -0.707107,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1184,
+     "drop_frequency": 0.125,
+     "drop_count": 25,
+     "analytic_stable": true,
+     "tip_angle": 26.57,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.0428,
+      "y": 0.016,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.016,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       1.0,
+       -0.0
+      ],
+      "contact_length": 0.0384,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0428,
+       "yaw": 0.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        -1.0
+       ],
+       "contact_length": 0.0096,
+       "faces": [
+        "-Z",
+        "+Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "narrow_side_px",
+     "description": "on narrow side (16 mm face), +X face down",
+     "quat": [
+      0.707107,
+      0.0,
+      0.707107,
+      0.0
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1184,
+     "drop_frequency": 0.115,
+     "drop_count": 23,
+     "analytic_stable": true,
+     "tip_angle": 26.57,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.0428,
+      "y": 0.016,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0006,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.016,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "contact_length": 0.0384,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0428,
+       "yaw": 0.0,
+       "height": 0.016,
+       "axis_body": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "contact_length": 0.0096,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "upright",
+     "description": "upright",
+     "quat": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.0,
+     "tilt": 0.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "probability": 0.0689,
+     "drop_frequency": 0.055,
+     "drop_count": 11,
+     "analytic_stable": true,
+     "tip_angle": 20.8,
+     "com_height": 0.02106,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.016,
+      "height": 0.0428
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.016,
+      "yaw": 90.0,
+      "height": 0.0215,
+      "axis_body": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "contact_length": 0.032,
+      "faces": [
+       "+Y",
+       "-Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.032,
+       "yaw": 0.0,
+       "height": 0.0215,
+       "axis_body": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "contact_length": 0.016,
+       "faces": [
+        "+X",
+        "-X"
+       ],
+       "note": "flat parallel side walls"
+      }
+     ]
+    },
+    {
+     "id": "upside_down",
+     "description": "upside down on studs",
+     "quat": [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.0428,
+     "tilt": 180.0,
+     "down_face_normal_body": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "probability": 0.0325,
+     "drop_frequency": 0.025,
+     "drop_count": 5,
+     "analytic_stable": true,
+     "tip_angle": 12.45,
+     "com_height": 0.02174,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.016,
+      "height": 0.0428
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0021,
+       "rotation_deg": 0.0,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0041,
+       "rotation_deg": 0.0088,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.009
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.016,
+      "yaw": 90.0,
+      "height": 0.0215,
+      "axis_body": [
+       0.0,
+       -1.0,
+       -0.0
+      ],
+      "contact_length": 0.032,
+      "faces": [
+       "-Y",
+       "+Y"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.032,
+       "yaw": 0.0,
+       "height": 0.0215,
+       "axis_body": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "contact_length": 0.016,
+       "faces": [
+        "+X",
+        "-X"
+       ],
+       "note": "flat parallel side walls"
+      }
+     ]
+    }
+   ]
+  },
+  "part-004": {
+   "part": "2302",
+   "mesh": "duplo_2x3_curved_top_2302",
+   "mass": 0.0076,
+   "com_shell": [
+    -0.0,
+    0.002229,
+    0.011611
+   ],
+   "com_hull_volume": [
+    0.0,
+    0.002429,
+    0.010643
+   ],
+   "hull": {
+    "vertices": 49,
+    "triangles": 94,
+    "facets": 41,
+    "stable_facets": 8
+   },
+   "drops": 200,
+   "drops_unsettled": 0,
+   "drops_off_facet": 0,
+   "poses": [
+    {
+     "id": "upside_down",
+     "description": "upside down on studs",
+     "quat": [
+      0.0,
+      0.707107,
+      0.707107,
+      0.0
+     ],
+     "rest_height": 0.0236,
+     "tilt": 180.0,
+     "down_face_normal_body": [
+      0.0,
+      -0.0,
+      1.0
+     ],
+     "probability": 0.195,
+     "drop_frequency": 0.41,
+     "drop_count": 82,
+     "analytic_stable": true,
+     "tip_angle": 30.38,
+     "com_height": 0.01199,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0086,
+       "rotation_deg": 0.007,
+       "speed_mm_s": 5e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0145
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.004,
+       "rotation_deg": 0.0131,
+       "speed_mm_s": 0.00207,
+       "angular_speed_rad_s": 0.00019,
+       "vibration_mm_s": 0.3861
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.005
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.016
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.04422,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "upright",
+     "description": "upright",
+     "quat": [
+      0.707107,
+      0.0,
+      0.0,
+      0.707107
+     ],
+     "rest_height": 0.0,
+     "tilt": 0.0,
+     "down_face_normal_body": [
+      0.0,
+      -0.0,
+      -1.0
+     ],
+     "probability": 0.2592,
+     "drop_frequency": 0.27,
+     "drop_count": 54,
+     "analytic_stable": true,
+     "tip_angle": 54.03,
+     "com_height": 0.01161,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.032,
+      "height": 0.0236
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0005,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0005,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.0
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.012,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.04393,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "side_px",
+     "description": "on side (curved profile), +X face down",
+     "quat": [
+      0.5,
+      0.5,
+      0.5,
+      -0.5
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1342,
+     "drop_frequency": 0.115,
+     "drop_count": 23,
+     "analytic_stable": true,
+     "tip_angle": 25.37,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0026,
+       "rotation_deg": 0.0044,
+       "speed_mm_s": 0.00026,
+       "angular_speed_rad_s": 2e-05,
+       "vibration_mm_s": 0.0402
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0024,
+       "rotation_deg": 0.0031,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.006
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.0236,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       -0.0,
+       0.0,
+       -1.0
+      ],
+      "contact_length": 0.0256,
+      "faces": [
+       "-Z",
+       "+Z"
+      ],
+      "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "side_nx",
+     "description": "on side (curved profile), -X face down",
+     "quat": [
+      0.5,
+      -0.5,
+      -0.5,
+      -0.5
+     ],
+     "rest_height": 0.016,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "probability": 0.1342,
+     "drop_frequency": 0.11,
+     "drop_count": 22,
+     "analytic_stable": true,
+     "tip_angle": 25.37,
+     "com_height": 0.016,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.0236,
+      "height": 0.032
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0022,
+       "rotation_deg": 0.0008,
+       "speed_mm_s": 6e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0488
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0054,
+       "rotation_deg": 0.0127,
+       "speed_mm_s": 0.00042,
+       "angular_speed_rad_s": 1e-05,
+       "vibration_mm_s": 0.0862
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.001
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.017
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.0236,
+      "yaw": 90.0,
+      "height": 0.016,
+      "axis_body": [
+       -0.0,
+       0.0,
+       1.0
+      ],
+      "contact_length": 0.0256,
+      "faces": [
+       "+Z",
+       "-Z"
+      ],
+      "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "curved_face",
+     "description": "on curved face and stud edges, tilted 35 deg from upside down",
+     "quat": [
+      0.211236,
+      0.674818,
+      0.674818,
+      0.211236
+     ],
+     "rest_height": 0.022125,
+     "tilt": 145.24,
+     "down_face_normal_body": [
+      0.0,
+      -0.5702,
+      0.8215
+     ],
+     "probability": 0.1488,
+     "drop_frequency": 0.055,
+     "drop_count": 11,
+     "analytic_stable": true,
+     "tip_angle": 4.38,
+     "com_height": 0.01386,
+     "footprint": {
+      "x": 0.05038,
+      "y": 0.032,
+      "height": 0.03581
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0116,
+       "rotation_deg": 0.0194,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0051,
+       "rotation_deg": 0.0146,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 7,
+       "worst_error_deg": 34.758
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 7,
+       "worst_error_deg": 34.754
+      }
+     },
+     "marginal": true,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 90.0,
+      "height": 0.018,
+      "axis_body": [
+       1.0,
+       -0.0,
+       -0.0
+      ],
+      "contact_length": 0.03367,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "flat_end_py",
+     "description": "on flat end, +Y face down",
+     "quat": [
+      0.707107,
+      -0.707107,
+      0.0,
+      0.0
+     ],
+     "rest_height": 0.024,
+     "tilt": 90.0,
+     "down_face_normal_body": [
+      0.0,
+      1.0,
+      -0.0
+     ],
+     "probability": 0.0762,
+     "drop_frequency": 0.03,
+     "drop_count": 6,
+     "analytic_stable": true,
+     "tip_angle": 19.22,
+     "com_height": 0.02177,
+     "footprint": {
+      "x": 0.032,
+      "y": 0.0236,
+      "height": 0.048
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0025,
+       "rotation_deg": 0.0027,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0024,
+       "rotation_deg": 0.0027,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.003
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": true,
+      "width": 0.032,
+      "yaw": 0.0,
+      "height": 0.024,
+      "axis_body": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0192,
+      "faces": [
+       "+X",
+       "-X"
+      ],
+      "note": "flat parallel side walls"
+     },
+     "alternative_grasps": [
+      {
+       "feasible": true,
+       "width": 0.0236,
+       "yaw": 90.0,
+       "height": 0.024,
+       "axis_body": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "contact_length": 0.0256,
+       "faces": [
+        "+Z",
+        "-Z"
+       ],
+       "note": "one jaw on the stud tops; one jaw on the open underside (wall rim only)"
+      }
+     ]
+    },
+    {
+     "id": "stud_edge_px",
+     "description": "on stud edges and +X top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.320869,
+      -0.630113,
+      0.630113,
+      0.320869
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      0.8087,
+      -0.0,
+      0.5882
+     ],
+     "probability": 0.0262,
+     "drop_frequency": 0.01,
+     "drop_count": 2,
+     "analytic_stable": true,
+     "tip_angle": 7.1,
+     "com_height": 0.0174,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.03603,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0043,
+       "rotation_deg": 0.0103,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0041,
+       "rotation_deg": 0.0102,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.01
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.01
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": false,
+      "width": 0.0,
+      "yaw": 0.0,
+      "height": 0.0,
+      "axis_body": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0,
+      "faces": [
+       "",
+       ""
+      ],
+      "note": "no flat parallel jaw contact 10-45 mm wide"
+     },
+     "alternative_grasps": []
+    },
+    {
+     "id": "stud_edge_nx",
+     "description": "on stud edges and -X top edge, tilted 54 deg from upside down",
+     "quat": [
+      0.320869,
+      -0.630113,
+      -0.630113,
+      -0.320869
+     ],
+     "rest_height": 0.024233,
+     "tilt": 126.03,
+     "down_face_normal_body": [
+      -0.8087,
+      -0.0,
+      0.5882
+     ],
+     "probability": 0.0262,
+     "drop_frequency": 0.0,
+     "drop_count": 0,
+     "analytic_stable": true,
+     "tip_angle": 7.1,
+     "com_height": 0.0174,
+     "footprint": {
+      "x": 0.048,
+      "y": 0.03603,
+      "height": 0.03717
+     },
+     "verified": {
+      "table": {
+       "ok": true,
+       "drift_mm": 0.0043,
+       "rotation_deg": 0.0103,
+       "speed_mm_s": 0.0,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      },
+      "plate": {
+       "ok": true,
+       "drift_mm": 0.0041,
+       "rotation_deg": 0.0102,
+       "speed_mm_s": 1e-05,
+       "angular_speed_rad_s": 0.0,
+       "vibration_mm_s": 0.0
+      }
+     },
+     "perturbation": {
+      "table": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.01
+      },
+      "plate": {
+       "tilt_deg": 2.0,
+       "trials": 12,
+       "returned": 12,
+       "worst_error_deg": 0.01
+      }
+     },
+     "marginal": false,
+     "grasp": {
+      "feasible": false,
+      "width": 0.0,
+      "yaw": 0.0,
+      "height": 0.0,
+      "axis_body": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "contact_length": 0.0,
+      "faces": [
+       "",
+       ""
+      ],
+      "note": "no flat parallel jaw contact 10-45 mm wide"
+     },
+     "alternative_grasps": []
+    }
+   ]
+  }
+ }
+}
