@@ -125,6 +125,7 @@ class Perception:
         self.config_path = config_path
         self.module = None
         self.config = None
+        self.tracker = None  # one PerceptionTracker per station process (memory between frames)
         self.status = "not loaded"
 
     def _load(self) -> None:
@@ -141,7 +142,13 @@ class Perception:
         """(state, error text). The state is empty if perception is missing or fails."""
         try:
             self._load()
-            state = self.module.locate(frames, scene, self.config)
+            tracker_class = getattr(self.module, "PerceptionTracker", None)
+            if tracker_class is None:
+                state = self.module.locate(frames, scene, self.config)
+            else:
+                if self.tracker is None:
+                    self.tracker = tracker_class(scene, self.config)
+                state = self.tracker.update(frames, scene)
             if not isinstance(state, StationState):
                 raise TypeError(f"locate() returned {type(state).__name__}, not StationState")
             self.status = "ok"
