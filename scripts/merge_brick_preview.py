@@ -15,12 +15,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--transform", type=Path, required=True)
+    parser.add_argument("--object-id", default="brick-001")
+    parser.add_argument("--pose", default="initial")
+    parser.add_argument(
+        "--max-radius-m",
+        type=float,
+        default=0.06,
+        help="Review-only radius around median of ROI points, to discard distant stray depths",
+    )
+    parser.add_argument("--top-roi", type=int, nargs=4, default=(229, 219, 282, 272))
+    parser.add_argument("--plate-roi", type=int, nargs=4, default=(362, 70, 431, 140))
     args = parser.parse_args()
     tf = json.loads(args.transform.read_text())
     rotation = np.asarray(tf["top_from_plate_R"])
     translation = np.asarray(tf["top_from_plate_t_m"])
     clouds, counts = [], {}
-    for name, roi in [("top", (229, 219, 282, 272)), ("plate", (362, 70, 431, 140))]:
+    for name, roi in [("top", args.top_roi), ("plate", args.plate_roi)]:
         packet = json.loads((args.directory / f"{name}-points.json").read_text())
         if packet["serial"] != tf["sdk_serials"][name]:
             raise ValueError("Transform camera mismatch")
@@ -32,6 +42,9 @@ def main():
         red = (cloud[:, 3] > 1.35 * cloud[:, 4]) & (cloud[:, 3] > 1.35 * cloud[:, 5])
         keep = red & (u >= x0) & (u < x1) & (v >= y0) & (v < y1)
         cloud = cloud[keep]
+        if len(cloud):
+            center = np.median(cloud[:, :3], axis=0)
+            cloud = cloud[np.linalg.norm(cloud[:, :3] - center, axis=1) <= args.max_radius_m]
         counts[name] = len(cloud)
         if name == "plate":
             cloud[:, :3] = cloud[:, :3] @ rotation.T + translation
@@ -59,7 +72,10 @@ def main():
     fig.savefig(args.directory / "merged-preview.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     report = dict(
-        object_id="brick-001",
+        object_id=args.object_id,
+        pose=args.pose,
+        rois=dict(top=args.top_roi, plate=args.plate_roi),
+        max_radius_m=args.max_radius_m,
         synthetic=False,
         provisional=True,
         points=counts,

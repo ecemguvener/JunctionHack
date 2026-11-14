@@ -1,5 +1,17 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 upright pose — 14 November 2026
+
+Captured RGB/point packets under `artifacts/brick-001-rotated-review/`. RGB
+review shows the same red brick standing upright with studs toward the plate
+camera. Kept this distinct pose separate from the earlier lying-down capture;
+camera registration does not register a rotated object into its previous pose.
+Exported a rough two-camera upright PLY and preview using the existing review
+transform. Added configurable ROI/pose fields to `merge_brick_preview.py` and
+a review-only 60 mm median-centered radius to remove distant stray depths.
+This filter assumes a small brick and may discard valid surfaces; raw packets
+are preserved. No new camera calibration, training or defect decision occurred.
+
 ## Brick-001 coarse merged preview — 14 November 2026
 
 At the operator's request to proceed with coarse visualization, captured
