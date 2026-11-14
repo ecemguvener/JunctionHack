@@ -1,0 +1,41 @@
+name: CRACI - optional Brickcell core supply-chain build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-core:
+    runs-on: craci
+    timeout-minutes: 30
+    steps:
+      - uses: cracicorp/setup@v1
+        with:
+          size: "4"
+          image: "default"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.8"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: Core software tests (optional architecture stack excluded)
+        run: uv run pytest --ignore=tests/test_block_inspector.py
+      - run: uv run ruff check src tests scripts
+      - run: uv run ruff format --check src tests scripts
+      - name: Build source and wheel without models or datasets
+        run: uv build --out-dir artifacts/release
+      - name: Record installed dependency inventory
+        run: |
+          uv pip freeze > artifacts/dependencies.txt
+          uv run python scripts/codex_contribution_report.py --output artifacts/source-evidence.json
+      - name: Check installed distributions against public vulnerability advisories
+        run: uvx pip-audit --path .venv/lib/python3.12/site-packages --format json --output artifacts/vulnerability-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: craci-brickcell-release-evidence
+          path: |
+            artifacts/release/
+            artifacts/dependencies.txt
+            artifacts/source-evidence.json
+            artifacts/vulnerability-audit.json
