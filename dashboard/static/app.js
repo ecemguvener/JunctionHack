@@ -2,7 +2,8 @@
  *   /api/config  camera poses + intrinsics (from the sim scene), pivot
  *   /api/status  source health, focus block and anomaly overlays (stubs until a service posts)
  *   /api/cloud   fused D415 point cloud (int16 x5 records), long-polled
- *   /stream/{sim,real}.mjpg  live Top camera streams
+ *   /frame/{sim,real}.jpg?after=SEQ  live Top camera frames, pulled one at a time so the rate
+ *                     fits the link (the hidden source refreshes once a second)
  */
 (() => {
   const $ = (s, r = document) => r.querySelector(s);
@@ -10,6 +11,11 @@
   const css = (el, name, fallback) => getComputedStyle(el).getPropertyValue(name).trim() || fallback;
   const hex = (h) => { const v = parseInt(h.replace("#", ""), 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
 
+  // fetch with a deadline: a half-dead link must not stall a loop forever
+  function fetchT(url, ms) {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+    return fetch(url, { cache: "no-store", signal: ac.signal }).finally(() => clearTimeout(t));
+  }
   const hash = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
   const state = {
     src: hash.src === "real" ? "real" : "sim",
@@ -27,15 +33,21 @@
   // ------------------------------------------------------------------ state → DOM
   function bind(name, text) { $$(`[data-bind="${name}"]`).forEach((e) => (e.textContent = text)); }
   function setOn(el, on) { el.classList.toggle("on", !!on); el.setAttribute("aria-pressed", on ? "true" : "false"); }
-  const focusOverlay = () => (status?.focus?.connected && status.focus.object_id ? status.focus : null);
+  // A status older than STATUS_STALE_MS (local clock) means the server is unreachable: no source is
+  // trusted and no overlay is drawn. Overlays must never outlive their data.
+  const STATUS_STALE_MS = 4000;
+  let statusAt = 0;
+  const statusFresh = () => !!status && performance.now() - statusAt < STATUS_STALE_MS;
+  const focusOverlay = () => (statusFresh() && status.focus?.connected && status.focus.object_id ? status.focus : null);
   function visibleAnomalies() {
     const a = status?.anomalies;
-    if (!state.defects || !a?.connected) return [];
+    if (!state.defects || !statusFresh() || !a?.connected) return [];
     const f = focusOverlay();
     return state.scope === "all" ? a.items : a.items.filter((i) => f && i.object_id === f.object_id);
   }
 
   function sync() {
+    if (typeof wake === "function") wake();
     const b = document.body.classList;
     b.toggle("src-sim", state.src === "sim");
     b.toggle("src-real", state.src === "real");
@@ -62,18 +74,31 @@
 
   function renderStatus() {
     if (!status) return;
-    const S = status.sources, b = document.body.classList;
-    b.toggle("real-down", !S.real.ok);
-    b.toggle("sim-down", !S.sim.ok);
-    b.toggle("cloud-down", !S.cloud.ok);
+    const fresh = statusFresh(), S = status.sources, b = document.body.classList;
+    b.toggle("real-down", !fresh || !S.real.ok);
+    b.toggle("sim-down", !fresh || !S.sim.ok);
+    b.toggle("cloud-down", !fresh || !S.cloud.ok);
     const live = $('[data-bind="health"]');
-    live.textContent = status.ok ? "Live" : "Degraded";
-    live.classList.toggle("down", !status.ok);
-    bind("real-fps", S.real.fps ? `${S.real.fps.toFixed(0)} fps` : "– fps");
+    live.textContent = !fresh ? "Server unreachable" : status.ok ? "Live" : "Degraded";
+    live.classList.toggle("down", !fresh || !status.ok);
+    if (!fresh) {
+      bind("cam-error", "The dashboard server does not answer.");
+      bind("cloud-error", "The dashboard server does not answer.");
+      bind("focus-label", "–");
+      bind("defect-count", "0");
+      for (const kind of ["anomalies", "focus"]) {
+        $(`[data-stub="${kind}"]`).classList.toggle("show", state[kind === "anomalies" ? "defects" : "focus"]);
+        bind(`${kind}-reason`, "Server unreachable");
+      }
+      return;
+    }
+    bind("real-fps", S.real.fps ? `camera ${S.real.fps.toFixed(0)} fps` : "– fps");
     const cam = state.src === "sim" ? S.sim : S.real;
+    const fps = shownFps(state.src);
+    const shown = fps == null ? "–" : fps.toFixed(fps < 10 ? 1 : 0);
     bind("cam-detail", state.src === "sim"
-      ? `${config?.sim_camera ?? "overhead"} render · ${S.sim.fps ?? "–"} fps · not twin-synced`
-      : `D415 Top · ${S.real.fps ?? "–"} fps`);
+      ? `${config?.sim_camera ?? "overhead"} render · ${shown} fps shown · not twin-synced`
+      : `D415 Top · ${shown} fps shown`);
     bind("cam-age", `age ${fmtAge(cam.age_s)}`);
     bind("cam-error", cam.error || (cam.ok ? "" : "The source sends no fresh frames."));
     const cams = Object.entries(S.cloud.cameras || {}).map(([n, c]) => `${n} ${c.ok ? c.points : "×"}`).join(" · ");
@@ -108,7 +133,7 @@
     sync();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.target.matches("input,textarea") || e.altKey || e.metaKey) return;
+    if ((e.target instanceof Element && e.target.matches("input,textarea")) || e.altKey || e.metaKey) return;
     const k = e.key.toLowerCase();
     if (k === "t") state.src = state.src === "sim" ? "real" : "sim";
     else if (k === "escape") state.fs = "";
@@ -120,13 +145,43 @@
     sync();
   });
 
-  // ------------------------------------------------------------------ live camera streams
-  function startStream(img, url) {
-    let retry = null;
-    const open = () => { img.src = `${url}?t=${Date.now()}`; };
-    img.addEventListener("error", () => { clearTimeout(retry); retry = setTimeout(open, 1500); });
-    img.addEventListener("load", () => drawOverlay(), { once: true });
-    open();
+  // ------------------------------------------------------------------ live camera frames
+  const frames = { sim: { seq: 0, shown: [] }, real: { seq: 0, shown: [] } };
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  async function frameLoop(name) {
+    const img = $(`img.cam-${name}`), f = frames[name];
+    let url = null;
+    for (;;) {
+      const visible = state.src === name;
+      try {
+        // visible: long-poll the next frame; hidden: take the newest frame once a second
+        const r = await fetchT(`/frame/${name}.jpg?after=${visible ? f.seq : 0}`, 6000);
+        if (r.status === 200) {
+          const seq = Number(r.headers.get("X-Frame-Seq"));
+          if (seq !== f.seq) {
+            const next = URL.createObjectURL(await r.blob());
+            img.src = next;
+            f.seq = seq;
+            // no await on decode(): it only resolves when the page paints
+            const old = url;
+            if (old) setTimeout(() => URL.revokeObjectURL(old), 2000);
+            url = next;
+            f.shown.push(performance.now());
+            if (f.shown.length > 20) f.shown.shift();
+          } else await r.arrayBuffer();
+        } else if (r.status !== 204) await sleep(1000);
+      } catch { await sleep(1000); }
+      if (state.src !== name) await waitVisibleOr(1000, name);
+    }
+  }
+  const wakers = [];
+  function waitVisibleOr(ms, name) {
+    return new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { if (state.src === name) { clearTimeout(t); ok(); } }); });
+  }
+  function wake() { wakers.splice(0).forEach((w) => w()); }
+  function shownFps(name) {
+    const t = frames[name].shown;
+    return t.length > 2 && performance.now() - t[t.length - 1] < 3000 ? ((t.length - 1) * 1000) / (t[t.length - 1] - t[0]) : null;
   }
 
   // ------------------------------------------------------------------ camera overlay
@@ -223,14 +278,15 @@
     const pBuf = gl.createBuffer(), cBuf = gl.createBuffer();
     let n = 0, rgb = new Float32Array(0), sensor = new Uint8Array(0);
     function setPoints(arrayBuffer) {
-      const rec = new Int16Array(arrayBuffer), count = rec.length / 5;
+      // records: int16 x, y, z (mm); uint16 sensor << 15 | RGB555
+      const xyz = new Int16Array(arrayBuffer), col = new Uint16Array(arrayBuffer), count = xyz.length / 4;
       const pos = new Float32Array(count * 3);
       rgb = new Float32Array(count * 3); sensor = new Uint8Array(count);
       for (let i = 0; i < count; i++) {
-        const o = i * 5, c = rec[o + 3];
-        pos[i * 3] = rec[o] / 1000; pos[i * 3 + 1] = rec[o + 1] / 1000; pos[i * 3 + 2] = rec[o + 2] / 1000;
+        const o = i * 4, c = col[o + 3];
+        pos[i * 3] = xyz[o] / 1000; pos[i * 3 + 1] = xyz[o + 1] / 1000; pos[i * 3 + 2] = xyz[o + 2] / 1000;
         rgb[i * 3] = ((c >> 10) & 31) / 31; rgb[i * 3 + 1] = ((c >> 5) & 31) / 31; rgb[i * 3 + 2] = (c & 31) / 31;
-        sensor[i] = rec[o + 4];
+        sensor[i] = c >> 15;
       }
       n = count;
       gl.bindBuffer(gl.ARRAY_BUFFER, pBuf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
@@ -447,7 +503,7 @@
   async function loadConfig() {
     for (;;) {
       try {
-        const r = await fetch("/api/config", { cache: "no-store" });
+        const r = await fetchT("/api/config", 5000);
         if (r.ok) return await r.json();
         bind("health", "Waiting for sim scene");
       } catch { bind("health", "Server unreachable"); }
@@ -457,12 +513,11 @@
   async function statusLoop() {
     for (;;) {
       try {
-        const r = await fetch("/api/status", { cache: "no-store" });
-        if (r.ok) { status = await r.json(); renderStatus(); drawOverlay(); }
-      } catch {
-        const live = $('[data-bind="health"]');
-        live.textContent = "Server unreachable"; live.classList.add("down");
-      }
+        const r = await fetchT("/api/status", 3000);
+        if (r.ok) { status = await r.json(); statusAt = performance.now(); }
+      } catch { /* statusFresh() turns false after STATUS_STALE_MS */ }
+      renderStatus();
+      drawOverlay();
       await new Promise((ok) => setTimeout(ok, 1000));
     }
   }
@@ -470,7 +525,7 @@
   async function cloudLoop() {
     for (;;) {
       try {
-        const r = await fetch(`/api/cloud?after=${cloudState.seq}`, { cache: "no-store" });
+        const r = await fetchT(`/api/cloud?after=${cloudState.seq}`, 8000);
         if (r.status === 200) {
           cloudState.seq = Number(r.headers.get("X-Cloud-Seq"));
           cloud.setPoints(await r.arrayBuffer());
@@ -496,10 +551,10 @@
   sync();
   loadConfig().then((c) => {
     config = c;
-    startStream($("img.cam-sim"), "/stream/sim.mjpg");
-    startStream($("img.cam-real"), "/stream/real.mjpg");
+    frameLoop("sim");
+    frameLoop("real");
     cloud = makeCloud();
-    window.dashboard = { state, get status() { return status; }, get config() { return config; }, cloudState, cloud, sync };
+    window.dashboard = { state, get status() { return status; }, get config() { return config; }, cloudState, cloud, sync, frames, shownFps };
     sync();
     statusLoop();
     if (cloud) cloudLoop();

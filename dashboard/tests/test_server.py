@@ -3,6 +3,7 @@
 Run: uv run --no-project --with numpy --with opencv-python-headless --with pytest pytest dashboard/tests
 """
 
+import gzip
 import json
 import math
 import sys
@@ -181,9 +182,13 @@ def test_to_world_uses_columns_as_camera_axes():
 def test_pack_round_trip_and_rgb555():
     xyz = np.array([[0.25, -0.13, 0.01], [-0.1, 0.4, 0.3]])
     data = dash.pack(xyz, np.array([[255, 0, 8], [16, 255, 255]]), np.array([0, 1]))
-    rec = dash.unpack(data)
-    assert rec[:, :3].tolist() == [[250, -130, 10], [-100, 400, 300]]
-    assert rec[0, 3] == (31 << 10) | (0 << 5) | 1 and rec[1, 4] == 1
+    assert len(data) == 2 * 8
+    xyz_mm, colour, sensor = dash.unpack(data)
+    assert xyz_mm.tolist() == [[250, -130, 10], [-100, 400, 300]]
+    assert colour.tolist() == [(31 << 10) | (0 << 5) | 1, (2 << 10) | (31 << 5) | 31]
+    assert sensor.tolist() == [0, 1]
+    with pytest.raises(ValueError):
+        dash.pack(xyz, np.zeros((2, 3)), np.array([0, 2]))
 
 
 def test_crop_keeps_workspace_only():
@@ -254,12 +259,16 @@ def test_status_config_and_static(stack):
 def test_cloud_long_poll_returns_world_points(stack):
     _, _, base = stack
     status, headers, body = get(base + "/api/cloud?after=0")
-    assert status == 200
-    rec = dash.unpack(body)
+    assert status == 200 and "Content-Encoding" not in headers
+    xyz_mm, _, sensor = dash.unpack(body)
     # top: 2 points kept (third is outside the workspace); plate: 1 point on the table
-    assert len(rec) == int(headers["X-Cloud-Count"]) == 3
-    assert sorted(rec[:, 4].tolist()) == [0, 0, 1]
-    assert [250, -130, 0] in rec[:, :3].tolist() and [300, -500, 0] in rec[:, :3].tolist()
+    assert len(xyz_mm) == int(headers["X-Cloud-Count"]) == 3
+    assert sorted(sensor.tolist()) == [0, 0, 1]
+    assert [250, -130, 0] in xyz_mm.tolist() and [300, -500, 0] in xyz_mm.tolist()
+    req = urllib.request.Request(base + "/api/cloud?after=0", headers={"Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.headers["Content-Encoding"] == "gzip"
+        assert len(dash.unpack(gzip.decompress(r.read()))[0]) == 3
     seq = int(headers["X-Cloud-Seq"])
     status, headers, _ = get(base + f"/api/cloud?after={seq}")
     assert status == 200 and int(headers["X-Cloud-Seq"]) > seq  # a newer cloud arrives
@@ -294,6 +303,11 @@ def test_frames_and_mjpeg_stream(stack):
     _, _, base = stack
     status, headers, body = get(base + "/frame/sim.jpg")
     assert status == 200 and body.startswith(b"\xff\xd8")  # sim PNG re-encoded as JPEG
+    seq = int(headers["X-Frame-Seq"])
+    status, headers, _ = get(base + f"/frame/real.jpg?after={seq + 1000}")  # long poll, none newer
+    assert status == 204
+    status, headers, _ = get(base + "/frame/real.jpg?after=1")
+    assert status == 200 and int(headers["X-Frame-Seq"]) > 1
     with urllib.request.urlopen(base + "/stream/real.mjpg", timeout=5) as r:
         assert r.headers["Content-Type"].startswith("multipart/x-mixed-replace")
         chunk = r.read(4096)

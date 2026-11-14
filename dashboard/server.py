@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import collections
+import functools
+import gzip
 import json
 import math
 import threading
@@ -72,7 +74,8 @@ def check_jpeg(data: bytes) -> bytes:
     return data
 
 
-def png_to_jpeg(data: bytes, quality: int = 88) -> bytes:
+def png_to_jpeg(data: bytes, quality: int = 80) -> bytes:
+    """Decode any image (PNG or JPEG) and encode it as a JPEG of the given quality."""
     import cv2
 
     image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
@@ -242,20 +245,29 @@ def crop(xyz: np.ndarray, box=WORKSPACE) -> np.ndarray:
     return keep
 
 
+CLOUD_FORMAT = (
+    "8-byte little-endian records: int16 x, y, z (mm, robot base frame); "
+    "uint16 colour = sensor << 15 | RGB555 (sensor 0 top, 1 plate)"
+)
+
+
 def pack(xyz: np.ndarray, rgb: np.ndarray, sensor: np.ndarray) -> bytes:
-    """int16 little-endian records: x, y, z (mm), RGB555, sensor id."""
+    """See CLOUD_FORMAT."""
     if not (len(xyz) == len(rgb) == len(sensor)):
         raise ValueError("Point arrays differ in length")
-    out = np.zeros((len(xyz), 5), "<i2")
-    out[:, :3] = np.clip(np.round(xyz * 1000), -32768, 32767)
-    c = np.clip(rgb, 0, 255).astype(np.int32) >> 3
-    out[:, 3] = (c[:, 0] << 10) | (c[:, 1] << 5) | c[:, 2]
-    out[:, 4] = sensor
+    if len(sensor) and not np.isin(sensor, (0, 1)).all():
+        raise ValueError("sensor ids must be 0 or 1")
+    out = np.zeros((len(xyz), 4), "<u2")
+    out[:, :3] = np.clip(np.round(xyz * 1000), -32768, 32767).astype("<i2").view("<u2")
+    c = np.clip(rgb, 0, 255).astype(np.uint32) >> 3
+    out[:, 3] = (np.asarray(sensor, np.uint32) << 15) | (c[:, 0] << 10) | (c[:, 1] << 5) | c[:, 2]
     return out.tobytes()
 
 
-def unpack(data: bytes) -> np.ndarray:
-    return np.frombuffer(data, "<i2").reshape(-1, 5)
+def unpack(data: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """-> (xyz mm int16 (N,3), rgb555 (N,), sensor (N,))."""
+    rec = np.frombuffer(data, "<u2").reshape(-1, 4)
+    return rec[:, :3].view("<i2"), rec[:, 3] & 0x7FFF, rec[:, 3] >> 15
 
 
 @dataclass(frozen=True)
@@ -338,6 +350,7 @@ class CloudSource:
 class Cloud:
     seq: int
     data: bytes
+    gz: bytes  # the same data, gzip level 1
     count: int
     time: float
     cameras: dict
@@ -410,7 +423,7 @@ class CloudWorker:
                 per_camera[source.sensor] = dict(ok=False, error=f"{type(exc).__name__}: {exc}")
                 continue
             per_camera[source.sensor] = info
-            parts.append((xyz, rgb, np.full(len(xyz), SENSOR_IDS.get(source.sensor, 9))))
+            parts.append((xyz, rgb, np.full(len(xyz), SENSOR_IDS.get(source.sensor, 1))))
         with self.cond:
             self.per_camera = per_camera
         if not parts:
@@ -420,9 +433,10 @@ class CloudWorker:
             pick = self.rng.choice(len(xyz), MAX_CLOUD_POINTS, replace=False)
             xyz, rgb, sensor = xyz[pick], rgb[pick], sensor[pick]
         data = pack(xyz, rgb, sensor)
+        gz = gzip.compress(data, compresslevel=1, mtime=0)
         with self.cond:
             seq = (self.cloud.seq + 1) if self.cloud else 1
-            self.cloud = Cloud(seq, data, len(xyz), time.time(), per_camera)
+            self.cloud = Cloud(seq, data, gz, len(xyz), time.time(), per_camera)
             self.cond.notify_all()
 
     def run(self, stop: threading.Event) -> None:
@@ -543,12 +557,17 @@ class Dashboard:
     def __init__(self, args):
         self.args = args
         self.stop = threading.Event()
-        self.real = Feed("real", args.real_url, args.real_fps)
+        self.real = Feed(
+            "real",
+            args.real_url,
+            args.real_fps,
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
+        )
         self.sim = Feed(
             "sim",
             f"{args.sim_url.rstrip('/')}/camera/{args.sim_camera}.png",
             args.sim_fps,
-            convert=png_to_jpeg,
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
         )
         self.scene = Scene(args.sim_url)
         self.cloud = CloudWorker(args.cloud, self.scene, args.cloud_hz, args.stale_after)
@@ -579,7 +598,7 @@ class Dashboard:
             pivot=list(self.args.pivot),
             workspace=WORKSPACE,
             sim_camera=self.args.sim_camera,
-            cloud_format="int16 x5 little-endian: x, y, z (mm, robot base frame), RGB555, sensor (0 top, 1 plate)",
+            cloud_format=CLOUD_FORMAT,
         )
 
     def status(self) -> dict:
@@ -644,13 +663,22 @@ def make_handler(app: Dashboard):
                     return self.send_json(400, {"error": "after must be an integer"})
                 return self.cloud(after)
             if route in ("/frame/real.jpg", "/frame/sim.jpg"):
+                # ?after=SEQ waits up to 2 s for a newer frame (204 if none): the client pulls
+                # the next frame only after the last one arrived, so the rate fits the link.
                 feed = app.real if "real" in route else app.sim
-                frame = feed.wait(0, 0)
+                try:
+                    after = int(query.get("after", ["0"])[0] or 0)
+                except ValueError:
+                    return self.send_json(400, {"error": "after must be an integer"})
+                frame = feed.wait(after, 2.0 if after else 0)
+                if frame is None and after:
+                    return self.no_content()
                 if frame is None:
                     return self.send_json(
                         503, {"error": f"No {feed.name} frame yet", "detail": feed.error}
                     )
-                return self.send(200, "image/jpeg", frame.data, {"X-Frame-Seq": str(frame.seq)})
+                headers = {"X-Frame-Seq": str(frame.seq), "X-Frame-Time": f"{frame.time:.3f}"}
+                return self.send(200, "image/jpeg", frame.data, headers)
             if route in ("/stream/real.mjpg", "/stream/sim.mjpg"):
                 return self.mjpeg(app.real if "real" in route else app.sim)
             self.send_json(404, {"error": "Not found"})
@@ -675,24 +703,26 @@ def make_handler(app: Dashboard):
                 return self.send_json(404, {"error": "Not found"})
             self.send(200, STATIC_TYPES[path.suffix], path.read_bytes())
 
+        def no_content(self) -> None:
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def cloud(self, after: int) -> None:
             cloud = app.cloud.wait(after, timeout=2.0)
             if cloud is None:
-                self.send_response(204)
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            self.send(
-                200,
-                "application/octet-stream",
-                cloud.data,
-                {
-                    "X-Cloud-Seq": str(cloud.seq),
-                    "X-Cloud-Count": str(cloud.count),
-                    "X-Cloud-Time": f"{cloud.time:.3f}",
-                },
-            )
+                return self.no_content()
+            headers = {
+                "X-Cloud-Seq": str(cloud.seq),
+                "X-Cloud-Count": str(cloud.count),
+                "X-Cloud-Time": f"{cloud.time:.3f}",
+                "Vary": "Accept-Encoding",
+            }
+            body = cloud.data
+            if "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                body, headers["Content-Encoding"] = cloud.gz, "gzip"
+            self.send(200, "application/octet-stream", body, headers)
 
         def mjpeg(self, feed: Feed) -> None:
             self.send_response(200)
@@ -755,6 +785,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="point cloud source; repeat. Default: top=overhead and plate=side on :8094",
     )
     p.add_argument("--real-fps", type=float, default=12)
+    p.add_argument(
+        "--jpeg-quality", type=int, default=75, help="JPEG quality of the re-encoded frames"
+    )
     p.add_argument("--sim-fps", type=float, default=4)
     p.add_argument("--cloud-hz", type=float, default=2)
     p.add_argument(
