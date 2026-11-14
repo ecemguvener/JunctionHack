@@ -223,6 +223,7 @@ class BrickState:
     confidence: float = 0.0  # 0..1
     residual_mm: float | None = None  # median model-to-cloud distance of the fit
     cameras: list[str] = field(default_factory=list)  # cameras that saw it
+    color_name: str | None = None  # nearest colour in configs/brick-palette.yaml
 
 
 @dataclass
