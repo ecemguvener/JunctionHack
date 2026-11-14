@@ -1,5 +1,17 @@
 # Executed validation — 13 November 2026
 
+## Brick-002 orientation guide and accepted studs-facing view — 14 November 2026
+
+Captured RGB previews and subsampled point packets under ignored
+`artifacts/brick-002-orientation-check/`. Plate RGB review confirms all four
+studs facing the camera, without hand occlusion. Recorded this as brick-002's
+human-labeled clean studs-facing pose, in the existing session group, with no
+partition or detector decision. Created a local HTML guide containing native
+2D SVG orientation diagrams, the actual accepted photo, a live plate preview
+and explicit half-turn instructions for the next back view. The diagrams are
+schematic, not measured brick geometry. Guide HTML returned HTTP 200 and inline
+JavaScript syntax passed; opened it in the Mac browser. No core source changed.
+
 ## Brick-002 repeat collection review — 14 November 2026
 
 Repeat-02 showed an empty board in both views and was excluded from the clean
