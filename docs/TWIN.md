@@ -120,4 +120,5 @@ It writes the sim camera images and sim/real blends.
   part. The overhead camera is about 0.9 m from the table; small bricks look too low in its depth.
 - The side camera gives depth for about half of its image.
 - Live arm reads are written but not tested on hardware. The gripper angle map is an assumption.
-- Live rate depends on perception time.
+- Perception: 0.3–0.45 s for one `locate` call; the station keeps one `PerceptionTracker`, so a
+  warm live update takes 0.13–0.18 s (both D415 snapshots then add about 0.4 s of capture).
