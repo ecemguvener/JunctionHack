@@ -1333,3 +1333,60 @@ the fresh-process regression test. Optional skips cover missing FastAPI/Frax/
 MuJoCo, trained-model assets and the live simulation service. Dashboard tests
 outside the socket sandbox: **28 Python passed**; **6 Node tests passed**.
 No cloud or hardware performance is implied by these checks.
+
+## Fifteen optional product features on ecem — 14 November 2026
+
+Implemented separate, product-named commits for Cloudinary evidence, Google
+Gemini explanations, ElevenLabs speech, Tiger Data telemetry, Codex engineering
+provenance, CRACI supply-chain workflow, Aiven Kafka events, MongoDB Atlas cases,
+Modal isolated training, Verda Inference, Vultr report hosting, self-hosted Google
+Gemma, Arduino UNO Q capture requests, Oxylabs research and Context.dev extraction.
+`docs/integrations/README.md` maps the fifteen feature commits to detailed setup,
+actual usage and verification limits. Initial baseline merge commits are explicitly
+not counted as product integrations.
+
+The integration layer is opt-in and runs after local inspection, with immutable
+case hashes, verified image evidence, explicit execution, serial SQLite delivery
+receipts and redacted errors. A source-result case builder preserves the original
+classification and checks acquisition-time identity. The authenticated report
+service queues jobs without executing providers; an explicit worker drains them.
+Configuration diagnostics report variable names/presence only, never values.
+No existing detector, controller, camera driver or dashboard implementation was
+changed. The one compatibility fix defers optional MuJoCo imports until simulation
+operations, keeping the simulator separate from core imports.
+
+Executed in the isolated ecem worktree with Python 3.12.16:
+
+- `uv sync --locked`: completed; anomalib remains 2.7.0 and the core lock is unchanged.
+- `uv run pytest`: **192 passed, 13 skipped**, including 22 new integration/
+  compatibility tests. Skips require optional FastAPI/Frax/MuJoCo, trained model
+  assets or a live simulation service; they are not real-model accuracy checks.
+- `uv run ruff check src tests scripts`: passed.
+- `uv run ruff format --check src tests scripts`: passed, 144 files.
+- Ruff check/format for the isolated Modal script: passed.
+- Existing dashboard tests: **28 Python passed** with fake loopback upstreams
+  outside the socket sandbox; **6 Node evidence tests passed**.
+- Report-page JavaScript syntax: passed. Handler tests check authentication,
+  queued-only ingestion, historical case rendering data and audio-path traversal.
+- Case planning CLI: reports `network: false` for the ten runtime adapters.
+- Codex source/history manifest: generated successfully without claims of test results.
+- CRACI workflow: YAML parsed locally; not dispatched to a hosted runner.
+- `uv build`: wheel and source archive built. Inspected archives for integration
+  modules, isolated cloud script, hosting templates and UNO Q firmware; ignored
+  datasets, artifacts and secret-bearing env files are absent.
+- Diff whitespace check: passed.
+
+The first full-suite attempt exposed the pre-existing eager MuJoCo import; the
+compatibility fix above resolves it without adding dependencies. Build sandbox
+DNS failures were resolved by approved native uv execution. Dashboard test sockets
+were initially blocked by the sandbox; approved native execution passed them.
+
+Provider contract tests inject HTTP/database/broker/bridge behavior and use
+explicit synthetic images. No live provider credentials, account APIs, cloud
+training, paid compute, CRACI runners, Vultr VM, board compilation/flashing,
+camera/arm access or browser-rendered visual review was performed. Credentials,
+account/model availability, live database migrations, hosted deployment, voice
+quality and hardware behavior remain to be verified. Uploaded evidence defaults
+to private/authenticated Cloudinary delivery; public demo delivery is explicit.
+These features do not establish real defect accuracy, physical sorting success,
+new model calibration or GPU/NPU performance.

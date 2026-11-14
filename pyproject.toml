@@ -53,4 +53,6 @@ include = [
   "/policy/*.py", "/policy/pyproject.toml", "/policy/uv.lock",
   "/README.md", "/AGENTS.md", "/Makefile", "/pyproject.toml",
   "/uv.lock", "/.python-version", "/.gitignore",
+  "/cloud/integrations", "/deploy/vultr", "/hardware/uno_q",
+  "/.github/workflows/craci-brickcell.yml",
 ]

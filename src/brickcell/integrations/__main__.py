@@ -6,19 +6,9 @@ import json
 from pathlib import Path
 
 from brickcell.integrations.core import HTTP, Context, Outbox, case_id, validate
+from brickcell.integrations.settings import SETTINGS, status
 
-PROVIDERS = {
-    "cloudinary",
-    "gemini",
-    "elevenlabs",
-    "tigerdata",
-    "aiven",
-    "mongodb",
-    "gemma",
-    "verda",
-    "oxylabs",
-    "contextdev",
-}
+PROVIDERS = set(SETTINGS)
 
 
 def main():
@@ -26,11 +16,22 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--case", type=Path)
     source.add_argument("--drain", action="store_true")
-    parser.add_argument("--providers", nargs="+", choices=sorted(PROVIDERS), required=True)
+    source.add_argument("--status", action="store_true")
+    parser.add_argument("--providers", nargs="+", choices=sorted(PROVIDERS))
     parser.add_argument("--evidence-root", type=Path, default=Path("."))
     parser.add_argument("--output", type=Path, default=Path("artifacts/integrations"))
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    if args.status:
+        print(
+            json.dumps(
+                {"network": False, "providers": status(args.providers or sorted(PROVIDERS))},
+                indent=2,
+            )
+        )
+        return
+    if not args.providers:
+        parser.error("--providers is required for planning or delivery")
     case = validate(json.loads(args.case.read_text())) if args.case else None
     if not args.execute:
         print(

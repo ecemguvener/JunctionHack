@@ -286,3 +286,10 @@ inertia tensors into the existing calibrated frames (`configs/published_priors_v
 records bounded real trajectories, and fits effective actuator response. The interactive phantom
 compares recorded encoder motion with independent forward-dynamics predictions.
 See [executed evidence and limitations](docs/VALIDATION.md).
+
+## Optional product integrations
+
+See [the integration guide](docs/integrations/README.md) for the fifteen separate
+product features, setup, case builder, evidence portal, per-product commits and
+explicit offline/live verification status. All services are optional sidecars;
+existing inspection and robot execution remain unchanged.

@@ -43,3 +43,73 @@ and has bounded timeouts and response sizes. Loopback HTTP is for local models.
 Do not expose local credentials in browser code. Cloud accounts, boards and hosted
 compute need configuration before live verification; offline contract tests are
 not proof that an account is connected, deployed, paid for or physically working.
+
+## Connect an actual result
+
+Serialize the existing `InspectionResult` using `dataclasses.asdict(result)`
+after inspection completes. Keep the camera's original acquisition timestamp
+and identify the capture session/camera explicitly. This command builds the
+sidecar case and verifies evidence bytes without rerunning or modifying inspection:
+
+```bash
+uv run python -m brickcell.integrations.case_builder \
+  --result artifacts/result.json --session-id capture-session-1 --camera-id wrist \
+  --captured-at 1794657600 --data-kind real --evidence-root artifacts \
+  --observed artifacts/observed.png --overlay artifacts/overlay.png \
+  --output artifacts/case.json
+```
+
+Use the actual timestamp; the illustrative value must match the source result's
+UTC-aware ISO timestamp. `--reference` and `--overlay` are optional. The existing
+result's decision/score/validity/model/threshold are copied, never inferred from
+a human label. Real data collection/model accuracy remain separate requirements.
+Missing/stale live results must be handled by the existing inspector/supervisor;
+this tool only preserves a historical result. The case can be submitted to the
+CLI or authenticated report API, then processed by the explicit sidecar worker.
+
+## Product guides and delivered feature commits
+
+| Company/product | Brickcell use | Feature commit | Guide |
+|---|---|---|---|
+| Cloudinary | Hashed reference/observed/overlay evidence delivery | `813d992` | [Setup](cloudinary.md) |
+| Google Gemini API | Structured image-grounded advisory explanation | `1e2ac15` | [Setup](gemini.md) |
+| ElevenLabs | Deterministic operator guidance as MP3 | `d4088f4` | [Setup](elevenlabs.md) |
+| Tiger Data | Timescale telemetry and model-specific trends | `3e60710` | [Setup](tigerdata.md) |
+| OpenAI Codex | Source/history evidence of development work | `5abab7b` | [Evidence](codex.md) |
+| CRACI | Manual supply-chain build and advisory checks | `f5ff1dd` | [Setup](craci.md) |
+| Aiven Kafka | Acknowledged, versioned inspection event delivery | `76d0f58` | [Setup](aiven.md) |
+| MongoDB Atlas | Immutable cases and separate human review history | `d39cd15` | [Setup](mongodb.md) |
+| Modal | Isolated locked CPU training jobs on explicit data | `c9c1fd9` | [Setup](modal.md) |
+| Verda Inference | Alternative hosted visual explanation endpoint | `9847f43` | [Setup](verda.md) |
+| Vultr | Authenticated evidence portal and hosting templates | `c848475` | [Setup](vultr.md) |
+| Google Gemma | Self-hosted image-capable explanation assistant | `77c1c06` | [Setup](gemma.md) |
+| Arduino UNO Q | Freshness-gated capture request and status light | `cc95768` | [Setup](arduino.md) |
+| Oxylabs Web API | Approved-source research with retrieved citations | `594b4fa` | [Setup](oxylabs.md) |
+| Context.dev | Explicit structured reference-field extraction | `853bb18` | [Setup](contextdev.md) |
+
+These are implemented adapters/tools/templates, not fifteen verified live account
+connections. Contract tests inject provider responses. Account credentials,
+service/model availability, deployed runners/VMs/boards and real task performance
+still need live validation. No cloud accounts, APIs, hardware or paid compute were
+used for the feature tests. Every feature commit names its product and explains
+implementation, invocation and verification limits in its body. The two initial
+merge commits only established the baseline and are not product integrations.
+
+For one demo, prefer Cloudinary + one explanation provider + ElevenLabs + one
+store, shown in the Vultr-ready local portal. Enable alternatives deliberately;
+running all explanatory services duplicates cost without adding detector accuracy.
+
+## Configuration diagnostics
+
+`configs/integrations/.env.example` lists blank configuration names. Copy it to
+an ignored local file and export only the services you intend to run. The code
+does not automatically load env files or discover credentials from other projects.
+Check configuration presence without showing values or making network calls:
+
+```bash
+uv run python -m brickcell.integrations --status
+```
+
+Presence is not key validity, account authorization or deployment verification.
+Gemma remote authentication, optional database/Kafka drivers and service-specific
+constraints are checked at execution; use the individual guide before a live run.
