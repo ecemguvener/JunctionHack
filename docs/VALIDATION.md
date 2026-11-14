@@ -1,5 +1,17 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 back/underside pose — 14 November 2026
+
+Saved RGB and SDK point packets under ignored `artifacts/brick-001-back-review/`.
+RGB review shows the broad underside with circular tubes facing the plate
+camera, consistent with the operator's back-view label. Processed top ROI
+`[242,211,278,271]` and plate ROI `[360,59,452,136]` using the existing red
+selection, radius filter and provisional transform. Exported a rough two-view
+cloud, plot and pose report. Kept this pose separate from earlier orientations;
+the cloud does not imply measured cavity geometry, complete coverage or a
+cross-pose reconstruction. No source code changed; processing and diff
+whitespace checks completed successfully.
+
 ## Brick-001 narrow-side pose — 14 November 2026
 
 Saved fresh RGB/SDK point packets in ignored `artifacts/brick-001-narrow-review/`.
