@@ -1,5 +1,16 @@
 # Executed validation — 13 November 2026
 
+## Brick-002 accepted narrow side — 14 November 2026
+
+Saved fresh RGB previews and subsampled point packets under ignored
+`artifacts/brick-002-side-review/`. Visual review confirms the upright blue
+brick's narrow curved side faces the plate camera, with studs in profile and
+no hand occlusion. Retained the same brick-002/session group and source hashes;
+assigned no dataset partition or model decision and applied no old camera
+transform. Updated the existing HTML guide and review pages with the saved
+photo and an opposite-side target requiring a 180-degree turn. No core source
+changed during capture.
+
 ## Brick-002 accepted back and next-pose guide — 14 November 2026
 
 Saved fresh RGB previews and subsampled point packets under ignored
