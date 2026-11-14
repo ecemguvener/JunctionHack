@@ -1,0 +1,548 @@
+"""Physical SO-101 3-Plate Inspection Cell Runtime (Real2Sim + Frax IK + Live Cameras + armd).
+
+Replicates the full verified simulation architecture on the physical Intel bench:
+  - `FrameSource` (`LiveBenchHttpFrameSource`): consumes live loopback streams from
+    `live_depth.py` (`http://127.0.0.1:8094` Dual-D415 RGB-D + point clouds) and
+    `focus_assist.py` (`http://127.0.0.1:8091/frame.jpg` Sonix UVC wrist RGB) without
+    fighting V4L2 device locks.
+  - `Inspector` (`RealCameraAnomalyInspector`): strictly isolated from robot control
+    (zero `RobotInterface` handle per `AGENTS.md`). Evaluates symmetric-flanked CIE-Lab
+    dark-mark surface scores + optional `OpenVINODetector` raw PatchCore distances inside
+    a bounded-timeout worker (timed-out workers are abandoned and never reused).
+  - `RobotInterface` (`PhysicalArmController`): wraps `ArmdFollowerBridge` (`127.0.0.1:8765`)
+    with bounded speeds, `SAFE_GRIPPER_MIN_RAW = 1339`, adaptive pitched-wrist Frax IK,
+    bench obstacle clearance checks, and immediate `hold` stop on any servo fault.
+  - `SkillExecutor` (`PhysicalSO101CellExecutor`): driven by the exact same
+    `CogManInspectionAgent` (`mode="clear_source_plate"`), mirroring live state into
+    `SO101InspectionTwin` and streaming live decision overlays to `:8096`
+    (`brickcell-dashboard`), `:8095` (`LiveInspectionHudServer`), and `:8093` (`camui`).
+"""
+
+from __future__ import annotations
+
+import base64
+import concurrent.futures
+import io
+import json
+import math
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from brickcell.block_inspector.armd_bridge import ArmdFollowerBridge, ArmFaultError, DecodedArmState
+from brickcell.block_inspector.camera_adapters import (
+    CamUiReporter,
+    LiveInspectionHudServer,
+    TwinDashboardReporter,
+)
+from brickcell.block_inspector.cogman import (
+    CogManInspectionAgent,
+    GroundedOperator,
+    SkillOutcome,
+    SymbolicState,
+)
+from brickcell.block_inspector.frax_ik import GraspIKSolution, SO101FraxIK
+from brickcell.block_inspector.geometry import (
+    DUPLO_CATALOG,
+    REPO_ROOT,
+    T_WORLD_BASE,
+    station_camera_rig,
+)
+from brickcell.block_inspector.ledger import EightCornerCoverageLedger
+from brickcell.block_inspector.real2sim import (
+    PerceivedBrick,
+    Real2SimPipeline,
+    Real2SimSceneState,
+    project_world_obb_to_image_box,
+    real_intel_camera_poses_world,
+)
+from brickcell.block_inspector.twin import (
+    PLATE_DROP_SLOT_OFFSETS_XY,
+    SO101InspectionTwin,
+    SpawnedBlockInfo,
+)
+
+# High upright observation posture clear of Top and Plate camera sightlines & strictly in CCW Joint-5 zone
+PHYSICAL_OBSERVATION_HOME_Q = np.array([0.00, -1.15, 0.88, 0.42, 0.55], dtype=np.float64)
+
+# Physical Plate-camera presentation target (+X forward, -Y right, +Z up) placing held brick
+# centered in the real Plate D415 (`243622060450`) frame at z_cam ~ 0.28 m.
+# Joint 5 (`wrist_roll`) hits its physical CW stop at ~2282 ticks (+0.36 rad) and rotates
+# freely in the Counter-Clockwise (+tick / +rad) direction [2341 .. 4042 ticks] = [+0.45 .. +3.06 rad].
+PHYSICAL_PLATE_SCAN_POS = np.array([0.312, -0.025, 0.118], dtype=np.float64)
+PHYSICAL_JOINT5_CCW_START_RAD = +0.45
+PHYSICAL_JOINT5_CCW_END_RAD = +3.05
+
+# Measured static bench obstacles in calibrated +X-forward robot base frame (m):
+# (x, y, z, radius_m, label)
+BENCH_OBSTACLE_SPHERES: tuple[tuple[float, float, float, float, str], ...] = (
+    (0.060, -0.168, 0.095, 0.048, "bench_can_right"),
+    (0.055, +0.255, 0.055, 0.070, "laptop_left_rear"),
+    (0.340, +0.268, 0.175, 0.080, "laptop_screen_left"),
+    (0.515, -0.240, 0.140, 0.075, "plate_camera_pedestal"),
+)
+
+PART_ID_TO_DASHBOARD_ID = {
+    "3437": "part-001",
+    "3011": "part-002",
+    "76371": "part-003",
+    "2302": "part-004",
+}
+
+
+def score_brick_roi_dark_mark(
+    roi_rgb: np.ndarray,
+    fg_mask: np.ndarray | None = None,
+) -> tuple[float, list[dict[str, Any]]]:
+    """Evaluate symmetric-flanked CIE-Lab blackhat raw surface anomaly score on a brick ROI.
+
+    Detects thin dark pen/marker strokes or surface gouges flanked on both transverse sides
+    by uniform brick plastic (same lightness and Lab chromaticity), rejecting outer silhouette
+    edges, plate rims, circular stud shadows, and underside hollow tubes.
+    Never returns or represents a probability: `raw_score` is a Lab contrast distance (>= 0).
+    """
+    if roi_rgb.size == 0 or min(roi_rgb.shape[:2]) < 20:
+        return 0.0, []
+
+    hsv = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2HSV)
+    lab = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2LAB)
+    L = lab[:, :, 0].astype(np.float32)
+    A = lab[:, :, 1].astype(np.float32)
+    B = lab[:, :, 2].astype(np.float32)
+
+    # Exclude aquamarine/blue KALAS plate plastic and purple PLA robot gripper jaws
+    not_plate = ~((hsv[:, :, 0] >= 92) & (hsv[:, :, 0] <= 114) & (hsv[:, :, 1] >= 95))
+    not_purple_jaw = ~((hsv[:, :, 0] >= 118) & (hsv[:, :, 0] <= 148) & (hsv[:, :, 1] >= 75))
+    valid_fg = (
+        not_plate & not_purple_jaw if fg_mask is None else (fg_mask & not_plate & not_purple_jaw)
+    )
+
+    interior = cv2.erode(valid_fg.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    if int(np.sum(interior)) < 50:
+        return 0.0, []
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    blackhat = cv2.morphologyEx(L, cv2.MORPH_BLACKHAT, kernel) * interior
+
+    cand = (blackhat >= 14.0) & interior
+    n_comp, lbls, stats, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8))
+    best_score = 0.0
+    detections: list[dict[str, Any]] = []
+    h_img, w_img = L.shape
+
+    for idx in range(1, n_comp):
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        if area < 9 or area > 280:
+            continue
+        ys, xs = np.where(lbls == idx)
+        pts = np.column_stack([xs.astype(np.float64), ys.astype(np.float64)])
+        centered = pts - pts.mean(axis=0, keepdims=True)
+        cov = (centered.T @ centered) / max(1, len(pts) - 1)
+        evals, evecs = np.linalg.eigh(cov)
+        l1 = float(max(evals[-1], 1e-6))
+        l2 = float(max(evals[0], 0.0))
+        linearity = (l1 - l2) / l1
+        _, (w_r, h_r), _ = cv2.minAreaRect(pts.astype(np.float32))
+        maj = max(float(w_r), float(h_r))
+        min_s = max(min(float(w_r), float(h_r)), 1.0)
+        if maj < 7.5 or min_s > 6.8 or linearity < 0.70:
+            continue
+
+        normal = evecs[:, 0]
+        p_plus = np.round(pts + 5.0 * normal[None, :]).astype(int)
+        p_minus = np.round(pts - 5.0 * normal[None, :]).astype(int)
+        in_bounds = (
+            (p_plus[:, 0] >= 0)
+            & (p_plus[:, 0] < w_img)
+            & (p_plus[:, 1] >= 0)
+            & (p_plus[:, 1] < h_img)
+            & (p_minus[:, 0] >= 0)
+            & (p_minus[:, 0] < w_img)
+            & (p_minus[:, 1] >= 0)
+            & (p_minus[:, 1] < h_img)
+        )
+        if int(np.sum(in_bounds)) < 6:
+            continue
+
+        pp = p_plus[in_bounds]
+        pm = p_minus[in_bounds]
+        pv = pts[in_bounds].astype(int)
+        both_fg = valid_fg[pp[:, 1], pp[:, 0]] & valid_fg[pm[:, 1], pm[:, 0]]
+        if float(np.mean(both_fg)) < 0.72:
+            continue
+
+        l_plus = L[pp[:, 1], pp[:, 0]]
+        l_minus = L[pm[:, 1], pm[:, 0]]
+        l_mid = L[pv[:, 1], pv[:, 0]]
+        side_l_diff = float(np.median(np.abs(l_plus - l_minus)))
+        ab_diff = float(
+            np.median(
+                np.hypot(
+                    A[pp[:, 1], pp[:, 0]] - A[pm[:, 1], pm[:, 0]],
+                    B[pp[:, 1], pp[:, 0]] - B[pm[:, 1], pm[:, 0]],
+                )
+            )
+        )
+        flank_contrast = float(np.median(np.minimum(l_plus, l_minus) - l_mid))
+        if side_l_diff > 14.5 or ab_diff > 12.5 or flank_contrast < 12.0:
+            continue
+
+        raw_score = float(flank_contrast * (0.5 + 0.5 * linearity))
+        x0 = int(stats[idx, cv2.CC_STAT_LEFT])
+        y0 = int(stats[idx, cv2.CC_STAT_TOP])
+        bw = int(stats[idx, cv2.CC_STAT_WIDTH])
+        bh = int(stats[idx, cv2.CC_STAT_HEIGHT])
+        detections.append(
+            {
+                "box": [x0, y0, x0 + bw, y0 + bh],
+                "score": round(raw_score, 4),
+                "label": "dark mark",
+                "linearity": round(linearity, 3),
+            }
+        )
+        best_score = max(best_score, raw_score)
+
+    return best_score, detections
+
+
+@dataclass(frozen=True)
+class FrameInspectionResult:
+    """Trusted/untrusted result of inspecting a single real camera frame."""
+
+    valid_view: bool
+    raw_anomaly_distance: float
+    threshold_value: float
+    flagged: bool
+    detections: list[dict[str, Any]]
+    foreground_pixels: int
+    reason: str = "ok"
+
+
+class RealCameraAnomalyInspector:
+    """`Inspector` boundary with bounded-timeout worker isolation (zero robot handles!)."""
+
+    def __init__(
+        self,
+        dark_mark_threshold: float | None = 16.0,
+        openvino_detector: Any | None = None,
+        worker_timeout_s: float = 2.5,
+    ) -> None:
+        if dark_mark_threshold is None or not math.isfinite(float(dark_mark_threshold)):
+            raise ValueError("RealCameraAnomalyInspector requires a finite dark_mark_threshold")
+        if openvino_detector is not None and getattr(openvino_detector, "threshold", None) is None:
+            raise ValueError("OpenVINODetector requires a calibrated threshold before deployment")
+        self.dark_mark_threshold = float(dark_mark_threshold)
+        self.openvino_detector = openvino_detector
+        self.worker_timeout_s = float(worker_timeout_s)
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = (
+            concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="inspector-wkr")
+        )
+        self.timed_out: bool = False
+
+    def close(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
+
+    def _score_sync(
+        self,
+        rgb: np.ndarray,
+        depth_m: np.ndarray | None,
+        crop_box: list[int],
+        expected_z_m: float | None,
+        z_band_m: float,
+    ) -> FrameInspectionResult:
+        u0, v0, u1, v1 = [int(x) for x in crop_box]
+        roi_rgb = rgb[v0:v1, u0:u1]
+        if roi_rgb.size == 0 or min(roi_rgb.shape[:2]) < 20 or float(roi_rgb.std()) <= 4.0:
+            return FrameInspectionResult(
+                valid_view=False,
+                raw_anomaly_distance=0.0,
+                threshold_value=self.dark_mark_threshold,
+                flagged=False,
+                detections=[],
+                foreground_pixels=0,
+                reason="empty_or_low_contrast_roi",
+            )
+
+        fg_mask: np.ndarray | None = None
+        fg_count = int(roi_rgb.shape[0] * roi_rgb.shape[1])
+        if depth_m is not None and expected_z_m is not None:
+            roi_dep = depth_m[v0:v1, u0:u1]
+            fg_mask = (
+                np.isfinite(roi_dep)
+                & (roi_dep >= max(0.10, expected_z_m - z_band_m))
+                & (roi_dep <= expected_z_m + z_band_m)
+            )
+            fg_count = int(np.sum(fg_mask))
+            if fg_count < 45:
+                return FrameInspectionResult(
+                    valid_view=False,
+                    raw_anomaly_distance=0.0,
+                    threshold_value=self.dark_mark_threshold,
+                    flagged=False,
+                    detections=[],
+                    foreground_pixels=fg_count,
+                    reason=f"insufficient_foreground_depth_pixels({fg_count})",
+                )
+
+        dark_score, local_dets = score_brick_roi_dark_mark(roi_rgb, fg_mask=fg_mask)
+        full_dets: list[dict[str, Any]] = []
+        for d in local_dets:
+            bx0, by0, bx1, by1 = d["box"]
+            full_dets.append(
+                {
+                    "box": [u0 + bx0, v0 + by0, u0 + bx1, v0 + by1],
+                    "score": d["score"],
+                    "label": d["label"],
+                }
+            )
+
+        flagged = dark_score >= self.dark_mark_threshold
+        raw_dist = dark_score
+        eff_thr = self.dark_mark_threshold
+
+        if self.openvino_detector is not None:
+            bg_iso = np.array([28, 32, 38], dtype=np.uint8)
+            roi_iso = (
+                np.where(fg_mask[:, :, None], roi_rgb, bg_iso) if fg_mask is not None else roi_rgb
+            )
+            pred = self.openvino_detector.predict(roi_iso)
+            ov_score = float(pred.score)
+            ov_thr = float(self.openvino_detector.threshold.value)
+            if not math.isfinite(ov_score):
+                raise ValueError("Non-finite OpenVINO raw distance")
+            if ov_score >= ov_thr:
+                flagged = True
+                full_dets.append(
+                    {
+                        "box": [u0, v0, u1, v1],
+                        "score": round(ov_score, 4),
+                        "label": "patchcore anomaly",
+                    }
+                )
+            if ov_score / max(ov_thr, 1e-6) > raw_dist / max(eff_thr, 1e-6):
+                raw_dist = ov_score
+                eff_thr = ov_thr
+
+        return FrameInspectionResult(
+            valid_view=True,
+            raw_anomaly_distance=raw_dist,
+            threshold_value=eff_thr,
+            flagged=flagged,
+            detections=full_dets,
+            foreground_pixels=fg_count,
+            reason="ok",
+        )
+
+    def evaluate_frame(
+        self,
+        rgb: np.ndarray,
+        depth_m: np.ndarray | None,
+        crop_box: list[int],
+        expected_z_m: float | None = None,
+        z_band_m: float = 0.065,
+    ) -> FrameInspectionResult:
+        """Run bounded-timeout inspection; retire worker permanently on timeout (`AGENTS.md`)."""
+        if self.timed_out or self._executor is None:
+            raise TimeoutError("Inspector worker previously timed out and cannot be reused")
+        fut = self._executor.submit(
+            self._score_sync, rgb, depth_m, crop_box, expected_z_m, z_band_m
+        )
+        try:
+            return fut.result(timeout=self.worker_timeout_s)
+        except concurrent.futures.TimeoutError as exc:
+            self.timed_out = True
+            # Abandon timed-out worker forever; never reuse it for subsequent cycles!
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
+            raise TimeoutError(
+                f"Inspector timed out after {self.worker_timeout_s:.2f}s; worker retired"
+            ) from exc
+
+
+class PhysicalSO101CellExecutor:
+    def _skill_present_and_spin_at_plate_camera(self) -> SkillOutcome:
+        """Move held brick to low Plate camera and sweep Joint 5 CCW while scoring live frames."""
+        if self.hand_empty or self._active_brick is None:
+            return SkillOutcome(False, reason="block_not_held")
+
+        brick = self._active_brick
+        dash_obj_id = PART_ID_TO_DASHBOARD_ID.get(brick.spec.part_id, "part-001")
+        radial_az = math.atan2(float(PHYSICAL_PLATE_SCAN_POS[1]), float(PHYSICAL_PLATE_SCAN_POS[0]))
+        pres_sol = self.ik.solve_grasp_pose(
+            PHYSICAL_PLATE_SCAN_POS,
+            jaw_yaw_world=radial_az + 0.5 * math.pi,
+            pitch_down_deg=56.0,
+        )
+
+        q_scan_start = pres_sol.q_grasp.copy()
+        q_scan_start[4] = max(
+            float(self.ik.cal_kin.calibration.lower[4]) + 0.08, PHYSICAL_JOINT5_CCW_START_RAD
+        )
+        q_scan_end = pres_sol.q_grasp.copy()
+        q_scan_end[4] = min(
+            float(self.ik.cal_kin.calibration.upper[4]) - 0.08, PHYSICAL_JOINT5_CCW_END_RAD
+        )
+
+        q_cur, _ = self.arm.current_q_and_grip(fresh=False)
+        q_carry = 0.5 * (q_cur + q_scan_start)
+        q_carry[1] = min(float(q_cur[1]), float(q_scan_start[1]), -0.65)
+        self.status_banner = "PresentAndSpinAtPlateCamera: Moving held brick to Plate D415"
+        self.arm.move_to_pose(
+            q_carry,
+            gripper_pct=self._active_close_pct,
+            speed=220,
+            include_gripper=False,
+            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+        )
+        self.arm.move_to_pose(
+            q_scan_start,
+            gripper_pct=self._active_close_pct,
+            speed=200,
+            include_gripper=False,
+            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+        )
+
+        self.plate_scan_active = True
+        self.plate_scan_valid_frames = 0
+        self.plate_scan_keyframes.clear()
+        R_pl, p_pl, K_pl = self.real_cams["plate"]
+        n_stops = 6
+        seen_frame_ids: set[str] = set()
+        verified_held_in_depth = False
+
+        for step_idx in range(n_stops + 1):
+            tau = step_idx / n_stops
+            q_step = q_scan_start.copy()
+            q_step[4] = float(q_scan_start[4] + tau * (q_scan_end[4] - q_scan_start[4]))
+            swept_deg = math.degrees(q_step[4] - q_scan_start[4])
+            self.status_banner = (
+                f"Plate Camera CCW Spin +{swept_deg:.0f} deg | "
+                f"{'ANOMALY FLAGGED' if self.anomaly_flagged else 'Scanning...'}"
+            )
+            self.arm.move_to_pose(
+                q_step,
+                gripper_pct=self._active_close_pct,
+                speed=240,
+                timeout_s=5.0,
+                include_gripper=False,
+            )
+            if not self.arm.dry_run:
+                time.sleep(0.16)
+
+            q_meas, g_meas = self.arm.current_q_and_grip(fresh=True)
+            T_held = self.ik.fk_world_body3(q_meas) @ self._T_body3_block_held
+            top_box = self._project_to_top_box(T_held, brick.spec.dims_m)
+            if self.dashboard is not None and top_box is not None:
+                self.dashboard.report_focus(
+                    object_id=dash_obj_id,
+                    label=f"{brick.spec.name} (CCW +{swept_deg:.0f} deg)",
+                    box=top_box,
+                )
+
+            try:
+                plate_snap = self.frame_source.fetch_d415_snapshot("plate")
+                top_snap = self.frame_source.fetch_d415_snapshot("top")
+                wrist_snap = self.frame_source.fetch_wrist_snapshot()
+            except StaleCameraFrameError as exc:
+                self.anomaly_untrusted_error = f"stale_camera_frame:{exc}"
+                break
+
+            if not self.arm.dry_run and plate_snap.frame_id in seen_frame_ids:
+                continue
+            seen_frame_ids.add(plate_snap.frame_id)
+
+            if self.arm.dry_run:
+                # In zero-motion dry-run, score the brick's resting Plate ROI across spin steps
+                eval_T = brick.T_world_block
+            else:
+                eval_T = T_held
+
+            plate_box, _ = project_world_obb_to_image_box(
+                eval_T,
+                brick.spec.dims_m,
+                R_pl,
+                p_pl,
+                K_pl,
+                width=640,
+                height=480,
+                pad_px=22,
+            )
+            if plate_box is None:
+                continue
+
+            try:
+                res = self.inspector.evaluate_frame(
+                    plate_snap.rgb,
+                    None,
+                    plate_box,
+                    expected_z_m=None,
+                    z_band_m=0.075,
+                )
+            except Exception as exc:
+                self.anomaly_untrusted_error = f"inspector_failure:{exc}"
+                break
+
+            if res.valid_view:
+                self.plate_scan_valid_frames += 1
+                if step_idx in (0, 2, 4, 6) and len(self.plate_scan_keyframes) < 4:
+                    self.plate_scan_keyframes.append(plate_snap.rgb.copy())
+                if self.arm.dry_run or g_meas >= 0.048 or res.foreground_pixels >= 55:
+                    verified_held_in_depth = True
+                self.max_plate_anomaly_distance = (
+                    res.raw_anomaly_distance
+                    if self.max_plate_anomaly_distance is None
+                    else max(self.max_plate_anomaly_distance, res.raw_anomaly_distance)
+                )
+                if res.flagged:
+                    self.anomaly_flagged = True
+                    self.anomaly_messages.append(
+                        f"plate_spin_dark_mark={res.raw_anomaly_distance:.2f}>={res.threshold_value:.2f}"
+                    )
+                    if self.dashboard is not None and top_box is not None:
+                        self.dashboard.report_anomalies(
+                            [
+                                {
+                                    "box": top_box,
+                                    "score": res.raw_anomaly_distance,
+                                    "label": "dark mark",
+                                    "object_id": dash_obj_id,
+                                }
+                            ]
+                        )
+
+            self._sync_mirror_and_telemetry(
+                q_meas, g_meas, top_snap.rgb, plate_snap.rgb, wrist_snap.rgb
+            )
+
+        self.plate_scan_active = False
+        if self.anomaly_untrusted_error is not None:
+            return SkillOutcome(False, reason=self.anomaly_untrusted_error)
+        if not verified_held_in_depth:
+            # Grasp slipped — open jaws safely at observation home and refuse untrusted sort
+            self.hand_empty = True
+            self.arm.move_to_pose(PHYSICAL_OBSERVATION_HOME_Q, gripper_pct=0.70, speed=200)
+            return SkillOutcome(False, reason="pick_not_verified_in_plate_depth")
+        if self.plate_scan_valid_frames < 3:
+            return SkillOutcome(
+                False, reason=f"insufficient_valid_plate_views({self.plate_scan_valid_frames})"
+            )
+
+        self.plate_scan_completed = True
+        return SkillOutcome(
+            True,
+            reason="plate_ccw_scan_completed",
+            metadata={
+                "valid_plate_views": self.plate_scan_valid_frames,
+                "anomaly_flagged": self.anomaly_flagged,
+                "max_raw_anomaly_distance": self.max_plate_anomaly_distance,
+            },
+        )

@@ -1,0 +1,14 @@
+{
+  "source": "/home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py",
+  "read_date": "2026-11-14",
+  "source_sha256": "728f31dc35b6373f92c3068c77249db7bb4c9774be9cdfa1f69d252f22c98c12",
+  "patched_sha256": "06f2d761264dbb7bf46b1c91ae1d9ddf41730ba085856dbe8742f502cf581af9",
+  "fixture": "tests/fixtures/inspection_validity/hardware_cell.py.txt",
+  "scope": "Verbatim source excerpts; test harness executes only inspection definitions and the presentation method with fake hardware.",
+  "excerpt_ast_sha256": {
+    "score_brick_roi_dark_mark": "d321bd407e76cca01745884dad1c79513cc39372cd1071a1c98aa5bab8bba701",
+    "FrameInspectionResult": "974e4d85fd49e26cd245d8a72d20fdf1dbe9477d57fd520392e43c82220b8e31",
+    "RealCameraAnomalyInspector": "ac8c15ca9d281af8890819aba3088b956a5387156d4be46e60cf95fe0a700d48",
+    "_skill_present_and_spin_at_plate_camera": "03f4969591062e774c2bfd7718a703236905787b1e4ee0cad2b1b6291451a514"
+  }
+}

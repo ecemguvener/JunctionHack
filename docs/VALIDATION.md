@@ -1230,3 +1230,41 @@ Extended the simulated cell to three IKEA KALAS plates (`source` aquamarine blue
 - Physical bench connection (`ssh.md` / `hardware.md` / `arm-api.md`), real STS3215 servo motion, physical RealSense D415 / Sonix camera capture, and remote cloud training/inference were intentionally not executed prior to starting the hardware phase.
 
 
+
+## Deployed inspection validity fix — 2026-11-14
+
+Branch `codex/inspection-validity`, based on main `3720e9b`. Added the lightweight
+`brickcell.inspection.validity` gate and an integration patch for the unpublished
+Intel `hardware_cell.py` captured read-only earlier that day. No deployment,
+service changes or hardware actions were performed for this fix. Source/output
+hashes and reproduction instructions are in `patches/inspection-validity/`.
+
+Executed locally using the existing native ARM64 Python 3.12.11 environment with
+`PYTHONPATH=src` pointing to this isolated worktree:
+
+- Focused offline tests: **49 passed**. The baseline's real presentation method
+  accepted missing-depth crops; the patched method rejects them, including with
+  a large gripper reading or dry-run flag. Clean and marked artificial fixtures
+  pass through the actual dark-mark scorer and seven-position fake-arm scan.
+  Tests cover malformed/out-of-bounds RGB/depth/crops, absent/nonfinite/incorrect
+  depth, sparse/fragmented support, plate/jaw-only colours, duplicate/stale frames,
+  too few valid views, and not calling the anomaly model on invalid views.
+- Core regression: **189 passed, 5 skipped** using
+  `uv run --locked --no-sync pytest --ignore=tests/test_block_inspector.py -q`.
+  Four skips require trained model assets and one requires a live simulator.
+- Unfiltered `uv run --locked --no-sync pytest -q` was attempted and stopped at
+  collection because the existing optional block-inspector tests import missing
+  `mujoco`. This is not a full-suite pass or a new dependency added by this fix.
+- Ruff lint and format checks passed for `src tests scripts` (103 Python files).
+- Prepared a patched full local controller copy with the hash-checked script and
+  compiled its syntax without execution. Verified the test fixture definitions
+  match the deployed source and the full `PhysicalArmController` AST is unchanged.
+  Regression tests also assert every presentation/recovery `move_to_pose` call
+  and the dark-mark scoring function remain unchanged.
+
+The first focused run exposed a fixture extraction error (a stray dataclass
+annotation); fixed the fixture and reran successfully. No trained Anomalib model
+or physical camera/arm was exercised. Conservative evidence thresholds still
+need real Plate-camera validation. A depth-supported crop is not proof of a
+successful grasp, object identity, complete surface coverage or physical sorting.
+Merging this branch alone does not patch the running Intel controller.

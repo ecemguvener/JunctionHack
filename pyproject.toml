@@ -49,7 +49,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "/src", "/tests", "/configs", "/docs", "/scripts",
+  "/src", "/tests", "/configs", "/docs", "/scripts", "/patches",
   "/policy/*.py", "/policy/pyproject.toml", "/policy/uv.lock",
   "/README.md", "/AGENTS.md", "/Makefile", "/pyproject.toml",
   "/uv.lock", "/.python-version", "/.gitignore",

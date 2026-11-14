@@ -1,0 +1,147 @@
+--- a/src/brickcell/block_inspector/hardware_cell.py
++++ b/src/brickcell/block_inspector/hardware_cell.py
+@@ -35,6 +35,8 @@
+ import cv2
+ import numpy as np
+ from PIL import Image
++
++from brickcell.inspection.validity import validate_plate_view
+ 
+ from brickcell.block_inspector.armd_bridge import ArmdFollowerBridge, ArmFaultError, DecodedArmState
+ from brickcell.block_inspector.camera_adapters import (
+@@ -357,6 +359,7 @@
+     detections: list[dict[str, Any]]
+     foreground_pixels: int
+     reason: str = "ok"
++    depth_supported: bool = False
+ 
+ 
+ class RealCameraAnomalyInspector:
+@@ -393,39 +396,22 @@
+         expected_z_m: float | None,
+         z_band_m: float,
+     ) -> FrameInspectionResult:
+-        u0, v0, u1, v1 = [int(x) for x in crop_box]
+-        roi_rgb = rgb[v0:v1, u0:u1]
+-        if roi_rgb.size == 0 or min(roi_rgb.shape[:2]) < 20 or float(roi_rgb.std()) <= 4.0:
++        evidence = validate_plate_view(rgb, depth_m, crop_box, expected_z_m, z_band_m)
++        if not evidence.valid_view:
+             return FrameInspectionResult(
+                 valid_view=False,
+                 raw_anomaly_distance=0.0,
+                 threshold_value=self.dark_mark_threshold,
+                 flagged=False,
+                 detections=[],
+-                foreground_pixels=0,
+-                reason="empty_or_low_contrast_roi",
+-            )
+-
+-        fg_mask: np.ndarray | None = None
+-        fg_count = int(roi_rgb.shape[0] * roi_rgb.shape[1])
+-        if depth_m is not None and expected_z_m is not None:
+-            roi_dep = depth_m[v0:v1, u0:u1]
+-            fg_mask = (
+-                np.isfinite(roi_dep)
+-                & (roi_dep >= max(0.10, expected_z_m - z_band_m))
+-                & (roi_dep <= expected_z_m + z_band_m)
+-            )
+-            fg_count = int(np.sum(fg_mask))
+-            if fg_count < 45:
+-                return FrameInspectionResult(
+-                    valid_view=False,
+-                    raw_anomaly_distance=0.0,
+-                    threshold_value=self.dark_mark_threshold,
+-                    flagged=False,
+-                    detections=[],
+-                    foreground_pixels=fg_count,
+-                    reason=f"insufficient_foreground_depth_pixels({fg_count})",
+-                )
++                foreground_pixels=evidence.foreground_pixels,
++                reason=evidence.reason,
++                depth_supported=False,
++            )
++        u0, v0, u1, v1 = [int(x) for x in crop_box]
++        roi_rgb = rgb[v0:v1, u0:u1]
++        fg_mask = evidence.foreground_mask
++        fg_count = evidence.foreground_pixels
+ 
+         dark_score, local_dets = score_brick_roi_dark_mark(roi_rgb, fg_mask=fg_mask)
+         full_dets: list[dict[str, Any]] = []
+@@ -473,7 +459,8 @@
+             flagged=flagged,
+             detections=full_dets,
+             foreground_pixels=fg_count,
+-            reason="ok",
++            reason=evidence.reason,
++            depth_supported=evidence.depth_supported,
+         )
+ 
+     def evaluate_frame(
+@@ -1413,7 +1400,7 @@
+         R_pl, p_pl, K_pl = self.real_cams["plate"]
+         n_stops = 6
+         seen_frame_ids: set[str] = set()
+-        verified_held_in_depth = False
++        depth_supported_view_seen = False
+ 
+         for step_idx in range(n_stops + 1):
+             tau = step_idx / n_stops
+@@ -1462,7 +1449,7 @@
+             else:
+                 eval_T = T_held
+ 
+-            plate_box, _ = project_world_obb_to_image_box(
++            plate_box, plate_expected_z = project_world_obb_to_image_box(
+                 eval_T,
+                 brick.spec.dims_m,
+                 R_pl,
+@@ -1478,21 +1465,20 @@
+             try:
+                 res = self.inspector.evaluate_frame(
+                     plate_snap.rgb,
+-                    None,
++                    plate_snap.depth_m,
+                     plate_box,
+-                    expected_z_m=None,
++                    expected_z_m=plate_expected_z,
+                     z_band_m=0.075,
+                 )
+             except Exception as exc:
+                 self.anomaly_untrusted_error = f"inspector_failure:{exc}"
+                 break
+ 
+-            if res.valid_view:
++            if res.valid_view and res.depth_supported:
+                 self.plate_scan_valid_frames += 1
+                 if step_idx in (0, 2, 4, 6) and len(self.plate_scan_keyframes) < 4:
+                     self.plate_scan_keyframes.append(plate_snap.rgb.copy())
+-                if self.arm.dry_run or g_meas >= 0.048 or res.foreground_pixels >= 55:
+-                    verified_held_in_depth = True
++                depth_supported_view_seen = True
+                 self.max_plate_anomaly_distance = (
+                     res.raw_anomaly_distance
+                     if self.max_plate_anomaly_distance is None
+@@ -1522,11 +1508,12 @@
+         self.plate_scan_active = False
+         if self.anomaly_untrusted_error is not None:
+             return SkillOutcome(False, reason=self.anomaly_untrusted_error)
+-        if not verified_held_in_depth:
+-            # Grasp slipped — open jaws safely at observation home and refuse untrusted sort
++        if not depth_supported_view_seen:
++            # No usable depth-supported inspection; use the existing failure recovery.
++            # This is not proof of a slipped grasp (nor is depth support proof of a grasp).
+             self.hand_empty = True
+             self.arm.move_to_pose(PHYSICAL_OBSERVATION_HOME_Q, gripper_pct=0.70, speed=200)
+-            return SkillOutcome(False, reason="pick_not_verified_in_plate_depth")
++            return SkillOutcome(False, reason="missing_depth_supported_inspection_view")
+         if self.plate_scan_valid_frames < 3:
+             return SkillOutcome(
+                 False, reason=f"insufficient_valid_plate_views({self.plate_scan_valid_frames})"
+@@ -1538,6 +1525,7 @@
+             reason="plate_ccw_scan_completed",
+             metadata={
+                 "valid_plate_views": self.plate_scan_valid_frames,
++                "depth_supported_view_seen": depth_supported_view_seen,
+                 "anomaly_flagged": self.anomaly_flagged,
+                 "max_raw_anomaly_distance": self.max_plate_anomaly_distance,
+             },
