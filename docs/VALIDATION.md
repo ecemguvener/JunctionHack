@@ -1,5 +1,19 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 narrow-side pose — 14 November 2026
+
+Saved fresh RGB/SDK point packets in ignored `artifacts/brick-001-narrow-review/`.
+Visual review shows the narrow face obliquely toward the plate camera, with
+part of the adjacent long face visible. Software receive timestamps differ by
+0.121 s; this is not hardware synchronization. Reused the provisional camera
+transform and capture-specific ROIs: top `[224,216,280,258]`, plate
+`[379,62,441,143]`. Red selection plus the 60 mm review radius retained 129 top
+and 147 plate points. Exported a two-camera rough PLY, source-colored preview
+and report under the same folder. This pose remains separate from previous
+object poses; no cross-pose reconstruction, training or defect test occurred.
+No source code changed; existing processing completed successfully and diff
+whitespace validation passed.
+
 ## Brick-001 upright pose — 14 November 2026
 
 Captured RGB/point packets under `artifacts/brick-001-rotated-review/`. RGB
