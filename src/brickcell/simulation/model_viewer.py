@@ -34,6 +34,7 @@ from brickcell.simulation.world import (
     FLOOR_HALF,
     INSPECTION,
     PLATE_RGBA,
+    PLATES,
     brick_xml,
     plate_xml,
     scene_xml,
@@ -403,7 +404,7 @@ class ModelViewer:
         ]
         angles = np.linspace(0, 2 * np.pi, 49)
         ring = PLATE_OUTER_RADIUS * np.column_stack((np.cos(angles), np.sin(angles), 0 * angles))
-        for name, pos in BOWLS.items():
+        for name, pos in PLATES.items():  # the spare plate is at its park spot
             centre = np.array([pos[0], pos[1], 0.0005])
             points = (ring + centre).astype(np.float32)
             handles.append(
@@ -418,7 +419,7 @@ class ModelViewer:
             handles.append(
                 scene.add_label(
                     f"/station/plate-{name}-label",
-                    f"{name.upper()} plate",
+                    f"{name.upper()} plate" + (" (parked)" if name not in BOWLS else ""),
                     position=centre,
                     anchor="bottom-center",
                     font_screen_scale=0.8,

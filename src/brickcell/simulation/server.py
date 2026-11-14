@@ -44,7 +44,7 @@ from brickcell.simulation.scene_config import (
     parse_brick_color_arg,
     parse_color,
 )
-from brickcell.simulation.world import OBJECTS, World, inspection_crop
+from brickcell.simulation.world import OBJECTS, PLATES, World, inspection_crop
 from brickcell.twin.sim_sync import TwinSync, load_sim_config
 
 CAMERA_PATH = re.compile(r"/camera/([A-Za-z0-9_][A-Za-z0-9_-]*)\.png")
@@ -167,7 +167,7 @@ class SimulationServer:
                 for handle in handles:
                     handle.visible = frustums.value
 
-        with gui.add_folder("Brick colours"):
+        with gui.add_folder("Brick colours"):  # first copies only; GET /scene lists all copies
             self.color_inputs = {}
             for part in OBJECTS:
                 picker = gui.add_rgb(part, rgb255(self.world.bricks[part].rgba))
@@ -212,12 +212,12 @@ class SimulationServer:
                     except Exception:
                         self.twin_live_box.value = False
 
-        self.plate_labels = {
-            name: self.viewer.scene.add_label(
+        self.plate_labels = {}
+        for name in PLATES:
+            pos = self.world.model.body(f"plate_{name}").pos
+            self.plate_labels[name] = self.viewer.scene.add_label(
                 f"/labels/{name}", name.upper(), position=(pos[0], pos[1], 0.06)
             )
-            for name, pos in self.world.bowls.items()
-        }
         self.viewer.scene.add_label("/labels/inspection", "INSPECTION", position=(0.25, 0, 0.23))
 
         @self.viewer.on_client_connect
@@ -283,7 +283,7 @@ class SimulationServer:
         hide_plane_grids(self.viewer, self.world.model)
         self.scene.update_from_mjdata(self.world.data)
         if update_pickers:  # not for a change that came from a picker: the user can be dragging
-            for part in colors:
+            for part in set(colors) & set(self.color_inputs):
                 self.color_inputs[part].value = rgb255(self.world.bricks[part].rgba)
 
     def scene_state(self) -> dict:
@@ -324,23 +324,29 @@ class SimulationServer:
             self.apply_brick_colors(
                 {part: self.world.bricks[part].rgba for part in report["colors_changed"]}
             )
-        moved = [name for name, plate in report["plates"].items() if plate["moved_mm"] > 0]
-        if moved:
-            model, data = self.world.model, self.world.data
-            plate_bodies = {model.body(f"plate_{name}").id for name in moved}
-            # mjviser places fixed bodies once; move their meshes, or make them again.
-            handles = getattr(self.scene, "_fixed_geom_handles", None)
-            if handles is None:
-                self.scene.rebuild_visual_handles()
-                hide_plane_grids(self.viewer, model)
-            else:
-                for (body, _, _), handle in handles.items():
-                    if body in plate_bodies:
-                        handle.position = data.xpos[body]
-            for name in moved:
-                pos = self.world.bowls[name]
-                self.plate_labels[name].position = (pos[0], pos[1], 0.06)
+        self.show_plates(name for name, plate in report["plates"].items() if plate["moved_mm"] > 0)
         self.scene.update_from_mjdata(self.world.data)
+
+    def show_plates(self, names) -> None:
+        """Main thread only: show plates that moved (model.body_pos) in the browser viewer."""
+        names = list(names)
+        if not names:
+            return
+        model, data = self.world.model, self.world.data
+        mujoco.mj_kinematics(model, data)
+        plate_bodies = {model.body(f"plate_{name}").id for name in names}
+        # mjviser places fixed bodies once; move their meshes, or make them again.
+        handles = getattr(self.scene, "_fixed_geom_handles", None)
+        if handles is None:
+            self.scene.rebuild_visual_handles()
+            hide_plane_grids(self.viewer, model)
+        else:
+            for (body, _, _), handle in handles.items():
+                if body in plate_bodies:
+                    handle.position = data.xpos[body]
+        for name in names:
+            pos = model.body(f"plate_{name}").pos
+            self.plate_labels[name].position = (pos[0], pos[1], 0.06)
 
     def twin_changed(self) -> None:
         """Any thread: the twin status changed. The main thread shows it."""
@@ -400,8 +406,8 @@ class SimulationServer:
             return self.call_on_main(lambda: self.camera_png(match.group(1)))
         if method == "POST" and path == "/brick_color":
             part = payload["object_id"]
-            if part not in OBJECTS:
-                raise ValueError(f"Unknown fixture object. Known: {OBJECTS}")
+            if part not in self.world.bricks:
+                raise ValueError(f"Unknown brick. Known: {list(self.world.bricks)}")
             rgb = parse_color(payload["color"], f"brick colour {part}")
             self.call_on_main(lambda: self.apply_brick_colors({part: rgb}))
             return {"object_id": part, "color": color_hex(rgb), "rgb": list(rgb)}
@@ -492,6 +498,8 @@ class SimulationServer:
             self.stopped.clear()
             self.run_active = False
             self.world.reset()
+            self.show_plates(["spare"])  # reset parks the spare plate
+            self.scene.update_from_mjdata(self.world.data)
             self.inspected = self.last_capture = None
             self.run_id = uuid.uuid4().hex
             self.panel.content = "Reset · ready for four camera-driven inspections"

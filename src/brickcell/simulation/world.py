@@ -26,6 +26,7 @@ from brickcell.simulation.scene_config import (
     load_scene_config,
     parse_color,
 )
+from brickcell.twin.state import BRICK_IDS, INSTANCES_PER_PART, SORT_PLATES, part_of
 
 ASSETS = Path(__file__).resolve().parents[3] / "assets" / "duplo"
 
@@ -84,6 +85,9 @@ def _contact(name: str, priority: int) -> str:
 # Sorting targets are IKEA KALAS plates (Ø186 x 23.5 mm; floor top 3.1 mm). The xy value is the
 # plate centre. The z value is the brick bottom height at release: a 6 mm drop onto the floor.
 BOWLS = {"good": np.array([0.10, -0.22, 0.009]), "defective": np.array([0.10, 0.22, 0.009])}
+assert tuple(BOWLS) == SORT_PLATES
+# Spare plate (blue): not a sort target and not part of the demo. The station twin can move it.
+SPARE_PLATE = "spare"
 # Release slots on a plate, in placement order: two rows along X, diagonal first, so that the
 # next brick does not land on an earlier one and the opening jaw does not touch a neighbour.
 SLOTS = [(-1, -0.024), (1, 0.024), (1, -0.024), (-1, 0.024)]
@@ -142,7 +146,29 @@ BRICKS = {
         _RGB["part-004"],
     ),
 }
-OBJECTS = list(BRICKS)
+OBJECTS = list(BRICKS)  # the pick-and-sort demo uses only these first copies
+
+
+def _park_xy(object_id: str) -> tuple[float, float]:
+    """Park spot of a brick body: a 4 x 4 grid behind the arm base on the +Y side, 0.15 m pitch.
+
+    Copy k of part p: a 2 x 2 block for each copy (one spot for each part), blocks 0.30 m apart.
+    """
+    p = list(BRICKS).index(part_of(object_id).object_id)
+    k = BRICK_IDS.index(object_id) // len(BRICKS)
+    return (-1.05 - 0.15 * (p // 2) - 0.30 * (k % 2), 0.90 + 0.15 * (p % 2) + 0.30 * (k // 2))
+
+
+# Park spots (x, y) on the table that no camera sees (inspection, overview, overhead, side, and
+# the wrist camera at the demo poses): one for each brick body, one for the spare plate.
+# tests/test_twin_sim_sync.py checks this by projection and by render.
+PARK = {object_id: _park_xy(object_id) for object_id in BRICK_IDS}
+PARK_PLATES = {SPARE_PLATE: (-1.35, 1.65)}
+# Plates in the model: the sort targets, then the spare plate (parked at the start).
+PLATES = {**BOWLS, SPARE_PLATE: np.array([*PARK_PLATES[SPARE_PLATE], 0.0])}
+# Brick copies (not the first copy) -> part id. Same mesh, mass and contacts as the first copy.
+COPIES = {oid: part_of(oid).object_id for oid in BRICK_IDS if oid not in BRICKS}
+assert len(BRICK_IDS) == len(BRICKS) * INSTANCES_PER_PART
 
 # KALAS plate cross-section (radius, height) in mm, measured from IKEA's product model.
 # Only these numbers are used; the mesh is generated here, so no IKEA file is redistributed.
@@ -205,11 +231,17 @@ def plate_xml(name: str, pos: np.ndarray, rgb: tuple[float, float, float] | None
     )
 
 
-def brick_xml(index: int, name: str, b: Brick) -> str:
+def brick_xml(index: int, name: str, b: Brick, pos: tuple[float, float] | None = None) -> str:
+    """One brick body. ``pos``: (x, y) of a parked copy; default = demo start spot ``index``.
+
+    A parked copy has gravity compensation and no contacts (see World.set_parked).
+    """
     face_z = b.body_height / 2 - b.grip_z
     mark_z = min(0.005, b.body_height / 2 - 0.003)
+    x, y = pos if pos is not None else (0.25, (index - 1.5) * 0.065)
+    park = ' gravcomp="1"' if pos is not None else ""
     return (
-        f'<body name="{name}" pos=".25 {(index - 1.5) * 0.065} {b.grip_z}">'
+        f'<body name="{name}" pos="{x} {y} {b.grip_z}"{park}>'
         f'<freejoint name="{name}-joint"/>'
         f'<geom name="{name}-solid" type="mesh" mesh="{b.mesh}" pos="0 0 {-b.grip_z}" '
         f'euler="0 0 {b.yaw}" mass="{b.mass}" {_contact("brick", 0)} '
@@ -235,10 +267,15 @@ def scene_xml(directory: Path, scene: SceneConfig | None = None) -> str:
         f'<mesh name="{b.mesh}" file="{ASSETS / (b.mesh + ".stl")}" inertia="convex"/>'
         for b in BRICKS.values()
     )
-    plates = "".join(plate_xml(name, pos, scene.plate_colors[name]) for name, pos in BOWLS.items())
+    plates = "".join(plate_xml(name, pos, scene.plate_colors[name]) for name, pos in PLATES.items())
     bricks = "".join(
         brick_xml(i, name, replace(b, rgba=scene.brick_colors[name]))
         for i, (name, b) in enumerate(BRICKS.items())
+    )
+    # The copies come after the first copies, so the demo bodies keep their model indices.
+    copies = "".join(
+        brick_xml(0, oid, replace(BRICKS[part], rgba=scene.brick_colors[part]), PARK[oid])
+        for oid, part in COPIES.items()
     )
     cameras = "".join(camera.xml() for camera in scene.world_cameras())
     width, height = scene.offscreen_size()  # a Renderer cannot be larger than this buffer
@@ -254,7 +291,7 @@ def scene_xml(directory: Path, scene: SceneConfig | None = None) -> str:
         <light pos=".4 -.3 1" dir="0 0 -1" diffuse=".7 .7 .7" castshadow="false"/>
         <geom name="table" type="plane" size="1 1 .01" group="3" rgba="{floor} 1" {_contact("table", 2)}/>
         <geom name="floor" type="box" size="{FLOOR_HALF} {FLOOR_HALF} .005" pos="0 0 -.005" material="floor" rgba="{floor} 1" contype="0" conaffinity="0"/>
-        {plates}{bricks}<frame name="robot_mount"/>
+        {plates}{bricks}{copies}<frame name="robot_mount"/>
         {cameras}
       </worldbody></mujoco>"""
 
@@ -309,9 +346,13 @@ class World:
     def __init__(self, directory: Path, scene_config: object = None):
         """``scene_config``: SceneConfig, mapping or YAML path; None loads the default file."""
         self.scene = load_scene_config(scene_config)
-        # Bricks with the configured colours. set_brick_color keeps this up to date.
+        # All brick bodies (BRICK_IDS) with the configured part colour. set_brick_color keeps
+        # this up to date.
         self.bricks = {
-            name: replace(b, rgba=self.scene.brick_colors[name]) for name, b in BRICKS.items()
+            oid: replace(
+                BRICKS[part_of(oid).object_id], rgba=self.scene.brick_colors[part_of(oid).object_id]
+            )
+            for oid in BRICK_IDS
         }
         profile = get_profile("so101")
         robot_cameras = {c.name: c.body for c in profile.cameras}
@@ -361,15 +402,48 @@ class World:
     def reset(self) -> None:
         """Reset fixtures explicitly between runs, never while carrying an object."""
         for i, name in enumerate(OBJECTS):
+            self.set_parked(name, False)
             joint = self.model.joint(f"{name}-joint")
             a, v = joint.qposadr[0], joint.dofadr[0]
             self.data.qpos[a : a + 7] = [0.25, (i - 1.5) * 0.065, BRICKS[name].grip_z, 1, 0, 0, 0]
             self.data.qvel[v : v + 6] = 0
             # Fixture truth controls appearance only; it is absent from the camera/action API.
             self.model.geom(f"{name}-mark").rgba[3] = float(i % 2)
+        self.park_extras()
         self.active = self.destination = None
         self.counts = {"good": 0, "defective": 0}
         mujoco.mj_forward(self.model, self.data)
+
+    def set_parked(self, object_id: str, parked: bool) -> None:
+        """A parked brick has no contacts and gravity compensation: it stays where it is and adds
+        no constraints, so 12 parked copies do not make the physics slower or change the demo.
+        Set it before you set the pose. A brick that is not parked has the normal physics.
+        """
+        geom = self.model.geom(f"{object_id}-solid").id
+        self.model.geom_contype[geom] = self.model.geom_conaffinity[geom] = 0 if parked else 1
+        self.model.body_gravcomp[self.model.body(object_id).id] = 1.0 if parked else 0.0
+
+    def is_parked(self, object_id: str) -> bool:
+        return self.model.body_gravcomp[self.model.body(object_id).id] > 0
+
+    def park(self, object_id: str, xy: tuple[float, float] | None = None) -> None:
+        """Park a brick at ``xy`` (default: its PARK spot), upright, at rest."""
+        self.set_parked(object_id, True)
+        joint = self.model.joint(f"{object_id}-joint")
+        a, v = joint.qposadr[0], joint.dofadr[0]
+        x, y = PARK[object_id] if xy is None else xy
+        self.data.qpos[a : a + 7] = [x, y, part_of(object_id).grip_z, 1, 0, 0, 0]
+        self.data.qvel[v : v + 6] = 0
+
+    def park_extras(self) -> None:
+        """Put the brick copies and the spare plate on their PARK spots, out of all camera views.
+
+        The demo does not use them. The station twin (brickcell.twin.sim_sync) moves them.
+        """
+        for oid in COPIES:
+            self.park(oid)
+        x, y = PARK_PLATES[SPARE_PLATE]
+        self.model.body(f"plate_{SPARE_PLATE}").pos[:] = [x, y, 0.0]
 
     def position(self, object_id: str) -> np.ndarray:
         return self.data.xpos[self.model.body(object_id).id].copy()
@@ -529,9 +603,12 @@ class World:
         return result
 
     def set_brick_color(self, part_id: str, color: object) -> tuple[float, float, float]:
-        """Change a brick colour in the running model. ``color``: "#rrggbb" or [r, g, b] 0-1."""
+        """Change the colour of one brick body (any copy id) in the running model.
+
+        ``color``: "#rrggbb" or [r, g, b] 0-1. The other copies of the part keep their colour.
+        """
         if part_id not in self.bricks:
-            raise ValueError(f"Unknown part id '{part_id}'. Known: {list(self.bricks)}")
+            raise ValueError(f"Unknown brick id '{part_id}'. Known: {list(self.bricks)}")
         rgb = parse_color(color, f"brick colour {part_id}")
         self.model.geom(f"{part_id}-solid").rgba[:3] = rgb
         self.bricks[part_id] = replace(self.bricks[part_id], rgba=rgb)

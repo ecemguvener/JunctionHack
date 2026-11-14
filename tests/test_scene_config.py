@@ -271,7 +271,11 @@ def test_colours():
     )
     assert config.brick_colors["part-002"] == (1.0, 128 / 255, 0.0)
     assert config.brick_colors["part-001"] == sc.DEFAULT_BRICK_COLORS["part-001"]
-    assert config.plate_colors == {"good": (0, 0, 1), "defective": (0.90, 0.72, 0.78)}
+    assert config.plate_colors == {
+        "good": (0, 0, 1),
+        "defective": (0.90, 0.72, 0.78),
+        "spare": (0.06, 0.73, 0.88),
+    }
     changed = config.with_brick_colors({"part-001": "#000000"})
     assert changed.brick_colors["part-001"] == (0, 0, 0)
     assert config.brick_colors["part-001"] == sc.DEFAULT_BRICK_COLORS["part-001"]

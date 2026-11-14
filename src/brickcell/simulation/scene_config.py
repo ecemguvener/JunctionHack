@@ -43,6 +43,9 @@ DEFAULT_BRICK_COLORS: dict[str, tuple[float, float, float]] = {
 DEFAULT_PLATE_COLORS: dict[str, tuple[float, float, float]] = {
     "good": (0.62, 0.86, 0.76),
     "defective": (0.90, 0.72, 0.78),
+    # Blue spare plate (not a sort target): real KALAS colour in the overhead D415 image
+    # (fixture-001, median of the plate floor, RGB 15 173 207) x 1.08 sim lighting gain.
+    "spare": (0.06, 0.73, 0.88),
 }
 # Floor: the table surface at z = 0 that bricks and plates stand on. Light brown, as the real
 # wooden table: the rendered colour matches the median wood colour RGB (161, 118, 61) of the real

@@ -64,12 +64,13 @@ sim:
   max_drift_mm: 3.0       # settled pose farther from the measured pose = flag in the report
   max_drift_deg: 5.0
   max_penetration_mm: 5.0 # deeper measured penetration = flag
-  # Bricks that are not in the state go here (x, y on the table). No world camera sees them.
-  park:
-    part-001: [-0.60, -0.60]
-    part-002: [-0.60, -0.75]
-    part-003: [-0.75, -0.60]
-    part-004: [-0.75, -0.75]
+  # Bricks that are not in the state go to a park spot (x, y on the table). No camera sees the
+  # spots. Default: a 4 x 4 grid for all 16 brick bodies (world.PARK; part-001 at
+  # [-1.05, 0.90]). Give only the entries to change, e.g. park: {part-001-2: [-1.65, 0.90]}.
+  park: {}
+  # Plates that go to their park spot (park_plates, default world.PARK_PLATES) when the state
+  # does not have them. The other plates keep their place.
+  park_absent_plates: [spare]
 
 # --- calibration: owner src/brickcell/twin/calibrate.py ---
 calibration:

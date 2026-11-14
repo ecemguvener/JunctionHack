@@ -4,8 +4,11 @@ MuJoCo environment only. Frames and units: see brickcell.twin.state.
 
 Steps of ``apply_state``:
   1. Plates: move the static plate bodies (model.body_pos). Collision follows after mj_forward.
-  2. Bricks: set each freejoint from the measured mesh pose. A brick that is not in the state
-     is "parked" on the table at a position that no world camera sees.
+     A plate that is not in the state keeps its place. Exception: a plate in
+     ``park_absent_plates`` (default: the spare plate) goes to its park spot.
+  2. Bricks: set each freejoint from the measured mesh pose (all copies, BRICK_IDS). A brick
+     that is not in the state is "parked" on the table at a spot that no camera sees. A parked
+     brick has no contacts and gravity compensation (World.set_parked).
   3. Arm: set the joint angles, the actuator targets and the World command state. The World
      then holds these joint angles (World.hold_q) until the next move().
   4. Relax: step the physics with zero velocity after each step. This pushes bricks out of
@@ -29,9 +32,10 @@ import numpy as np
 import yaml
 
 from brickcell.simulation.scene_config import color_hex
+from brickcell.simulation.world import PARK, PARK_PLATES
 from brickcell.twin.state import (
     ARM_JOINTS,
-    PARTS,
+    BRICK_IDS,
     PLATE_NAMES,
     ArmState,
     BrickState,
@@ -39,6 +43,7 @@ from brickcell.twin.state import (
     StationState,
     body_pose_from_mesh_pose,
     mesh_pose_from_body_pose,
+    part_of,
     quat_to_matrix,
     rotation_angle_deg,
 )
@@ -68,14 +73,14 @@ DEFAULT_SIM_CONFIG: dict = {
     # Change the sim colour only if a channel differs by more than this (0..1). A colour change
     # makes the browser viewer rebuild its meshes, so live mode must not do it each frame.
     "min_color_change": 0.06,
-    # Park positions (x, y) on the table for bricks that are not in the state. No world camera
-    # (overhead, side, overview, inspection) sees these positions.
-    "park": {
-        "part-001": [-0.60, -0.60],
-        "part-002": [-0.60, -0.75],
-        "part-003": [-0.75, -0.60],
-        "part-004": [-0.75, -0.75],
-    },
+    # Park positions (x, y) on the table for bricks that are not in the state, one for each
+    # brick body (BRICK_IDS). Default: the world.PARK grid, which no camera sees. The config
+    # file can override single entries.
+    "park": {oid: list(xy) for oid, xy in PARK.items()},
+    # Plates that go to their park spot when the state does not have them. The other plates
+    # keep their place.
+    "park_absent_plates": ["spare"],
+    "park_plates": {name: list(xy) for name, xy in PARK_PLATES.items()},
 }
 
 
@@ -100,11 +105,17 @@ def resolve_sim_config(config: dict | None) -> dict:
     if unknown:
         raise ValueError(f"Unknown sim config keys {sorted(unknown)}")
     park = {**DEFAULT_SIM_CONFIG["park"], **(config.pop("park", None) or {})}
-    result = {**DEFAULT_SIM_CONFIG, **config, "park": park}
-    for name, xy in park.items():
-        if name not in PARTS or len(xy) not in (2, 3):
-            raise ValueError(f"Bad park entry {name!r}: {xy!r}")
-        park[name] = [float(v) for v in xy[:2]]
+    park_plates = {**DEFAULT_SIM_CONFIG["park_plates"], **(config.pop("park_plates", None) or {})}
+    result = {**DEFAULT_SIM_CONFIG, **config, "park": park, "park_plates": park_plates}
+    for names, entries in ((BRICK_IDS, park), (PLATE_NAMES, park_plates)):
+        for name, xy in entries.items():
+            if name not in names or len(xy) not in (2, 3):
+                raise ValueError(f"Bad park entry {name!r}: {xy!r}")
+            entries[name] = [float(v) for v in xy[:2]]
+    absent = result["park_absent_plates"]
+    if isinstance(absent, str) or not all(name in park_plates for name in absent or []):
+        raise ValueError(f"sim.park_absent_plates: names with a park_plates entry, not {absent!r}")
+    result["park_absent_plates"] = list(absent or [])
     result["apply_colors"] = bool(result["apply_colors"])
     for key in ("color_gain", "min_color_change"):
         result[key] = float(result[key])
@@ -155,15 +166,20 @@ def _set_body_pose(world, object_id: str, pos, quat) -> None:
 
 
 def _park(world, object_id: str, config: dict) -> None:
-    x, y = config["park"][object_id]
-    _set_body_pose(world, object_id, [x, y, PARTS[object_id].grip_z], [1, 0, 0, 0])
+    world.park(object_id, config["park"][object_id])
 
 
 def is_parked(world, object_id: str, config: dict | None = None) -> bool:
-    """True if the brick lies near its park position."""
-    config = resolve_sim_config(config) if config is None or "park" not in config else config
-    pos, _ = _body_pose(world, object_id)
-    return float(np.linalg.norm(pos[:2] - config["park"][object_id])) < 0.05
+    """True if the brick is parked (no contacts, see World.set_parked). ``config`` is not used."""
+    return bool(world.is_parked(object_id))
+
+
+def plate_is_parked(world, name: str, config: dict) -> bool:
+    """True if the plate stands near its park spot (only plates with a park_plates entry)."""
+    if name not in config["park_plates"]:
+        return False
+    pos = world.model.body_pos[world.model.body(f"plate_{name}").id]
+    return float(np.linalg.norm(pos[:2] - config["park_plates"][name])) < 0.05
 
 
 def _penetration_mm(world, object_ids) -> dict[str, float]:
@@ -197,7 +213,7 @@ def match_stable_pose(object_id: str, quat, max_deg: float = 5.0) -> str | None:
     """Id of the stable pose that equals ``quat`` (mesh frame) up to a yaw about world Z."""
     r = quat_to_matrix(quat)
     best, best_angle = None, max_deg
-    for pose in _stable_poses().get(object_id, {}).get("poses", []):
+    for pose in _stable_poses().get(part_of(object_id).object_id, {}).get("poses", []):
         rel = r @ quat_to_matrix(pose["quat"]).T  # a pure yaw if the tilt is the same
         angle = math.degrees(math.acos(max(-1.0, min(1.0, rel[2, 2]))))
         if angle < best_angle:
@@ -289,15 +305,27 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
     }
 
     # 1. Plates.
-    for plate in state.plates:
-        body = m.body(f"plate_{plate.name}").id
+    given = {plate.name: plate for plate in state.plates}
+    if len(given) != len(state.plates):
+        raise ValueError("A plate is in the state two times")
+    for name in PLATE_NAMES:
+        body = m.body(f"plate_{name}").id
         old = m.body_pos[body].copy()
-        m.body_pos[body] = [plate.pos[0], plate.pos[1], 0.0]  # a plate stands on the table
-        world.bowls[plate.name][:2] = plate.pos[:2]
-        report["plates"][plate.name] = {
-            "pos": [float(plate.pos[0]), float(plate.pos[1]), 0.0],
+        if name in given:
+            pos = given[name].pos
+            entry = {"given_z_mm": round(1000 * float(pos[2]), 2), "parked": False}
+        elif name in config["park_absent_plates"]:
+            pos = config["park_plates"][name]
+            entry = {"parked": True}
+        else:
+            continue  # not measured: the plate keeps its place
+        m.body_pos[body] = [pos[0], pos[1], 0.0]  # a plate stands on the table
+        if name in world.bowls:  # sort targets only
+            world.bowls[name][:2] = pos[:2]
+        report["plates"][name] = {
+            "pos": [float(pos[0]), float(pos[1]), 0.0],
             "moved_mm": round(1000 * float(np.linalg.norm(m.body_pos[body] - old)), 2),
-            "given_z_mm": round(1000 * float(plate.pos[2]), 2),
+            **entry,
         }
 
     # 2. Bricks.
@@ -305,14 +333,16 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
     for brick in state.bricks:
         if brick.object_id in measured:
             raise ValueError(f"Brick {brick.object_id} is in the state two times")
-        if brick.part != PARTS[brick.object_id].part:
+        sim_part = part_of(brick.object_id).part
+        if brick.part != sim_part:
             report["warnings"].append(
-                f"{brick.object_id}: part {brick.part} given, the sim has {PARTS[brick.object_id].part}"
+                f"{brick.object_id}: part {brick.part} given, the sim has {sim_part}"
             )
         measured[brick.object_id] = brick
-    for object_id in PARTS:
+    for object_id in BRICK_IDS:
         if object_id in measured:
             b = measured[object_id]
+            world.set_parked(object_id, False)
             _set_body_pose(world, object_id, *body_pose_from_mesh_pose(object_id, b.pos, b.quat))
             if config["apply_colors"] and len(b.color) == 3:
                 rgb = np.clip(np.asarray(b.color, float) * config["color_gain"], 0.0, 1.0)
@@ -338,7 +368,7 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
     after_set = {oid: _mesh_pose(world, oid) for oid in measured}
 
     # 4 and 5. Relax, then settle. Velocities of the bricks and the arm stay zero in the relax.
-    dofs = [_freejoint(m, oid)[1] + k for oid in PARTS for k in range(6)] + _arm_dofs(world)
+    dofs = [_freejoint(m, oid)[1] + k for oid in BRICK_IDS for k in range(6)] + _arm_dofs(world)
     _step(world, config["relax_s"], quasi_static=True, dofs=dofs)
     relaxed = {oid: _mesh_pose(world, oid) for oid in measured}
     _step(world, config["settle_s"], quasi_static=False, dofs=dofs)
@@ -396,19 +426,22 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
 def state_from_world(
     world, timestamp: float | None = None, config: dict | None = None
 ) -> StationState:
-    """The current sim bricks, plates and arm as a StationState. Parked bricks are left out."""
+    """The current sim bricks, plates and arm as a StationState.
+
+    Parked bricks and parked plates (see ``plate_is_parked``) are left out.
+    """
     config = resolve_sim_config(config)
     m, d = world.model, world.data
     mujoco.mj_kinematics(m, d)
     bricks = []
-    for object_id, part in PARTS.items():
+    for object_id in BRICK_IDS:
         if is_parked(world, object_id, config):
             continue
         pos, quat = _mesh_pose(world, object_id)
         bricks.append(
             BrickState(
                 object_id=object_id,
-                part=part.part,
+                part=part_of(object_id).part,
                 pos=pos.tolist(),
                 quat=quat.tolist(),
                 color=[float(c) for c in world.bricks[object_id].rgba],
@@ -422,6 +455,7 @@ def state_from_world(
     plates = [
         PlateState(name, m.body_pos[m.body(f"plate_{name}").id].tolist(), 1.0)
         for name in PLATE_NAMES
+        if not plate_is_parked(world, name, config)
     ]
     ga, _ = _gripper_adr(m)
     arm = ArmState(
