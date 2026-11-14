@@ -1,0 +1,36 @@
+# Colours for the synthetic detector data (brickcell.simulation.generate --palette main|all).
+#
+# The synthetic defect is a dark mark (14 x 10 mm, rgb .015) on the camera-facing side. On a
+# dark brick the mark has little contrast, so a "defective" label can be invisible to the
+# detector. generate uses a colour for defective samples only if its mark contrast is at least
+# min_mark_delta_e. All palette colours are used for good samples.
+#
+# mark_delta_e: CIE76 delta E between the mark pixels with and without the mark, in the
+# inspection crop, at the inspection pose, palette albedo, no jitter. The value is the minimum
+# over the 4 parts (mark area 690 to 800 crop pixels). Measured 2026-11-14 with the default
+# scene (configs/sim-scene.yaml):
+#   python -m brickcell.simulation.generate --measure-contrast OUT.json
+# Measure again after a change to the lights, the inspection camera or the mark.
+# A palette colour that is not in this table stops generate (measure it first).
+
+min_mark_delta_e: 20  # a clear difference; delta E 2.3 is about the smallest visible difference
+
+mark_delta_e:
+  red: 91.89
+  blue: 74.29
+  azure: 71.27
+  yellow: 108.02
+  green: 79.21
+  orange: 99.47
+  white: 92.65
+  black: 3.79  # below the minimum: good samples only
+  brown: 38.6
+  grey: 66.05
+  purple: 69.45
+  pink: 78.19
+  lime: 122.94
+  tan: 84.84
+  dark_green: 32.66
+  dark_azure: 67.23
+  magenta: 60.43
+  light_yellow: 120.94
