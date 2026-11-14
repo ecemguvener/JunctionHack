@@ -1,5 +1,20 @@
 # Executed validation — 13 November 2026
 
+## Confirmed clean brick-002 review capture — 14 November 2026
+
+After the operator confirmed a new clean physical brick, saved fresh top/plate
+JPEG previews and subsampled SDK clouds to ignored
+`artifacts/brick-002-clean-front-review/`. Visual review shows a blue square
+four-stud brick lying flat, with the red brick-001 outside the board. Recorded
+object `brick-002`, session `brick-002-clean-20261114-a`, human GOOD label,
+source SHA-256 hashes, camera serials and source timestamps in a capture record.
+No model decision or dataset partition was assigned. Both image views are
+unobstructed. RGB previews and point packets were requested separately; point
+receive timestamps differ by 1.67 s, not hardware synchronization. JPEG previews
+are not native lossless camera captures, and clouds are subsampled rather than
+full depth images. The plate framing differs from earlier calibration, so no
+old camera transform was applied. No source code changed for this collection.
+
 ## Extensive saved-scan reconstruction audit — 14 November 2026
 
 Implemented offline geometry diagnostics in `brickcell.reconstruction` and
