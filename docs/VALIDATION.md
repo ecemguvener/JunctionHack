@@ -1,5 +1,20 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 coarse merged preview — 14 November 2026
+
+At the operator's request to proceed with coarse visualization, captured
+brick-001 RGB and point packets from both running live endpoints under ignored
+`artifacts/brick-001-merged-review/`. Applied the latest provisional transform
+without refitting. Capture-specific pixel ROIs and red-color selection retained
+136 top and 195 plate points; exported `brick-001-rough-merged.ply`, a source-
+colored plot and report. Sparse visible surfaces and stray depth points remain;
+this is not a complete solid reconstruction or defect measurement.
+
+Added optional `--transform` to the live review server, with camera-serial and
+freshness checks for a third merged panel. Reports retain `provisional: true`
+and software frame skew. The two cameras are not hardware synchronized; keep
+the object still. Coarse review transforms are not used by robot/detector code.
+
 ## Clearer labelled-board plate view — 14 November 2026
 
 Retrieved RGB and point packets in `artifacts/tilted-board-review/` after the

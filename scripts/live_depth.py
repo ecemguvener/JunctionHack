@@ -5,12 +5,13 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 PAGE = """<!doctype html><meta charset=utf-8><title>Live D415 depth</title>
 <style>body{background:#111;color:white;font:16px system-ui}section{display:inline-block;width:48%}canvas,img{width:100%}canvas{background:#18222a}button{font-size:18px}</style>
-<h1>Live 3D camera views</h1><p>Separate camera coordinates. Drag to rotate. Scroll to zoom. Depth range: 0.15–1.5 m. These views are not merged.</p>
+<h1>Live 3D camera views</h1><p>Drag to rotate. Scroll to zoom. Merged view uses a rough board alignment for visualization only. Keep camera positions fixed.</p>
 <div id=views></div><script>
-for(const name of ['top','plate']){
+for(const name of VIEW_NAMES){
 let section=document.createElement('section');section.innerHTML=`<h2>${name}</h2><p class=status>Connecting…</p><img><canvas width=640 height=480></canvas>`;views.append(section);
 let canvas=section.querySelector('canvas'),ctx=canvas.getContext('2d'),yaw=0,pitch=0,zoom=500,drag=false,last;
 canvas.onpointerdown=e=>{drag=true;last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId)};
@@ -29,7 +30,21 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8094)
+    parser.add_argument(
+        "--transform", type=Path, help="Provisional top-from-plate transform for visual review only"
+    )
     args = parser.parse_args()
+    transform = json.loads(args.transform.read_text()) if args.transform else None
+    if transform:
+        rotation = np.asarray(transform["top_from_plate_R"], dtype=float)
+        translation = np.asarray(transform["top_from_plate_t_m"], dtype=float)
+        if (
+            rotation.shape != (3, 3)
+            or translation.shape != (3,)
+            or not np.isfinite(rotation).all()
+            or not np.isfinite(translation).all()
+        ):
+            raise ValueError("Invalid rigid transform")
     packets, lock, stop = {}, threading.Lock(), threading.Event()
 
     def worker(name, serial):
@@ -88,18 +103,46 @@ def main():
 
         def do_GET(self):
             route = self.path.split("?")[0]
-            status, kind, body = 200, "text/html", PAGE.encode()
+            names = ["top", "plate", "merged"] if transform else ["top", "plate"]
+            status, kind, body = (
+                200,
+                "text/html",
+                PAGE.replace("VIEW_NAMES", json.dumps(names)).encode(),
+            )
             if route != "/":
                 parts = route.strip("/").split("/")
-                if (
-                    len(parts) != 2
-                    or parts[0] not in ("points", "rgb")
-                    or parts[1] not in ("top", "plate")
-                ):
+                if len(parts) != 2 or parts[0] not in ("points", "rgb") or parts[1] not in names:
                     self.send_error(404)
                     return
                 with lock:
-                    p = dict(packets.get(parts[1], {"error": "Waiting for camera"}))
+                    if parts[1] == "merged":
+                        a, b = [
+                            dict(packets.get(n, {"error": "Waiting for camera"}))
+                            for n in ["top", "plate"]
+                        ]
+                        if (
+                            a.get("error")
+                            or b.get("error")
+                            or min(a.get("time", 0), b.get("time", 0)) < time.time() - 3
+                        ):
+                            p = {"error": "Merged view needs both fresh cameras"}
+                        elif transform.get("sdk_serials") != {
+                            "top": a["serial"],
+                            "plate": b["serial"],
+                        }:
+                            p = {"error": "Camera identities do not match transform"}
+                        else:
+                            other = np.asarray(b["points"], float).reshape(-1, 6)
+                            other[:, :3] = other[:, :3] @ rotation.T + translation
+                            p = dict(
+                                points=a["points"] + other.tolist(),
+                                time=min(a["time"], b["time"]),
+                                jpeg=a["jpeg"],
+                                provisional=True,
+                                frame_skew_s=abs(a["time"] - b["time"]),
+                            )
+                    else:
+                        p = dict(packets.get(parts[1], {"error": "Waiting for camera"}))
                 age = time.time() - p.get("time", 0)
                 if p.get("error") or age > 3:
                     status, kind = 503, "application/json"
