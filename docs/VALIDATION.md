@@ -1,5 +1,16 @@
 # Executed validation — 13 November 2026
 
+## Brick-002 repeat collection review — 14 November 2026
+
+Repeat-02 showed an empty board in both views and was excluded from the clean
+brick collection. Repeat-03, saved under ignored
+`artifacts/brick-002-repeat-03-review/`, visibly shows the blue brick lying flat
+with studs upward. Recorded it as a clean repeat, not the requested studs-
+toward-plate pose or additional surface coverage. Saved source hashes and point
+receive times (0.121 s skew), retaining object `brick-002` and the same capture
+session group. No model prediction, dataset split or camera transform was
+applied. No source code changed for these capture reviews.
+
 ## Confirmed clean brick-002 review capture — 14 November 2026
 
 After the operator confirmed a new clean physical brick, saved fresh top/plate
