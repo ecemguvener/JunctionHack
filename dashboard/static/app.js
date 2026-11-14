@@ -25,6 +25,8 @@
     fs: ["cam", "depth"].includes(hash.fs) ? hash.fs : "",
     color: hash.color === "sensor" ? "sensor" : "rgb",
     zoom: hash.zoom === "2",
+    // which D415 clouds (points + frustum) are visible; #hide=plate or #hide=top,plate
+    show: { top: !(hash.hide || "").split(",").includes("top"), plate: !(hash.hide || "").split(",").includes("plate") },
   };
   let config = null; // from /api/config
   let status = null; // from /api/status
@@ -59,6 +61,7 @@
     $$("[data-opt]").forEach((e) => setOn(e, state[e.dataset.opt]));
     $$("[data-scope]").forEach((e) => setOn(e, e.dataset.scope === state.scope));
     $$("[data-color]").forEach((e) => setOn(e, e.dataset.color === state.color));
+    $$("[data-sensor]").forEach((e) => setOn(e, state.show[e.dataset.sensor]));
     $$("[data-zoom]").forEach((e) => setOn(e, state.zoom));
     $$("[data-panel]").forEach((p) => p.classList.toggle("fs", p.dataset.panel === state.fs));
     $$("[data-fs]").forEach((e) => setOn(e, e.closest("[data-panel]")?.dataset.panel === state.fs));
@@ -101,7 +104,7 @@
       : `D415 Top · ${shown} fps shown`);
     bind("cam-age", `age ${fmtAge(cam.age_s)}`);
     bind("cam-error", cam.error || (cam.ok ? "" : "The source sends no fresh frames."));
-    const cams = Object.entries(S.cloud.cameras || {}).map(([n, c]) => `${n} ${c.ok ? c.points : "×"}`).join(" · ");
+    const cams = Object.entries(S.cloud.cameras || {}).map(([n, c]) => `${n} ${c.ok ? c.points : "×"}${state.show[n] === false ? " (hidden)" : ""}`).join(" · ");
     bind("cloud-detail", `${cams} · age ${fmtAge(S.cloud.age_s)}`);
     bind("cloud-points", S.cloud.ok ? `${S.cloud.points.toLocaleString()} pts` : "down");
     bind("cloud-error", Object.entries(S.cloud.cameras || {}).filter(([, c]) => !c.ok).map(([n, c]) => `${n}: ${c.error}`).join(" · ") || "Waiting for depth.");
@@ -119,13 +122,14 @@
 
   // ------------------------------------------------------------------ controls
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-src],[data-opt],[data-scope],[data-fs],[data-color],[data-zoom]");
+    const t = e.target.closest("[data-src],[data-opt],[data-scope],[data-fs],[data-color],[data-zoom],[data-sensor]");
     if (!t) return;
     if (t.dataset.src) state.src = t.dataset.src;
     if (t.dataset.opt) state[t.dataset.opt] = !state[t.dataset.opt];
     if (t.dataset.scope) state.scope = t.dataset.scope;
     if (t.hasAttribute("data-zoom")) state.zoom = !state.zoom;
     if (t.dataset.color) { state.color = t.dataset.color; cloud?.recolor(); }
+    if (t.dataset.sensor) { state.show[t.dataset.sensor] = !state.show[t.dataset.sensor]; cloud?.dirty(); }
     if (t.hasAttribute("data-fs")) {
       const p = t.closest("[data-panel]").dataset.panel;
       state.fs = state.fs === p ? "" : p;
@@ -140,6 +144,7 @@
     else if (k === "d") state.defects = !state.defects;
     else if (k === "f") state.focus = !state.focus;
     else if (k === "z") state.zoom = !state.zoom;
+    else if (k === "8" || k === "9") { const c = k === "8" ? "top" : "plate"; state.show[c] = !state.show[c]; cloud?.dirty(); }
     else if (cloud && cloud.key(e)) return;
     else return;
     sync();
@@ -276,19 +281,24 @@
 
     // live cloud buffers
     const pBuf = gl.createBuffer(), cBuf = gl.createBuffer();
-    let n = 0, rgb = new Float32Array(0), sensor = new Uint8Array(0);
+    let n = 0, nTop = 0, rgb = new Float32Array(0), sensor = new Uint8Array(0);
     function setPoints(arrayBuffer) {
       // records: int16 x, y, z (mm); uint16 sensor << 15 | RGB555
+      // stored grouped by sensor (top first, then plate) so each camera draws as one range
       const xyz = new Int16Array(arrayBuffer), col = new Uint16Array(arrayBuffer), count = xyz.length / 4;
       const pos = new Float32Array(count * 3);
       rgb = new Float32Array(count * 3); sensor = new Uint8Array(count);
+      let tops = 0;
+      for (let i = 0; i < count; i++) if (!(col[i * 4 + 3] >> 15)) tops++;
+      const next = [0, tops];
       for (let i = 0; i < count; i++) {
-        const o = i * 4, c = col[o + 3];
-        pos[i * 3] = xyz[o] / 1000; pos[i * 3 + 1] = xyz[o + 1] / 1000; pos[i * 3 + 2] = xyz[o + 2] / 1000;
-        rgb[i * 3] = ((c >> 10) & 31) / 31; rgb[i * 3 + 1] = ((c >> 5) & 31) / 31; rgb[i * 3 + 2] = (c & 31) / 31;
-        sensor[i] = c >> 15;
+        const o = i * 4, c = col[o + 3], sid = c >> 15, j = next[sid]++;
+        pos[j * 3] = xyz[o] / 1000; pos[j * 3 + 1] = xyz[o + 1] / 1000; pos[j * 3 + 2] = xyz[o + 2] / 1000;
+        rgb[j * 3] = ((c >> 10) & 31) / 31; rgb[j * 3 + 1] = ((c >> 5) & 31) / 31; rgb[j * 3 + 2] = (c & 31) / 31;
+        sensor[j] = sid;
       }
       n = count;
+      nTop = tops;
       gl.bindBuffer(gl.ARRAY_BUFFER, pBuf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
       recolor();
     }
@@ -300,23 +310,27 @@
       dirty();
     }
 
-    // reference lines: table grid and the D415 frustums (top camera last, hidden in camera view)
-    let lineP, lineC, lineN, topStart = 0;
+    // reference lines: table grid, then one frustum per D415 in that sensor's colour
+    let lineP, lineC, gridN = 0;
+    const frustum = {}; // camera name -> [first vertex, vertex count]
     (function buildLines() {
       const L = [], C = [], seg = (a, b, c) => { L.push(...a, ...b); C.push(...c, ...c); };
-      const grid = hex(css(panel, "--cloud-grid", "#2a1a0f")), camc = hex(css(panel, "--cloud-cam", "#ff8a45"));
+      const grid = hex(css(panel, "--cloud-grid", "#2a1a0f"));
+      const camColor = { top: hex(css(panel, "--sensor-a", "#ff6a1a")), plate: hex(css(panel, "--sensor-b", "#f1f1f0")) };
       const [[x0, x1], [y0, y1]] = config.workspace;
       for (let x = Math.ceil(x0 * 20) / 20; x <= x1 + 1e-9; x += 0.05) seg([x, y0, 0], [x, y1, 0], grid);
       for (let y = Math.ceil(y0 * 20) / 20; y <= y1 + 1e-9; y += 0.05) seg([x0, y, 0], [x1, y, 0], grid);
-      for (const name of [...Object.keys(cams).filter((k) => k !== "top"), "top"]) {
-        if (name === "top") topStart = L.length / 3;
+      gridN = L.length / 3;
+      for (const name of Object.keys(cams)) {
+        const first = L.length / 3, camc = camColor[name] || hex(css(panel, "--cloud-cam", "#ff8a45"));
         const c = cams[name], R = c.rotation_cv, s = 0.07, col = (j) => [R[0][j], R[1][j], R[2][j]];
         const [rx, ry, rz] = [col(0), col(1), col(2)];
         const corner = (a, b) => c.pos.map((p, i) => p + s * (rz[i] + a * 0.66 * rx[i] + b * 0.5 * ry[i]));
         const k = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
         k.forEach((q, i) => { seg(c.pos, q, camc); seg(q, k[(i + 1) % 4], camc); });
+        frustum[name] = [first, L.length / 3 - first];
       }
-      lineP = buf(new Float32Array(L)); lineC = buf(new Float32Array(C)); lineN = L.length / 3;
+      lineP = buf(new Float32Array(L)); lineC = buf(new Float32Array(C));
     })();
 
     // view: "cam" = exactly the real Top camera; "orbit" = Blender-style around a target
@@ -383,11 +397,14 @@
       gl.enableVertexAttribArray(pa); gl.enableVertexAttribArray(ca);
       gl.bindBuffer(gl.ARRAY_BUFFER, lineP); gl.vertexAttribPointer(pa, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, lineC); gl.vertexAttribPointer(ca, 3, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.LINES, 0, view.mode === "cam" ? topStart : lineN);
+      gl.drawArrays(gl.LINES, 0, gridN);
+      for (const [name, [first, count]] of Object.entries(frustum))
+        if (state.show[name] !== false && !(name === "top" && view.mode === "cam")) gl.drawArrays(gl.LINES, first, count);
       if (n) {
         gl.bindBuffer(gl.ARRAY_BUFFER, pBuf); gl.vertexAttribPointer(pa, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, cBuf); gl.vertexAttribPointer(ca, 3, gl.FLOAT, false, 0, 0);
-        gl.drawArrays(gl.POINTS, 0, n);
+        if (state.show.top) gl.drawArrays(gl.POINTS, 0, nTop);
+        if (state.show.plate && n > nTop) gl.drawArrays(gl.POINTS, nTop, n - nTop);
       }
       drawLabels(M);
       drawGizmo();
@@ -412,8 +429,8 @@
         const x = M[0] * p[0] + M[4] * p[1] + M[8] * p[2] + M[12], y = M[1] * p[0] + M[5] * p[1] + M[9] * p[2] + M[13], w = M[3] * p[0] + M[7] * p[1] + M[11] * p[2] + M[15];
         if (w > 0) g.fillText(t, (x / w * 0.5 + 0.5) * labels.width + 6 * dpr, (0.5 - y / w * 0.5) * labels.height - 6 * dpr);
       };
-      if (view.mode !== "cam") put(top.pos, "D415 TOP");
-      if (cams.plate) put(cams.plate.pos, "D415 PLATE");
+      if (view.mode !== "cam" && state.show.top) put(top.pos, "D415 TOP");
+      if (cams.plate && state.show.plate) put(cams.plate.pos, "D415 PLATE");
     }
     function drawGizmo() {
       const g = gizmo.getContext("2d"), W = gizmo.width, H = gizmo.height, dpr = devicePixelRatio || 1;
@@ -496,7 +513,7 @@
     new ResizeObserver(resize).observe(canvas);
     if (hash.view) preset(hash.view);
     if (hash.orbit) { leaveCam(); const [y, p, d] = hash.orbit.split(",").map(Number); Object.assign(view, { yaw: y, pitch: p, dist: d, target: [...pivot] }); }
-    return { resize, recolor, key, dirty, setPoints, count: () => n, view };
+    return { resize, recolor, key, dirty, setPoints, count: () => n, counts: () => ({ top: nTop, plate: n - nTop }), view };
   }
 
   // ------------------------------------------------------------------ live loops

@@ -109,3 +109,12 @@ header .live.down::before { background: var(--red); }
 .stub { display: none; font: 600 13px var(--mono); color: var(--accent); border: 1px dashed var(--accent); padding: 8px 10px; }
 .stub.show { display: block; }
 .sim-note { color: var(--dim); }
+
+/* Per-camera cloud toggles: the swatch is the camera's Sensor-mode colour. Off = struck out. */
+.seg.sensors button { display: flex; align-items: center; gap: 7px; }
+.seg.sensors .swatch { width: 10px; height: 10px; flex: none; border: 1px solid #111; }
+.seg.sensors .swatch.top { background: #ff6a1a; }
+.seg.sensors .swatch.plate { background: #f1f1f0; }
+.seg.sensors .k { font-size: 11px; opacity: .7; }
+.seg.sensors button:not(.on) { color: var(--dim); text-decoration: line-through; }
+.seg.sensors button:not(.on) .swatch { opacity: .3; }

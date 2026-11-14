@@ -61,6 +61,7 @@ shift or a yaw. A large correction means that the camera needs a new calibration
 | `Esc` | Leave full screen |
 | `0` `7` `1` `3` (`Ctrl` = opposite) | Depth full screen: camera, top, front, right view |
 | `5` | Depth full screen: perspective / orthographic |
+| `8` / `9` | Show or hide the Top / Plate D415 cloud and its frustum (also the buttons in the depth bar) |
 | `Home` or `.` | Depth full screen: centre on the plates |
 
 Depth full screen mouse: drag = orbit, Shift + drag or right drag = pan, wheel or Ctrl + drag

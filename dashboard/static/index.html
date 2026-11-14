@@ -30,6 +30,9 @@
     <div class="bar">
       <span class="title">Depth · point cloud</span>
       <div class="seg"><button data-color="rgb">RGB</button><button data-color="sensor">Sensor</button></div>
+      <div class="seg sensors" title="Show or hide each camera's points (keys 8 and 9)">
+        <button data-sensor="top"><i class="swatch top"></i>Top<span class="k">8</span></button><button data-sensor="plate"><i class="swatch plate"></i>Plate<span class="k">9</span></button>
+      </div>
       <button class="icon" data-fs data-icon="fullscreen" data-icon-size="20" data-icon-stroke="2" title="Full screen"></button>
     </div>
     <div class="stage">
@@ -63,7 +66,7 @@
       <dt>Cloud</dt><dd data-bind="cloud-points">–</dd>
       <dt>View</dt><dd data-bind="src"></dd>
     </dl>
-    <div class="keys"><kbd>T</kbd>Sim / real<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>Esc</kbd>Exit full screen</div>
+    <div class="keys"><kbd>T</kbd>Sim / real<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>8</kbd>Top cloud<kbd>9</kbd>Plate cloud<kbd>Esc</kbd>Exit full screen</div>
   </aside>
 </main>
 <script src="/static/app.js"></script>
