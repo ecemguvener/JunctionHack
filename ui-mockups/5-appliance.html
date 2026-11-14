@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Station twin · 5 Appliance</title>
+<link rel="stylesheet" href="assets/base.css">
+<style>
+  :root { --page: #e7e5e0; --card: #f5f4f1; --ink: #1d1d1b; --dim: #85837d; --soft: #d9d6cf; --orange: #ff6a13; --red: #e5392f;
+    --sans: "Inter", "Helvetica Neue", Arial, sans-serif; }
+  body { background: var(--page); color: var(--ink); font: 14px/1.4 var(--sans); display: flex; flex-direction: column; padding: 18px; gap: 16px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 0 6px; }
+  header .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--orange); }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+  header .sp { flex: 1; }
+  header .pill { font-size: 12px; color: var(--dim); background: var(--card); padding: 6px 12px; border-radius: 99px; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 92px; gap: 16px; }
+  [data-panel] { background: var(--card); border-radius: 16px; padding: 12px; gap: 12px; }
+  [data-panel].fs { border-radius: 0; padding: 18px; }
+  .bar { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 4px; }
+  .bar .t { font-weight: 600; flex: 1; }
+  .pills { display: flex; background: var(--page); border-radius: 99px; padding: 3px; }
+  .pills button { border: 0; background: none; padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--dim); }
+  .pills button.on { background: var(--ink); color: var(--card); }
+  kbd { font: 600 11px var(--sans); color: var(--dim); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--soft); }
+  .round { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--page); display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--ink); }
+  .round.on { background: var(--ink); color: var(--card); }
+  .stage { border-radius: 10px; background: #1e1f21; }
+  .meta { display: flex; gap: 16px; font-size: 12px; color: var(--dim); padding: 0 4px; }
+  [data-panel="cam"] { --focus: #ff6a13; --defect: #e5392f; --box-style: round; --box-line: 2.5; --box-pad: 5; --label-font: 600 11px Inter, Helvetica Neue, Arial, sans-serif; --label-fg: #fff; }
+  [data-panel="depth"] { --cloud-bg: #1e1f21; --cloud-grid: #2a2b2e; --cloud-ring: #ff6a13; --cloud-cam: #f5f4f1; --cloud-text: #85837d; --label-family: Inter, sans-serif; --sensor-a: #ff6a13; --sensor-b: #f5f4f1; }
+  .nav { position: absolute; left: 30px; bottom: 54px; gap: 12px; align-items: flex-end; }
+  .nav canvas.gizmo { background: rgba(245,244,241,.08); border-radius: 50%; }
+  .nav .tools { display: flex; flex-direction: column; gap: 8px; }
+  .nav .tools button { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--card); color: var(--ink); display: grid; place-items: center; }
+  .nav .views { display: flex; gap: 2px; background: var(--card); border-radius: 99px; padding: 3px; }
+  .nav .views button { border: 0; background: none; border-radius: 99px; padding: 7px 13px; font-size: 12px; }
+  .nav .views button:hover { background: var(--page); }
+  .options { display: flex; flex-direction: column; align-items: center; gap: 20px; background: var(--card); border-radius: 16px; padding: 18px 0; }
+  body.fs-cam .options { top: 70px; right: 30px; width: 92px; box-shadow: 0 6px 30px rgba(0,0,0,.25); }
+  .knob { display: flex; flex-direction: column; align-items: center; gap: 8px; background: none; border: 0; padding: 0; font-size: 11px; color: var(--dim); }
+  .knob .c { width: 52px; height: 52px; border-radius: 50%; background: var(--page); display: grid; place-items: center; transition: background .15s; }
+  .knob .c::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--soft); transition: background .15s; }
+  .knob.on { color: var(--ink); }
+  .knob.on .c { background: var(--ink); }
+  .knob.on .c::after { background: var(--orange); }
+  .knob.red.on .c::after { background: var(--red); }
+  .scope { display: flex; flex-direction: column; gap: 4px; }
+  .scope button { border: 0; background: none; font-size: 11px; color: var(--dim); padding: 3px 8px; border-radius: 99px; }
+  .scope button.on { background: var(--page); color: var(--ink); }
+  .stat { text-align: center; font-size: 11px; color: var(--dim); margin-top: auto; }
+  .stat b { display: block; font-size: 22px; color: var(--ink); font-weight: 600; }
+</style>
+<body>
+<header>
+  <span class="dot"></span><h1>Station twin</h1><span class="sp"></span>
+  <span class="pill">Mock data</span><span class="pill">Focus · <span data-bind="focus-label"></span></span><span class="pill" data-bind="clock"></span>
+</header>
+<main>
+  <section data-panel="cam">
+    <div class="bar"><span class="t">Top camera</span>
+      <div class="pills"><button data-src="sim">Simulation</button><button data-src="real">Real</button></div><kbd>T</kbd>
+      <button class="round" data-zoom title="Zoom (Z)"><span data-bind="zoom"></span></button>
+      <button class="round" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><img class="cam-sim" src="assets/sim-top.jpg" alt=""><img class="cam-real" src="assets/real-top.jpg" alt=""><canvas class="cam-overlay"></canvas></div>
+    <div class="meta"><span data-bind="src-long"></span><span>Intel D415</span><span>15 fps</span></div>
+  </section>
+  <section data-panel="depth">
+    <div class="bar"><span class="t">Depth</span>
+      <div class="pills"><button data-color="rgb">Colour</button><button data-color="sensor">Sensor</button></div>
+      <button class="round" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><canvas class="cloud"></canvas><canvas class="cloud-labels"></canvas></div>
+    <div class="nav">
+      <canvas class="gizmo"></canvas>
+      <div class="tools"><button data-drag="orbit" data-icon="orbit"></button><button data-drag="pan" data-icon="pan"></button><button data-drag="zoom" data-icon="zoom"></button></div>
+      <div class="views"><button data-view="cam">Camera</button><button data-view="top">Top</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-proj data-bind="proj"></button></div>
+    </div>
+    <div class="meta"><span data-bind="view"></span><span>Two D415 sensors</span><span data-bind="dist"></span></div>
+  </section>
+  <aside class="options">
+    <button class="knob red" data-opt="defects"><span class="c"></span>Defects</button>
+    <div class="scope only-defects"><button data-scope="all">All</button><button data-scope="focus">Focus</button></div>
+    <button class="knob" data-opt="focus"><span class="c"></span>Focus</button>
+    <div class="stat"><b data-bind="defect-count"></b>shown</div>
+  </aside>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/engine.js"></script>
+</body>
+</html>

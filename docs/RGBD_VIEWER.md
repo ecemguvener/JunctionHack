@@ -1,7 +1,7 @@
 # PatchCore RGB + depth review
 
 The viewer can run separate real RGB and encoded-depth PatchCore models for
-each D415. It shows inputs, raw anomaly distances, per-modality heatmaps and
+each D415, plus an RGB-only arm/wrist camera input. It shows inputs, raw anomaly distances, per-modality heatmaps and
 threshold decisions beside the existing 3D viewer. It sends no robot commands
 and does not establish hidden-face coverage or object correspondence.
 
@@ -31,6 +31,31 @@ The shipped configuration has no models and no crop. It intentionally displays
 REINSPECT and an explicit setup reason. A visible depth image is not evidence
 of an active depth anomaly detector. At initial implementation the only exported
 local OpenVINO model was synthetic-trained and is refused for real inspection.
+
+## Arm / wrist camera
+
+The default configuration adds `wrist`, shown as **Arm / wrist (RGB only)**.
+It reads the existing upright, unannotated Sonix helper through
+`http://127.0.0.1:18091/frame.jpg`; forward Intel loopback port 8091 to local
+18091 alongside the D415 tunnel. The viewer does not open the Sonix device
+or control the arm. Set `source` in the configuration for a different tunnel.
+
+Set an explicit wrist crop in native source pixels (the previously observed
+stream was 1920×1080). Crop bounds are checked against each decoded frame.
+Configure only `models.rgb`, pointing to a separately trained real wrist model
+whose sensor contract has `serial: "sonix-wrist"`, the exact crop and
+`modality: "rgb"`. An RGB-only wrist decision needs no depth model. Missing
+models or thresholds still yield REINSPECT. Top/plate RGB+depth requirements
+remain unchanged. Models are not shared across cameras.
+
+The JPEG source must supply capture metadata in HTTP headers to enable trusted
+inference: `X-Frame-Time` (Unix seconds from acquisition), `X-Frame-Id` (capture
+identity), and `X-Camera-Serial` (`sonix-wrist`). These must describe the returned
+JPEG, not the HTTP request time. Without capture metadata the legacy helper
+provides **preview only**, with REINSPECT and no model execution. Wrong identity,
+stale/future frames and model exceptions block trusted decisions. Updating the
+remote helper and verifying its metadata are pending hardware work; this local
+change does not deploy or alter it.
 
 ## Configure real models
 

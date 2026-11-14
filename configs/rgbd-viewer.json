@@ -1,6 +1,23 @@
 {
   "cameras": {
-    "top": {"serial": "350122060653", "crop": null, "models": {}, "min_depth_fraction": 0.6},
-    "plate": {"serial": "243622060450", "crop": null, "models": {}, "min_depth_fraction": 0.6}
+    "top": {
+      "serial": "350122060653",
+      "crop": null,
+      "models": {},
+      "min_depth_fraction": 0.6
+    },
+    "plate": {
+      "serial": "243622060450",
+      "crop": null,
+      "models": {},
+      "min_depth_fraction": 0.6
+    },
+    "wrist": {
+      "type": "rgb",
+      "serial": "sonix-wrist",
+      "source": "http://127.0.0.1:18091/frame.jpg",
+      "crop": null,
+      "models": {}
+    }
   }
 }

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Station twin · 3 HMI panel</title>
+<link rel="stylesheet" href="assets/base.css">
+<style>
+  :root { --body: #202326; --plate: #2b2f33; --edge: #3a3f45; --deep: #141618; --text: #e6e8ea; --dim: #8a9097;
+    --amber: #ffc400; --red: #ff3d3d; --green: #3ddc84;
+    --sans: "Inter", "DIN Alternate", "Helvetica Neue", Arial, sans-serif; --mono: ui-monospace, Menlo, monospace; }
+  body { background: var(--body); color: var(--text); font: 13px/1.35 var(--sans); display: flex; flex-direction: column; padding: 10px; gap: 10px; }
+  header { display: flex; align-items: center; gap: 18px; height: 42px; padding: 0 14px; background: var(--plate); border: 1px solid var(--edge); border-radius: 3px; }
+  header .name { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: 12px; }
+  .lamp { display: flex; align-items: center; gap: 7px; font: 600 10px var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .lamp i { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .lamp.warn i { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  header .sp { flex: 1; }
+  .clock { font: 600 14px var(--mono); background: var(--deep); padding: 4px 10px; border-radius: 2px; color: var(--amber); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 210px; gap: 10px; }
+  [data-panel] { background: var(--plate); border: 1px solid var(--edge); border-radius: 3px; padding: 8px; gap: 8px; }
+  [data-panel].fs { border-radius: 0; padding: 10px; }
+  .bar { display: flex; align-items: center; gap: 10px; height: 34px; }
+  .plateno { font: 700 10px var(--mono); background: var(--deep); color: var(--dim); padding: 4px 7px; border-radius: 2px; }
+  .bar .t { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 11px; flex: 1; }
+  .seg { display: flex; background: var(--deep); padding: 3px; border-radius: 3px; gap: 3px; }
+  .seg button { border: 0; background: transparent; color: var(--dim); padding: 5px 14px; font: 700 10px var(--sans); letter-spacing: .12em; border-radius: 2px; }
+  .seg button.on { background: #4a5058; color: var(--text); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+  kbd { font: 700 10px var(--mono); background: var(--deep); color: var(--amber); padding: 4px 7px; border-radius: 2px; }
+  .key { width: 34px; height: 30px; border-radius: 3px; border: 1px solid var(--edge); background: linear-gradient(#3a3f45, #2f3338); display: grid; place-items: center; color: var(--text); font: 700 10px var(--mono); }
+  .key.on { color: var(--amber); }
+  .stage { background: var(--deep); border-radius: 2px; box-shadow: inset 0 0 0 1px #000, inset 0 2px 8px rgba(0,0,0,.6); }
+  .readout { display: flex; gap: 6px; }
+  .readout span { font: 600 10px var(--mono); background: var(--deep); padding: 4px 8px; border-radius: 2px; color: var(--dim); }
+  [data-panel="cam"] { --focus: #ffc400; --defect: #ff3d3d; --box-style: rect; --box-line: 2.5; --label-font: 700 10px Inter, Arial, sans-serif; --label-fg: #111; }
+  [data-panel="depth"] { --cloud-bg: #141618; --cloud-grid: #24282c; --cloud-ring: #ffc400; --cloud-cam: #8a9097; --cloud-text: #8a9097; --sensor-a: #ffc400; --sensor-b: #3ddc84; }
+  .nav { position: absolute; left: 20px; bottom: 56px; gap: 10px; align-items: flex-end; }
+  .nav canvas.gizmo { background: rgba(20,22,24,.9); border-radius: 50%; border: 1px solid var(--edge); }
+  .nav .tools, .nav .views { display: flex; gap: 4px; background: var(--plate); padding: 4px; border-radius: 3px; border: 1px solid var(--edge); }
+  .nav .tools { flex-direction: column; }
+  .nav button { border: 1px solid var(--edge); border-radius: 2px; background: linear-gradient(#3a3f45, #2f3338); color: var(--text); font: 700 10px var(--mono); }
+  .nav .tools button { width: 34px; height: 34px; display: grid; place-items: center; }
+  .nav .views button { padding: 7px 10px; }
+  .options { display: flex; flex-direction: column; gap: 10px; }
+  body.fs-cam .options { top: 60px; right: 22px; width: 210px; }
+  .switch { background: var(--plate); border: 1px solid var(--edge); border-radius: 3px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .switch .head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 11px; }
+  .rocker { width: 54px; height: 26px; border-radius: 3px; background: var(--deep); border: 1px solid #000; padding: 3px; display: flex; }
+  .rocker::before { content: "OFF"; width: 24px; display: grid; place-items: center; border-radius: 2px; font: 700 8px var(--sans); background: linear-gradient(#4a5058, #3a3f45); color: var(--dim); transition: transform .1s; }
+  .rocker.on::before { content: "ON"; transform: translateX(22px); background: linear-gradient(#ffd54a, #e6ad00); color: #111; }
+  .switch.defect .rocker.on::before { background: linear-gradient(#ff6b6b, #d92b2b); color: #fff; }
+  .switch small { color: var(--dim); font-size: 11px; }
+  .switch.defect:has(.rocker.on) { border-image: repeating-linear-gradient(45deg, var(--amber) 0 6px, #111 6px 12px) 4; border-width: 3px; border-style: solid; }
+  .switch .seg button { padding: 5px 8px; flex: 1; }
+  .gauge { background: var(--plate); border: 1px solid var(--edge); border-radius: 3px; padding: 12px; font: 600 10px var(--mono); color: var(--dim); display: grid; gap: 6px; }
+  .gauge b { color: var(--text); float: right; }
+  .gauge .big { font-size: 22px; color: var(--amber); letter-spacing: .02em; }
+  .mock { background: repeating-linear-gradient(45deg, var(--amber) 0 6px, #111 6px 12px); color: #111; font: 800 9px var(--sans); letter-spacing: .14em; padding: 4px 8px; border-radius: 2px; }
+  .mock span { background: var(--amber); padding: 1px 4px; }
+</style>
+<body>
+<header>
+  <span class="name">Brickcell · Station twin</span>
+  <span class="lamp"><i></i>Cam top</span><span class="lamp"><i></i>Cam plate</span><span class="lamp"><i></i>Arm</span><span class="lamp warn"><i></i>Model</span>
+  <span class="sp"></span><span class="mock"><span>MOCK DATA</span></span><span class="clock" data-bind="clock"></span>
+</header>
+<main>
+  <section data-panel="cam">
+    <div class="bar"><span class="plateno">A1</span><span class="t">Top camera</span>
+      <div class="seg"><button data-src="sim">SIM</button><button data-src="real">REAL</button></div><kbd>T</kbd>
+      <button class="key" data-zoom title="Zoom (Z)"><span data-bind="zoom"></span></button>
+      <button class="key" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><img class="cam-sim" src="assets/sim-top.jpg" alt=""><img class="cam-real" src="assets/real-top.jpg" alt=""><canvas class="cam-overlay"></canvas></div>
+    <div class="readout"><span data-bind="src"></span><span>D415 350122060653</span><span>15 FPS</span><span>640×480</span></div>
+  </section>
+  <section data-panel="depth">
+    <div class="bar"><span class="plateno">A2</span><span class="t">Depth cloud</span>
+      <div class="seg"><button data-color="rgb">RGB</button><button data-color="sensor">SENSOR</button></div>
+      <button class="key" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><canvas class="cloud"></canvas><canvas class="cloud-labels"></canvas></div>
+    <div class="nav">
+      <canvas class="gizmo"></canvas>
+      <div class="tools"><button data-drag="orbit" data-icon="orbit"></button><button data-drag="pan" data-icon="pan"></button><button data-drag="zoom" data-icon="zoom"></button></div>
+      <div class="views"><button data-view="cam">CAM</button><button data-view="top">TOP</button><button data-view="front">FRONT</button><button data-view="right">RIGHT</button><button data-proj data-bind="proj"></button></div>
+    </div>
+    <div class="readout"><span data-bind="view"></span><span data-bind="proj"></span><span>2 × D415</span><span data-bind="dist"></span></div>
+  </section>
+  <aside class="options">
+    <div class="switch defect">
+      <div class="head">Defects <button class="rocker" data-opt="defects"></button></div>
+      <div class="seg only-defects"><button data-scope="all">ALL</button><button data-scope="focus">FOCUS</button></div>
+      <small>Anomaly boxes · sim + real</small>
+    </div>
+    <div class="switch">
+      <div class="head">Focus block <button class="rocker" data-opt="focus"></button></div>
+      <small>Block selected by the arm</small>
+    </div>
+    <div class="gauge">
+      <div>FOCUS<b data-bind="focus-label"></b></div>
+      <div>BODY<b data-bind="focus-id"></b></div>
+      <div>THRESHOLD<b data-bind="threshold"></b></div>
+      <div>DEFECTS SHOWN</div><div class="big" data-bind="defect-count"></div>
+      <div>ARM STATE</div><div class="big">PICKING</div>
+    </div>
+  </aside>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/engine.js"></script>
+</body>
+</html>

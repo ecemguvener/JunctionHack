@@ -1,0 +1,23 @@
+/* Structure shared by all five designs. Look and layout are in each design file. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+button { font: inherit; color: inherit; cursor: pointer; }
+[data-panel] { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.stage > img, .stage > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage > img { object-fit: contain; }
+.cam-overlay, .cloud-labels { pointer-events: none; }
+body.src-sim .cam-real, body.src-real .cam-sim { visibility: hidden; }
+[data-panel].fs { position: fixed; inset: 0; z-index: 50; }
+[data-panel="depth"] .nav { display: none; }
+[data-panel="depth"].fs .nav { display: flex; }
+[data-panel="depth"]:not(.fs) .stage { cursor: default; }
+[data-panel="depth"].fs .stage { cursor: grab; }
+.fs-only { display: none !important; }
+body.fs-cam [data-panel="cam"] .fs-only,
+body.fs-depth [data-panel="depth"] .fs-only { display: revert !important; }
+body.fs-depth .options { display: none !important; }
+body.fs-cam .options { position: fixed; z-index: 60; }
+.only-defects { display: none; }
+body.opt-defects .only-defects { display: revert; }
+canvas.gizmo { width: 96px; height: 96px; cursor: pointer; }

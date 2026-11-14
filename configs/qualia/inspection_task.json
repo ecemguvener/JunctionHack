@@ -1,0 +1,10 @@
+{
+  "displayName": "Investigate Block",
+  "draft": {
+    "description": "Individually singulate, pick, inspect across all 8 corners / full 360-degree surface sweep at the low Plate camera via Joint-5 counter-clockwise rotation, and classify clustered DUPLO blocks from the aquamarine source plate into the good and defective KALAS plates.",
+    "scene": "Three IKEA KALAS plates (aquamarine source plate at x=0.23, y=0.00 holding 8 randomly mixed DUPLO blocks; green good plate at x=0.10, y=-0.22; pink defective plate at x=0.10, y=+0.22) viewed by Top and low Plate RealSense D415s plus the gripper Sonix UVC camera.",
+    "steps": "Retract arm to observation home and segment clustered DUPLO blocks in the aquamarine source plate\nSelect the most accessible block with collision-free jaw clearance and pick via pure contact friction\nPresent held block to the low Plate camera (side) and rotate Joint 5 counter-clockwise while OpenVINO monitors for surface anomalies\nRoute block to an open slot in the green good plate if no anomaly message arrives, or the pink defective plate if an anomaly is flagged\nRepeat until all 8 blocks are classified and park arm safely at rest",
+    "success": "All 8 clustered blocks are individually picked, scanned without occlusion, and settled inside their respective good or defective sorting plates with the arm parked at rest.",
+    "failure": "Any block remains unsorted, an untrusted or missing-threshold view triggers a sort, a block drops outside the destination plate, or a servo overload fault occurs."
+  }
+}
