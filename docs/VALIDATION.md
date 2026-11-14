@@ -1,5 +1,23 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 repeat underside and multi-pose candidate — 14 November 2026
+
+Captured `artifacts/brick-001-other-side-review/` following the operator's
+other-side cue. RGB review shows the broad underside again; recorded pose
+`underside-repeat-operator-other-side` rather than claiming opposite-side
+coverage. Existing extraction retained 129 top and 285 plate points.
+
+Added and executed `scripts/align_pose_preview.py` on upright, narrow, back
+and repeat-underside rough clouds. Tested 24 proper PCA-axis seeds per pair,
+30 iterations of trimmed nearest-neighbor ICP against the first pose, retaining
+80% of correspondences for fitting. Best trimmed fitting distances were 4.21,
+4.37 and 3.91 mm; alternative seeds have similar scores. These are in-sample
+fit measures, not physical accuracy, and the visible cloud remains noisy.
+Saved candidate PLY, source-pose-colored plot and rigid transforms under ignored
+`artifacts/brick-001-composite-review/`, marked `accepted: false`. No complete
+mesh, verified hidden surfaces, calibrated geometry or trained model is claimed.
+Raw pose clouds remain separate and preserved for later reconstruction work.
+
 ## Brick-001 back/underside pose — 14 November 2026
 
 Saved RGB and SDK point packets under ignored `artifacts/brick-001-back-review/`.
