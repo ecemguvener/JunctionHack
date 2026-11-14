@@ -7,14 +7,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from brickcell.simulation.world import BRICKS, OBJECTS, World, inspection_crop
+from brickcell.simulation.world import OBJECTS, World, inspection_crop
 
 
-def generate(root: Path) -> None:
+def generate(root: Path, scene_config: object = None) -> None:
     if root.exists():
         raise ValueError(f"Refusing to overwrite {root}")
     root.mkdir(parents=True)
-    world = World(root / "scene")
+    world = World(root / "scene", scene_config)
     rng = np.random.default_rng(2026)
     camera_pos = world.model.camera("inspection").pos.copy()
     rows = []
@@ -25,8 +25,11 @@ def generate(root: Path) -> None:
                 for i, object_id in enumerate(OBJECTS):
                     defective = split != "train" and i % 2 == 1
                     world.model.geom(f"{object_id}-mark").rgba[3] = float(defective)
+                    # Jitter around the colour from the scene config (world.bricks).
                     world.model.geom(f"{object_id}-solid").rgba[:3] = np.clip(
-                        np.array(BRICKS[object_id].rgba) + rng.uniform(-0.015, 0.015, 3), 0, 1
+                        np.array(world.bricks[object_id].rgba) + rng.uniform(-0.015, 0.015, 3),
+                        0,
+                        1,
                     )
                     world.model.camera("inspection").pos[:] = camera_pos + rng.uniform(
                         -0.0005, 0.0005, 3
@@ -75,4 +78,10 @@ def generate(root: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("data/two-bowl"))
-    generate(parser.parse_args().output)
+    parser.add_argument(
+        "--scene-config",
+        type=Path,
+        help="YAML with cameras and colours (default: configs/sim-scene.yaml)",
+    )
+    args = parser.parse_args()
+    generate(args.output, args.scene_config)

@@ -1,0 +1,117 @@
+# Scene config for the MuJoCo simulation: cameras and colours.
+# The simulation loads this file at start-up. To use a different file:
+#   --scene-config PATH (server, model_viewer, generate) or BRICKCELL_SCENE_CONFIG=PATH.
+# Restart the program after you change this file.
+#
+# Frames and units
+#   Lengths: metres. Angles: degrees. Pixels: OpenCV convention (the centre of the top-left
+#   pixel is (0, 0), u goes right, v goes down).
+#   World frame = robot base frame: origin at the SO-101 base on the table, +Z up, +X from the
+#   base to the bricks. Plates: green (good) at y = -0.22, pink (defective) at y = +0.22.
+#
+# Camera fields
+#   pos: [x, y, z]          camera position in the world frame (or in the `attach` body frame)
+#   Orientation: give exactly ONE of these four.
+#     lookat: [x, y, z]     point that the camera looks at; optional `up: [x, y, z]` is the
+#                           direction of the image top (default [0, 0, 1]; a camera that looks
+#                           straight down needs a different `up`, e.g. [1, 0, 0])
+#     xyaxes: [6 numbers]   MuJoCo convention: camera X axis (image right), then Y axis (image up)
+#     quat: [w, x, y, z]    MuJoCo camera frame: +X right, +Y up, the camera looks along -Z
+#     rotation_cv:          3x3 camera-to-world rotation, OpenCV camera frame: +X right, +Y down,
+#                           the camera looks along +Z. The columns are the camera axes in the
+#                           world frame. The loader converts it: R_mujoco = R_cv * diag(1, -1, -1).
+#                           If you have OpenCV extrinsics (x_cam = R x_world + t), use
+#                           rotation_cv = transpose(R) and pos = -transpose(R) t.
+#   Field of view: give ONE of these two.
+#     fovy: degrees         vertical field of view; the principal point is the image centre
+#     fx, fy, cx, cy        pinhole intrinsics in pixels for an image of `width` x `height`
+#                           (cx, cy are optional; default = image centre). No lens distortion.
+#   width, height           render size in pixels (default 256 x 256)
+#   attach: BODY            mount the camera on a model body, e.g. camera_mount (wrist camera).
+#                           `pos` and the orientation are then in the frame of that body.
+#   enabled: true/false     false = the camera is not in the model (default true)
+#
+# A camera entry replaces the complete built-in entry of the same name.
+
+cameras:
+  # Detector camera. Keep it 256 x 256: the fixed crop [48, 90, 208, 220] depends on it.
+  # If you change the pose, generate new data and train the detector again.
+  inspection:
+    pos: [0.55, 0, 0.24]
+    xyaxes: [0, 1, 0, -0.287348, 0, 0.957826]
+    fovy: 22
+    width: 256
+    height: 256
+
+  # Top view for the policy recorder (record_policy resizes it to 128 x 128).
+  overview:
+    pos: [0.3, 0, 1.1]
+    xyaxes: [1, 0, 0, 0, 1, 0]
+    fovy: 50
+    width: 256
+    height: 256
+
+  # Real camera "Top" (RealSense D415, serial 350122060653).
+  # MEASURED 2026-11-14 from a depth frame: table plane + fit of the SO-101 model at the
+  # joint angles read from the servos. Fit error: median 8 mm.
+  # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
+  overhead:
+    enabled: true
+    pos: [0.6028, 0.0753, 0.7566]
+    rotation_cv: [[-0.62571, 0.65434, -0.42465], [0.77836, 0.55958, -0.28463], [0.05138, -0.50863, -0.85945]]
+    fx: 603.94
+    fy: 603.02
+    cx: 313.15
+    cy: 235.87
+    width: 640
+    height: 480
+
+  # Real camera "Plate" (RealSense D415, serial 243622060450).
+  # MEASURED 2026-11-14 from a depth frame: table plane + fit of the SO-101 model at the
+  # joint angles read from the servos. Fit error: median 3 mm.
+  # Frame: robot base (origin at the arm base on the table, +Z up). Intrinsics: factory, 640x480.
+  side:
+    enabled: true
+    pos: [0.2466, -0.5838, 0.1079]
+    rotation_cv: [[0.99958, 0.02893, -0.00331], [0.00866, -0.18683, 0.98235], [0.02780, -0.98197, -0.18700]]
+    fx: 607.79
+    fy: 606.97
+    cx: 320.07
+    cy: 247.16
+    width: 640
+    height: 480
+
+  # Real camera "Gripper" (Sonix USB camera on the gripper). The SO-101 robot profile already
+  # has a `wrist` camera: body camera_mount, pos [0, -0.055, -0.045], fovy 75, 256 x 256.
+  # To replace it, remove the "#" marks below and put in the measured values. The pose is in
+  # the camera_mount body frame, not in the world frame.
+  # wrist:
+  #   attach: camera_mount
+  #   pos: [0.0, -0.055, -0.045]
+  #   quat: [0.0, 0.0, -0.281157451295294, 0.9596616526574011]
+  #   fovy: 75
+  #   width: 256
+  #   height: 256
+  #
+  # Example with measured OpenCV data (world camera):
+  # overhead:
+  #   pos: [0.262, 0.013, 0.845]
+  #   rotation_cv: [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
+  #   fx: 610.2
+  #   fy: 609.8
+  #   cx: 322.4
+  #   cy: 236.9
+  #   width: 640
+  #   height: 480
+
+# Brick colours: "#rrggbb" or [r, g, b] with numbers from 0 to 1.
+bricks:
+  part-001: {color: [0.80, 0.08, 0.08]}  # DUPLO 3437, 2x2 (red)
+  part-002: {color: [0.05, 0.33, 0.80]}  # DUPLO 3011, 2x4 (blue)
+  part-003: {color: [0.97, 0.76, 0.05]}  # DUPLO 76371, 1x2x2 (yellow)
+  part-004: {color: [0.10, 0.60, 0.28]}  # DUPLO 2302, 2x3 curved top (green)
+
+# Plate colours: same formats.
+plates:
+  good: {color: [0.62, 0.86, 0.76]}
+  defective: {color: [0.90, 0.72, 0.78]}

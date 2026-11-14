@@ -6,15 +6,26 @@ Bricks are grasped through friction/contact: no welds or carried-object teleport
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import mujoco
 import numpy as np
-from physicalai_mujoco_plugin.compose import compose_scene
+from physicalai_mujoco_plugin.compose import compose_scene, compose_scene_spec
 from physicalai_mujoco_plugin.conveyor_demo import ARM_JOINTS, ArmIK
 from physicalai_mujoco_plugin.profiles import get_profile
 from physicalai_mujoco_plugin.sim import place_home
+
+from brickcell.simulation.scene_config import (
+    CV_TO_MUJOCO,
+    DEFAULT_BRICK_COLORS,
+    DEFAULT_PLATE_COLORS,
+    Camera,
+    SceneConfig,
+    focal_from_fovy,
+    load_scene_config,
+    parse_color,
+)
 
 ASSETS = Path(__file__).resolve().parents[3] / "assets" / "duplo"
 
@@ -77,7 +88,8 @@ BOWLS = {"good": np.array([0.10, -0.22, 0.009]), "defective": np.array([0.10, 0.
 # next brick does not land on an earlier one and the opening jaw does not touch a neighbour.
 SLOTS = [(-1, -0.024), (1, 0.024), (1, -0.024), (-1, 0.024)]
 RELEASE_GRIP = 0.3  # open the moving jaw only a little at release; full open after the lift
-PLATE_RGBA = {"good": "0.62 0.86 0.76 1", "defective": "0.90 0.72 0.78 1"}
+# Default colours. configs/sim-scene.yaml (see scene_config.py) can change them for a World.
+PLATE_RGBA = {name: f"{_vec(rgb)} 1" for name, rgb in DEFAULT_PLATE_COLORS.items()}
 INSPECTION = np.array([0.25, 0.0, 0.15])
 
 
@@ -92,16 +104,17 @@ class Brick:
     body_height: float  # height without studs
     grip_z: float  # grasp point above the table
     mass: float  # from PHYSICS["brick_mass"]; weigh the real bricks to confirm
-    rgba: tuple[float, float, float]
+    rgba: tuple[float, float, float]  # default colour; World.bricks has the configured colour
 
 
 _MASS = PHYSICS["brick_mass"]
+_RGB = DEFAULT_BRICK_COLORS
 BRICKS = {
     "part-001": Brick(
-        "3437", "duplo_2x2_3437", 0.0, 0.016, 0.0192, 0.0105, _MASS["part-001"], (0.80, 0.08, 0.08)
+        "3437", "duplo_2x2_3437", 0.0, 0.016, 0.0192, 0.0105, _MASS["part-001"], _RGB["part-001"]
     ),
     "part-002": Brick(
-        "3011", "duplo_2x4_3011", 0.0, 0.032, 0.0192, 0.0105, _MASS["part-002"], (0.05, 0.33, 0.80)
+        "3011", "duplo_2x4_3011", 0.0, 0.032, 0.0192, 0.0105, _MASS["part-002"], _RGB["part-002"]
     ),
     "part-003": Brick(
         "76371",
@@ -111,7 +124,7 @@ BRICKS = {
         0.0384,
         0.017,
         _MASS["part-003"],
-        (0.97, 0.76, 0.05),
+        _RGB["part-003"],
     ),
     "part-004": Brick(
         "2302",
@@ -121,7 +134,7 @@ BRICKS = {
         0.0192,
         0.0105,
         _MASS["part-004"],
-        (0.10, 0.60, 0.28),
+        _RGB["part-004"],
     ),
 }
 OBJECTS = list(BRICKS)
@@ -168,8 +181,9 @@ def _quat(yaw: float, tilt: float) -> str:
     return f"{cz * cy:.6f} {-sz * sy:.6f} {cz * sy:.6f} {sz * cy:.6f}"
 
 
-def plate_xml(name: str, pos: np.ndarray) -> str:
+def plate_xml(name: str, pos: np.ndarray, rgb: tuple[float, float, float] | None = None) -> str:
     """Visual mesh plus primitive collision: a floor disc and a ring of sloped wall boxes."""
+    rgba = PLATE_RGBA[name] if rgb is None else f"{rgb[0]} {rgb[1]} {rgb[2]} 1"
     tilt = np.arctan2(91.3 - 79, 23.5 - 4.0)
     contact = _contact("plate", 2)
     walls = "".join(
@@ -180,7 +194,7 @@ def plate_xml(name: str, pos: np.ndarray) -> str:
     return (
         f'<body name="plate_{name}" pos="{pos[0]} {pos[1]} 0">'
         f'<geom name="plate_{name}-visual" type="mesh" mesh="kalas_plate" '
-        f'rgba="{PLATE_RGBA[name]}" contype="0" conaffinity="0"/>'
+        f'rgba="{rgba}" contype="0" conaffinity="0"/>'
         f'<geom name="plate_{name}-floor" type="cylinder" size=".079 .00155" pos="0 0 .00155" '
         f'rgba="0 0 0 0" {contact}/>{walls}</body>'
     )
@@ -201,31 +215,71 @@ def brick_xml(index: int, name: str, b: Brick) -> str:
     )
 
 
-def scene_xml(directory: Path) -> str:
-    """Self-contained scene; Menagerie supplies only the SO-101 geometry."""
-    plate = directory / "kalas_plate.obj"
+def scene_xml(directory: Path, scene: SceneConfig | None = None) -> str:
+    """Self-contained scene; Menagerie supplies only the SO-101 geometry.
+
+    ``scene`` gives the world-fixed cameras and the colours; None loads the default scene config.
+    """
+    scene = load_scene_config(scene)
+    plate = (
+        directory.resolve() / "kalas_plate.obj"
+    )  # absolute: MuJoCo resolves relative paths from the XML directory
     write_plate_obj(plate)
     assets = f'<mesh name="kalas_plate" file="{plate}" inertia="shell"/>'
     assets += "".join(
         f'<mesh name="{b.mesh}" file="{ASSETS / (b.mesh + ".stl")}" inertia="convex"/>'
         for b in BRICKS.values()
     )
-    plates = "".join(plate_xml(name, pos) for name, pos in BOWLS.items())
-    bricks = "".join(brick_xml(i, name, b) for i, (name, b) in enumerate(BRICKS.items()))
+    plates = "".join(plate_xml(name, pos, scene.plate_colors[name]) for name, pos in BOWLS.items())
+    bricks = "".join(
+        brick_xml(i, name, replace(b, rgba=scene.brick_colors[name]))
+        for i, (name, b) in enumerate(BRICKS.items())
+    )
+    cameras = "".join(camera.xml() for camera in scene.world_cameras())
+    width, height = scene.offscreen_size()  # a Renderer cannot be larger than this buffer
     p = PHYSICS
     return f"""<mujoco model="Brickcell two plate inspection">
       <compiler angle="radian" autolimits="true"/>
       <option timestep="{p["timestep"]}" gravity="{_vec(p["gravity"])}" integrator="{p["integrator"]}" cone="{p["cone"]}" iterations="{p["iterations"]}" ls_iterations="{p["ls_iterations"]}" impratio="{p["impratio"]}"/>
-      <visual><global offwidth="640" offheight="480"/><headlight ambient=".4 .4 .4" diffuse=".5 .5 .5" specular="0 0 0"/></visual>
+      <visual><global offwidth="{width}" offheight="{height}"/><headlight ambient=".4 .4 .4" diffuse=".5 .5 .5" specular="0 0 0"/></visual>
       <default><geom rgba=".9 .48 .08 1" condim="4" friction="1 .01 .001"/></default>
       <asset>{assets}</asset>
       <worldbody>
         <light pos=".4 -.3 1" dir="0 0 -1" diffuse=".7 .7 .7" castshadow="false"/>
         <geom name="table" type="plane" size="1 1 .01" rgba=".15 .18 .22 1" {_contact("table", 2)}/>
         {plates}{bricks}<frame name="robot_mount"/>
-        <camera name="inspection" pos=".55 0 .24" xyaxes="0 1 0 -.287348 0 .957826" fovy="22"/>
-        <camera name="overview" pos=".3 0 1.1" xyaxes="1 0 0 0 1 0" fovy="50"/>
+        {cameras}
       </worldbody></mujoco>"""
+
+
+def attach_cameras(path: Path, profile, cameras: list[Camera]) -> mujoco.MjModel:
+    """Compile the composed scene again with cameras mounted on bodies (wrist camera).
+
+    compose_scene gives only the compiled model, so this gets the same scene as an MjSpec, adds
+    the cameras and compiles it. A camera with the name of a robot camera replaces that camera.
+    """
+    spec = compose_scene_spec(path, profile)
+    for camera in cameras:
+        body = spec.body(camera.attach)
+        if body is None:
+            names = [b.name for b in spec.bodies if b.name]
+            raise ValueError(
+                f"Camera '{camera.name}': attach body '{camera.attach}' is not in the model. "
+                f"Bodies: {names}"
+            )
+        existing = spec.camera(camera.name)
+        if existing is not None:
+            spec.delete(existing)
+        added = body.add_camera(name=camera.name, pos=list(camera.pos), quat=camera.quat())
+        sensor = camera.sensor()
+        if sensor is None:
+            added.fovy = camera.fovy
+        else:
+            added.resolution = sensor["resolution"]
+            added.sensor_size = sensor["sensorsize"]
+            added.focal_pixel = sensor["focalpixel"]
+            added.principal_pixel = sensor["principalpixel"]
+    return spec.compile()
 
 
 def apply_jaw_physics(model: mujoco.MjModel) -> None:
@@ -245,12 +299,29 @@ def apply_jaw_physics(model: mujoco.MjModel) -> None:
 
 
 class World:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, scene_config: object = None):
+        """``scene_config``: SceneConfig, mapping or YAML path; None loads the default file."""
+        self.scene = load_scene_config(scene_config)
+        # Bricks with the configured colours. set_brick_color keeps this up to date.
+        self.bricks = {
+            name: replace(b, rgba=self.scene.brick_colors[name]) for name, b in BRICKS.items()
+        }
+        profile = get_profile("so101")
+        robot_cameras = {c.name: c.body for c in profile.cameras}
+        for camera in self.scene.world_cameras():
+            if camera.name in robot_cameras:
+                raise ValueError(
+                    f"Camera '{camera.name}' is a camera of the robot. To replace it, give "
+                    f"`attach: <body>` (the robot has it on '{robot_cameras[camera.name]}')."
+                )
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / "two_plate.xml"
-        path.write_text(scene_xml(directory))
-        composed = compose_scene(path, get_profile("so101"))
+        path.write_text(scene_xml(directory, self.scene))
+        composed = compose_scene(path, profile)
         self.model = composed.model
+        attached = self.scene.attached_cameras()
+        if attached:
+            self.model = attach_cameras(path, profile, attached)
         apply_jaw_physics(self.model)
         self.data = mujoco.MjData(self.model)
         for robot in composed.robots:
@@ -262,7 +333,7 @@ class World:
         self.target = self.ik.tcp(self.data).copy()
         self.grip = 0.5
         self.yaw = np.pi / 2
-        self.renderer = None
+        self.renderers: dict[tuple[int, int], mujoco.Renderer] = {}  # one per (width, height)
         self.active: str | None = None
         self.destination: str | None = None
         self.tick_callback = lambda: None
@@ -372,15 +443,88 @@ class World:
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 
+    def camera_names(self) -> list[str]:
+        return [self.model.camera(i).name for i in range(self.model.ncam)]
+
     def camera(self, camera: str = "inspection") -> np.ndarray:
-        if self.renderer is None:
-            self.renderer = mujoco.Renderer(self.model, height=256, width=256)
-        self.renderer.update_scene(self.data, camera=camera)
-        return self.renderer.render().copy()
+        """RGB image of a model camera at its configured size (256x256 if not configured)."""
+        if mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera) < 0:
+            raise ValueError(f"Unknown camera '{camera}'. Cameras: {self.camera_names()}")
+        size = self.scene.camera_size(camera)
+        renderer = self.renderers.get(size)
+        if renderer is None:
+            renderer = mujoco.Renderer(self.model, height=size[1], width=size[0])
+            self.renderers[size] = renderer
+        renderer.update_scene(self.data, camera=camera)
+        return renderer.render().copy()
+
+    def cameras(self) -> list[dict]:
+        """Name, pose and pinhole intrinsics of each model camera and each disabled config entry.
+
+        ``pos``, ``quat`` (MuJoCo camera frame, wxyz) and ``rotation_cv`` (OpenCV camera frame)
+        are in the parent frame: the world, or the ``attach`` body. ``world_pos`` and
+        ``world_rotation_cv`` are the pose in the world at this time. fx, fy, cx, cy are in
+        OpenCV pixels for the rendered ``width`` x ``height`` image.
+        """
+        result = []
+        for i in range(self.model.ncam):
+            name = self.model.camera(i).name
+            width, height = self.scene.camera_size(name)
+            body = int(self.model.cam_bodyid[i])
+            sensor, intrinsic = self.model.cam_sensorsize[i], self.model.cam_intrinsic[i]
+            fovy = float(self.model.cam_fovy[i])
+            if sensor[1] > 0:
+                fx = float(intrinsic[0] / sensor[0]) * width
+                fy = float(intrinsic[1] / sensor[1]) * height
+                cx = (width - 1) / 2 - float(intrinsic[2] / sensor[0]) * width
+                cy = (height - 1) / 2 - float(intrinsic[3] / sensor[1]) * height
+            else:
+                fx = fy = focal_from_fovy(fovy, height)
+                cx, cy = (width - 1) / 2, (height - 1) / 2
+            rotation = np.zeros(9)
+            mujoco.mju_quat2Mat(rotation, self.model.cam_quat[i])
+            result.append(
+                {
+                    "name": name,
+                    "enabled": True,
+                    "source": "scene config" if name in self.scene.cameras else "robot profile",
+                    "attach": self.model.body(body).name if body else None,
+                    "pos": self.model.cam_pos[i].tolist(),
+                    "quat": self.model.cam_quat[i].tolist(),
+                    "rotation_cv": (rotation.reshape(3, 3) @ CV_TO_MUJOCO).tolist(),
+                    "world_pos": self.data.cam_xpos[i].tolist(),
+                    "world_rotation_cv": (
+                        self.data.cam_xmat[i].reshape(3, 3) @ CV_TO_MUJOCO
+                    ).tolist(),
+                    "fovy": fovy,
+                    "width": width,
+                    "height": height,
+                    "fx": fx,
+                    "fy": fy,
+                    "cx": cx,
+                    "cy": cy,
+                }
+            )
+        result += [
+            {**camera.as_dict(), "source": "scene config"}
+            for camera in self.scene.cameras.values()
+            if not camera.enabled
+        ]
+        return result
+
+    def set_brick_color(self, part_id: str, color: object) -> tuple[float, float, float]:
+        """Change a brick colour in the running model. ``color``: "#rrggbb" or [r, g, b] 0-1."""
+        if part_id not in self.bricks:
+            raise ValueError(f"Unknown part id '{part_id}'. Known: {list(self.bricks)}")
+        rgb = parse_color(color, f"brick colour {part_id}")
+        self.model.geom(f"{part_id}-solid").rgba[:3] = rgb
+        self.bricks[part_id] = replace(self.bricks[part_id], rgba=rgb)
+        return rgb
 
     def close(self) -> None:
-        if self.renderer is not None:
-            self.renderer.close()
+        for renderer in self.renderers.values():
+            renderer.close()
+        self.renderers.clear()
 
 
 def inspection_crop(rgb: np.ndarray) -> np.ndarray:

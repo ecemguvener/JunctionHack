@@ -2,7 +2,8 @@
 
 Shows the four LEGO DUPLO bricks and one IKEA KALAS plate at true scale on a 1 cm grid.
 You can move each model with a gizmo, show the collision shapes that MuJoCo uses, measure
-between two points, and drop the bricks into the plate with MuJoCo physics.
+between two points, and drop the bricks into the plate with MuJoCo physics. A station map shows
+the configured cameras (configs/sim-scene.yaml) relative to the arm base, the plates and the bricks.
 
     MUJOCO_GL=egl PYTHONPATH=src python -m brickcell.simulation.model_viewer --port 19092
 
@@ -25,9 +26,12 @@ import trimesh
 import viser
 import viser.transforms as vtf
 
+from brickcell.simulation.scene_config import SceneConfig, color_hex, load_scene_config
 from brickcell.simulation.world import (
     ASSETS,
+    BOWLS,
     BRICKS,
+    INSPECTION,
     PLATE_RGBA,
     brick_xml,
     plate_xml,
@@ -38,13 +42,14 @@ from brickcell.simulation.world import (
 PLATE = "plate"
 FLOOR_RADIUS = 0.079  # KALAS inner floor radius (PLATE_PROFILE r = 79 mm at the bottom)
 SNAP_DISTANCE = 0.003
+# Browser camera (position, look_at): close to the models, and far enough to see the cameras.
+CHECK_VIEW = ((0.17, -0.33, 0.17), (0.0, -0.07, 0.0))
+STATION_VIEW = ((0.9, -0.8, 0.8), (0.25, 0.0, 0.3))
 GIZMO_MODES = ("Selected model", "All models", "Hidden")
-# The user's plates. Green and pink are the sim colours; light blue is only for this viewer.
-PLATE_COLOURS = {
-    "green": PLATE_RGBA.get("good", "0.62 0.86 0.76 1"),
-    "pink": PLATE_RGBA.get("defective", "0.90 0.72 0.78 1"),
-    "light blue": "0.60 0.80 0.93 1",
-}
+# The user's plates. "good" and "defective" are the sim colours from the scene config (green and
+# pink by default); light blue is only for this viewer.
+LIGHT_BLUE = (0.60, 0.80, 0.93)
+PLATE_OUTER_RADIUS = 0.093  # KALAS rim radius, for the station map
 # Drop-test layout over the plate centre (x, y) in metres: two rows of two bricks.
 DROP_LAYOUT = [(0.038, -0.022), (-0.038, -0.022), (-0.038, 0.022), (0.038, 0.022)]
 
@@ -52,6 +57,45 @@ DROP_LAYOUT = [(0.038, -0.022), (-0.038, -0.022), (-0.038, 0.022), (0.038, 0.022
 def rgb255(rgba: str | tuple[float, ...]) -> tuple[int, int, int]:
     values = [float(v) for v in rgba.split()] if isinstance(rgba, str) else list(rgba)
     return tuple(int(round(255 * min(max(v, 0.0), 1.0))) for v in values[:3])  # type: ignore[return-value]
+
+
+def add_camera_frustums(scene, cameras: list[dict], root: str = "/cameras") -> list:
+    """Draw the world-fixed cameras as frustums with labels. Returns the handles.
+
+    ``cameras``: dicts with name, enabled, attach, pos, rotation_cv, fovy, width, height
+    (World.cameras() or Camera.as_dict()). A camera on a body (``attach``) is not drawn.
+    """
+    handles = []
+    for camera in cameras:
+        if camera["attach"] is not None:
+            continue  # it moves with a robot body; the pose is not fixed in the world
+        rotation = np.array(camera["rotation_cv"])  # viser frustums use the OpenCV camera frame
+        handles.append(
+            scene.add_camera_frustum(
+                f"{root}/{camera['name']}",
+                fov=float(np.radians(camera["fovy"])),
+                aspect=camera["width"] / camera["height"],
+                scale=0.06,
+                thickness=1.5,
+                thickness_units="screen",
+                color=(255, 200, 40) if camera["enabled"] else (120, 120, 120),
+                wxyz=vtf.SO3.from_matrix(rotation).wxyz,
+                position=camera["pos"],
+                cast_shadow=False,
+                receive_shadow=False,
+            )
+        )
+        text = camera["name"] if camera["enabled"] else f"{camera['name']} (off)"
+        handles.append(
+            scene.add_label(
+                f"{root}/{camera['name']}-label",
+                f"CAM {text}",
+                position=camera["pos"],
+                anchor="bottom-center",
+                font_screen_scale=0.8,
+            )
+        )
+    return handles
 
 
 def yaw_wxyz(yaw: float) -> np.ndarray:
@@ -90,9 +134,12 @@ class Model:
         return self.mesh.triangles @ self.rotation().T + self.pos
 
 
-def build_drop_model(directory: Path, plate_name: str) -> mujoco.MjModel:
+def build_drop_model(
+    directory: Path, plate_name: str, scene: SceneConfig | None = None
+) -> mujoco.MjModel:
     """Plate + four bricks + table, from the world.py helpers. No robot."""
-    root = ET.fromstring(scene_xml(directory))  # also writes kalas_plate.obj into directory
+    # scene_xml also writes kalas_plate.obj into directory
+    root = ET.fromstring(scene_xml(directory, scene))
     keep = "".join(
         ET.tostring(root.find(tag), encoding="unicode")
         for tag in ("compiler", "option", "visual", "default", "asset")
@@ -189,12 +236,20 @@ def ray_triangles(origin: np.ndarray, direction: np.ndarray, tris: np.ndarray) -
 
 
 class ModelViewer:
-    def __init__(self, port: int):
+    def __init__(self, port: int, scene_config: object = None, station: bool = False):
         self.lock = threading.RLock()
+        self.view = CHECK_VIEW
+        self.scene_config = load_scene_config(scene_config)
+        plates = self.scene_config.plate_colors
+        self.plate_colours = {
+            "green": plates["good"],
+            "pink": plates["defective"],
+            "light blue": LIGHT_BLUE,
+        }
         self.tmp = tempfile.TemporaryDirectory(prefix="brickcell-model-viewer-")
         directory = Path(self.tmp.name)
         self.plate_name = "good" if "good" in PLATE_RGBA else next(iter(PLATE_RGBA))
-        self.drop_model = build_drop_model(directory, self.plate_name)
+        self.drop_model = build_drop_model(directory, self.plate_name, self.scene_config)
         self.models = self._load_models(directory)
         self.selected = next(iter(self.models))
         self.points: list[np.ndarray] = []
@@ -205,8 +260,11 @@ class ModelViewer:
             self.server.stop()
             raise RuntimeError(f"Port {port} is already in use")
         self._build_scene()
+        self.station_handles = self._build_station_map()
         self._build_gui()
         self.reset_layout()
+        if station:
+            self.station_layout()
 
     # ------------------------------------------------------------------ models
     def _load_models(self, directory: Path) -> dict[str, Model]:
@@ -230,7 +288,7 @@ class ModelViewer:
                 mesh=mesh,
                 collision=hull,
                 collision_note=f"convex hull, {len(hull.vertices)} vertices",
-                colour=rgb255(b.rgba),
+                colour=rgb255(self.scene_config.brick_colors[key]),
                 home_pos=pos,
                 home_wxyz=yaw_wxyz(b.yaw),
             )
@@ -250,7 +308,7 @@ class ModelViewer:
             mesh=plate,
             collision=collision,
             collision_note=f"{n_geoms} primitives (floor disc + wall boxes)",
-            colour=rgb255(PLATE_COLOURS["green"]),
+            colour=rgb255(self.plate_colours["green"]),
             home_pos=np.zeros(3),
             home_wxyz=np.array([1.0, 0, 0, 0]),
             smooth=True,
@@ -264,8 +322,8 @@ class ModelViewer:
         scene.configure_default_lights(enabled=True, cast_shadow=True)
         scene.add_grid(
             "/grid",
-            width=0.6,
-            height=0.6,
+            width=1.2,
+            height=1.2,
             cell_size=0.01,
             cell_color=(70, 74, 82),
             section_size=0.1,
@@ -315,10 +373,120 @@ class ModelViewer:
 
         @self.server.on_client_connect
         def configure_camera(client: viser.ClientHandle) -> None:
-            client.camera.position = (0.17, -0.33, 0.17)
-            client.camera.look_at = (0.0, -0.07, 0.0)
+            client.camera.position, client.camera.look_at = self.view
             client.camera.up_direction = (0, 0, 1)
             client.camera.near = 0.005
+
+    def _build_station_map(self) -> list:
+        """Cameras, arm base, plates and brick start positions in the robot base frame."""
+        scene = self.server.scene
+        handles = [
+            scene.add_frame("/station/base", axes_length=0.05, axes_radius=0.0015),
+            scene.add_label(
+                "/station/base-label",
+                "ARM BASE (0, 0, 0)",
+                position=(0, 0, 0.055),
+                anchor="bottom-center",
+                font_screen_scale=0.8,
+            ),
+        ]
+        angles = np.linspace(0, 2 * np.pi, 49)
+        ring = PLATE_OUTER_RADIUS * np.column_stack((np.cos(angles), np.sin(angles), 0 * angles))
+        for name, pos in BOWLS.items():
+            centre = np.array([pos[0], pos[1], 0.0005])
+            points = (ring + centre).astype(np.float32)
+            handles.append(
+                scene.add_line_segments(
+                    f"/station/plate-{name}",
+                    np.stack((points[:-1], points[1:]), axis=1),
+                    rgb255(self.scene_config.plate_colors[name]),
+                    thickness=2.0,
+                    thickness_units="screen",
+                )
+            )
+            handles.append(
+                scene.add_label(
+                    f"/station/plate-{name}-label",
+                    f"{name.upper()} plate",
+                    position=centre,
+                    anchor="bottom-center",
+                    font_screen_scale=0.8,
+                )
+            )
+        for key, pos in self._station_positions().items():
+            if key == PLATE:
+                continue
+            a = np.array([[-0.012, 0, 0], [0, -0.012, 0]]) + pos + [0, 0, 0.0005]
+            b = np.array([[0.012, 0, 0], [0, 0.012, 0]]) + pos + [0, 0, 0.0005]
+            handles.append(
+                scene.add_line_segments(
+                    f"/station/start-{key}",
+                    np.stack((a, b), axis=1).astype(np.float32),
+                    self.models[key].colour,
+                    thickness=2.0,
+                    thickness_units="screen",
+                )
+            )
+        handles.append(
+            scene.add_icosphere(
+                "/station/inspection",
+                radius=0.003,
+                color=(255, 200, 40),
+                position=INSPECTION,
+                cast_shadow=False,
+            )
+        )
+        handles.append(
+            scene.add_label(
+                "/station/inspection-label",
+                "inspection point",
+                position=INSPECTION,
+                anchor="bottom-center",
+                font_screen_scale=0.8,
+            )
+        )
+        cameras = [camera.as_dict() for camera in self.scene_config.cameras.values()]
+        return handles + add_camera_frustums(scene, cameras, "/station/cameras")
+
+    def _station_positions(self) -> dict[str, np.ndarray]:
+        """Where the simulation puts each model at the start (model origin = bottom centre)."""
+        positions = {key: np.array([0.25, (i - 1.5) * 0.065, 0.0]) for i, key in enumerate(BRICKS)}
+        plate = BOWLS[self.plate_name]
+        positions[PLATE] = np.array([plate[0], plate[1], 0.0])
+        return positions
+
+    def station_layout(self) -> None:
+        """Show the station map and put the models where the simulation starts them."""
+        if self.playing:
+            return
+        for key, pos in self._station_positions().items():
+            self.set_pose(self.models[key], pos, self.models[key].home_wxyz)
+        self._apply_gizmos()
+        self.station.value = True  # its callback shows the map
+        self._set_view(STATION_VIEW)
+
+    def _set_view(self, view) -> None:
+        self.view = view
+        for client in self.server.get_clients().values():
+            client.camera.position, client.camera.look_at = view
+
+    def _camera_table(self) -> str:
+        rows = ["| Camera | Position (m) | fovy | Size | State |", "|---|---|---|---|---|"]
+        for camera in self.scene_config.cameras.values():
+            x, y, z = camera.pos
+            where = f"{x:.3f}, {y:.3f}, {z:.3f}"
+            if camera.attach:
+                where += f" on `{camera.attach}`"
+            rows.append(
+                f"| {camera.name} | {where} | {camera.fovy:.1f}° | "
+                f"{camera.width} × {camera.height} | {'on' if camera.enabled else 'off'} |"
+            )
+        return (
+            "\n".join(rows)
+            + f"\n\nFrom `{Path(self.scene_config.source).name}`. Frame: arm base, Z up. Grey = "
+            "off (`enabled: false`). A camera on a robot body (`attach`) is not drawn here; the "
+            "simulation server viewer shows its image."
+        )
 
     def _gizmo_callback(self, model: Model):
         def callback(event) -> None:
@@ -379,7 +547,7 @@ class ModelViewer:
             reset = gui.add_button("Reset layout")
             reset.on_click(lambda _: self.reset_layout())
             self.colour = gui.add_dropdown(
-                "Plate colour", tuple(PLATE_COLOURS), initial_value="green"
+                "Plate colour", tuple(self.plate_colours), initial_value="green"
             )
             self.colour.on_update(lambda _: self._apply_plate_colour())
             self.gizmo_mode = gui.add_dropdown(
@@ -395,9 +563,32 @@ class ModelViewer:
         with gui.add_folder("Selected model"):
             self.pick = gui.add_dropdown("Model", tuple(self.models), initial_value=self.selected)
             self.pick.on_update(lambda _: self.select(self.pick.value))
+            self.model_colour = gui.add_rgb(
+                "Colour",
+                self.models[self.selected].colour,
+                hint="Colour of the selected model in this viewer. To keep it, copy the line "
+                "below into configs/sim-scene.yaml.",
+            )
+            self.model_colour.on_update(lambda _: self._apply_model_colour())
             self.readout = gui.add_markdown("")
             row = gui.add_button_group("Action", ("On table", "Upright", "Turn 90°", "Tip 90°"))
             row.on_click(lambda event: self._action(event.target.value))
+
+        with gui.add_folder("Station cameras"):
+            self.station = gui.add_checkbox(
+                "Show station map",
+                False,
+                hint="Cameras from the scene config, arm base, plate positions and brick start "
+                "positions, in the robot base frame.",
+            )
+            self.station.on_update(lambda _: self._apply_visibility())
+            place = gui.add_button("Station layout")
+            place.on_click(lambda _: self.station_layout())
+            gui.add_markdown(
+                "**Station layout** shows the map and puts the models where the simulation "
+                "starts them. **Reset layout** goes back to the model check."
+            )
+            gui.add_markdown(self._camera_table())
 
         with gui.add_folder("Collision shapes"):
             self.show_collision = gui.add_checkbox(
@@ -459,9 +650,19 @@ class ModelViewer:
         )
 
     def _apply_plate_colour(self) -> None:
-        colour = rgb255(PLATE_COLOURS[self.colour.value])
-        self.models[PLATE].colour = colour
-        self.models[PLATE].handles["mesh"].color = colour
+        self._set_colour(self.models[PLATE], rgb255(self.plate_colours[self.colour.value]))
+
+    def _apply_model_colour(self) -> None:
+        self._set_colour(self.models[self.selected], tuple(self.model_colour.value))
+
+    def _set_colour(self, model: Model, colour: tuple[int, int, int]) -> None:
+        if model.colour == colour:
+            return
+        model.colour = colour
+        model.handles["mesh"].color = colour
+        if model.key == self.selected:
+            self.model_colour.value = colour
+            self._update_readout()
 
     def _apply_gizmos(self) -> None:
         mode = self.gizmo_mode.value
@@ -478,12 +679,15 @@ class ModelViewer:
                 model.handles["collision"].visible = overlay
                 model.handles["mesh"].opacity = None if opacity >= 0.999 else float(opacity)
                 model.handles["label"].visible = self.labels.value
+            for handle in self.station_handles:
+                handle.visible = self.station.value
 
     def select(self, key: str) -> None:
         with self.lock:
             self.selected = key
             if self.pick.value != key:
                 self.pick.value = key
+            self.model_colour.value = self.models[key].colour
             self._apply_gizmos()
             self._update_readout()
 
@@ -493,8 +697,11 @@ class ModelViewer:
         lo, hi = world.min(0) * 1000, world.max(0) * 1000
         roll, pitch, yaw = np.degrees(vtf.SO3(model.wxyz).as_rpy_radians())
         x, y, z = model.pos * 1000
+        value = color_hex([v / 255 for v in model.colour])
+        entry = "plates: good" if model.key == PLATE else f"bricks: {model.key}"
         self.readout.content = (
             f"**{model.title}**\n\n{model.detail}\n\nCollision: {model.collision_note}\n\n"
+            f'Colour `{value}` · scene config: `{entry}: {{color: "{value}"}}`\n\n'
             f"Origin (bottom centre): {x:.1f}, {y:.1f}, {z:.1f} mm\n\n"
             f"Roll {roll:.0f}° · pitch {pitch:.0f}° · yaw {yaw:.0f}°\n\n"
             f"World box: {hi[0] - lo[0]:.1f} × {hi[1] - lo[1]:.1f} mm, "
@@ -524,7 +731,9 @@ class ModelViewer:
         for model in self.models.values():
             self.set_pose(model, model.home_pos, model.home_wxyz)
         self._apply_gizmos()
+        self.station.value = False  # the map is in the robot base frame, not in this layout
         self._apply_visibility()
+        self._set_view(CHECK_VIEW)
 
     # ----------------------------------------------------------------- measure
     def _apply_measure_mode(self) -> None:
@@ -717,9 +926,19 @@ class ModelViewer:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--port", type=int, default=19092)
+    parser.add_argument(
+        "--scene-config",
+        type=Path,
+        help="YAML with cameras and colours (default: configs/sim-scene.yaml)",
+    )
+    parser.add_argument(
+        "--station",
+        action="store_true",
+        help="start in the station layout: cameras, arm base, plates and bricks at sim positions",
+    )
     args = parser.parse_args()
     try:
-        ModelViewer(args.port).run()
+        ModelViewer(args.port, args.scene_config, args.station).run()
     except KeyboardInterrupt:
         pass
 
