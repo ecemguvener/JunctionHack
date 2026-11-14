@@ -1,5 +1,33 @@
 # Executed validation — 13 November 2026
 
+## Read-only deployed inspection audit — 14 November 2026
+
+On branch `codex/inspection-handoff`, added the standalone stdlib
+`scripts/audit_station.py`, offline HTML/JSON replay, a proposed provenance check,
+and `tests/test_station_audit.py`. No remote service, detector, arm settings or
+hardware commands were changed. SSH initially failed because the local alias
+had no known-host entry. Strict verification against repository-pinned keys
+succeeded; host verification was never disabled.
+
+Executed the collector through SSH stdin on Intel against existing HTTP services:
+four samples, four unique Top frames, four unique Plate frames. Replayed locally
+to `artifacts/station-audit/review-01/index.html`; raw captures remain Git-ignored.
+Observed missing result/frame provenance and an unchanged anomaly payload whose
+receive age reset. Read deployed source to verify cached-payload keepalives and
+Plate-score-to-Top-object-box publication. See `STATION_AUDIT.md` for evidence,
+limits and the proposed handoff. No classification accuracy or physical success
+was established by this audit.
+
+Focused audit/provenance tests: **24 passed**. Full-suite collection in the core
+environment is blocked by the existing optional `test_block_inspector.py`
+import of unavailable `mujoco`; this is not a failure of the new audit tests.
+No optional simulator dependencies were added to the core environment.
+The remaining suite (`pytest --ignore=tests/test_block_inspector.py`) completed:
+**164 passed, 5 skipped** (four opt-in model tests and one live simulator test).
+Repository Ruff lint, formatting (104 files) and diff whitespace checks passed.
+Checks used the existing environment with `uv run --locked --no-sync`; an initial
+automatic editable rebuild could not download Hatchling through sandbox DNS.
+
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
 Implemented `RGBDInspector` with separate modality models and explicit serial,
