@@ -1,5 +1,20 @@
 # Executed validation — 13 November 2026
 
+## Orange-board color corner candidates — 14 November 2026
+
+Fetched fresh RGB frames from both live-depth review endpoints and executed
+`scripts/orange_corners.py` on explicit manually reviewed target polygons.
+Normalized `(red-green)/(red+green+blue+1)` contrast plus Shi-Tomasi detected
+49 top-view and 64 plate-view corner candidates. Saved numbered overlays,
+contrast channels and candidate pixel coordinates under ignored
+`artifacts/orange-corner-review/`. Visual review shows pattern intersections
+and extra edge candidates. The plate image clips the right target boundary.
+These are unordered candidates, not cross-camera correspondences or evidence
+of a successful calibration; no transform or merged cloud was generated.
+The polygons are capture-specific. An irregular physical pattern can provide
+shared landmarks if correspondences are verified; standard equal-square
+checkerboard object coordinates are inappropriate for this target.
+
 ## Live D415 point-cloud review — 14 November 2026
 
 Added and deployed `scripts/live_depth.py` as a separate Intel SDK process on
