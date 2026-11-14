@@ -29,13 +29,17 @@ def test_mesh_body_round_trip():
 
 def test_upright_body_is_grip_height_above_mesh():
     for object_id, part in PARTS.items():
-        bp, bq = body_pose_from_mesh_pose(object_id, [0.25, 0, 0], matrix_to_quat(rot_z(part.mesh_yaw)))
+        bp, bq = body_pose_from_mesh_pose(
+            object_id, [0.25, 0, 0], matrix_to_quat(rot_z(part.mesh_yaw))
+        )
         assert np.allclose(bp, [0.25, 0, part.grip_z])
         assert np.allclose(quat_to_matrix(bq), np.eye(3))
 
 
 def test_state_json_round_trip_and_validation():
-    s = StationState(timestamp=1.0, bricks=[BrickState("part-001", "3437", [0, 0, 0], [1, 0, 0, 0], [1, 0, 0])])
+    s = StationState(
+        timestamp=1.0, bricks=[BrickState("part-001", "3437", [0, 0, 0], [1, 0, 0, 0], [1, 0, 0])]
+    )
     assert StationState.from_json(s.to_json()) == s
     bad = s.to_dict()
     bad["bricks"][0]["object_id"] = "part-999"

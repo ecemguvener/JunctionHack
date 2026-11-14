@@ -304,8 +304,10 @@ def board_roi(a_star, roi_override=None, min_cells: int = 6, valid=None):
             mask &= valid
         inside = a_star[mask]
         split = _otsu(inside)
-        levels = (float(np.median(inside[inside <= split])),
-                  float(np.median(inside[inside > split])))
+        levels = (
+            float(np.median(inside[inside <= split])),
+            float(np.median(inside[inside > split])),
+        )
         return mask, levels, 15.0
     high, mid = np.percentile(a_star, [99.5, 50])
     bright = a_star > 0.5 * (high + mid)
@@ -405,8 +407,12 @@ class Rectifier:
 
     def warp(self, image, interpolation=cv2.INTER_LINEAR, border=0.0) -> np.ndarray:
         return cv2.remap(
-            image, self.map_u, self.map_v, interpolation,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=border,
+            image,
+            self.map_u,
+            self.map_v,
+            interpolation,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=border,
         )
 
     def to_view(self, xy) -> np.ndarray:
@@ -461,8 +467,14 @@ def _sample_float(image, points) -> np.ndarray:
     padded = np.full((-(-count // width) * width, 2), -10.0, np.float32)
     padded[:count] = pts
     grid = padded.reshape(-1, width, 2)
-    out = cv2.remap(image.astype(np.float32), grid[..., 0].copy(), grid[..., 1].copy(),
-                    cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=float("nan"))
+    out = cv2.remap(
+        image.astype(np.float32),
+        grid[..., 0].copy(),
+        grid[..., 1].copy(),
+        cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=float("nan"),
+    )
     return out.reshape(-1)[:count]
 
 
@@ -564,8 +576,7 @@ def _check_line(a_rect, res, theta, offset, levels, min_len, step=0.5e-3):
     base = _line_points(theta, offset, s)
     side = 4.0e-3
     left, right = (
-        _classify(_sample_float(a_rect, (base + sign * side * n) / res), levels)
-        for sign in (1, -1)
+        _classify(_sample_float(a_rect, (base + sign * side * n) / res), levels) for sign in (1, -1)
     )
     differ = (left * right) == -1
     idx = np.nonzero(differ)[0]
@@ -679,8 +690,10 @@ def detect_board(
     height = float(-offset_w / normal_w[2])
     # Board region made larger by 1.5 cells, so the small dim cells at the edge are in it.
     grow = int(max(5, 1.5 * cell_px)) | 1
-    big = cv2.dilate(roi.astype(np.uint8),
-                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow))) > 0
+    big = (
+        cv2.dilate(roi.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow)))
+        > 0
+    )
     if valid is not None:
         big &= valid
     v, u = np.nonzero(big)
@@ -699,8 +712,10 @@ def detect_board(
         angles = angles[::-1]
     # Use the representative of each angle (mod pi) nearest to the reference angle, so that
     # the line offsets of the two cameras have the same sense.
-    angles = [a if math.cos(a - r) >= 0 else a - math.pi
-              for a, r in zip(angles, reference_angles, strict=True)]
+    angles = [
+        a if math.cos(a - r) >= 0 else a - math.pi
+        for a, r in zip(angles, reference_angles, strict=True)
+    ]
     a_img = np.where(np.isfinite(a_star), a_star, middle).astype(np.float32)
     inner = cv2.erode(np.isfinite(a_star).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
     edges, gx, gy = _edges(a_img, big & inner)
@@ -823,16 +838,18 @@ def _draw_rectified(view, rect: Rectifier, det: BoardDetection) -> np.ndarray:
             ends = rect.to_view(_line_points(line.theta, line.offset, line.extent))
             a, b = (tuple(int(x) for x in np.round(e)) for e in ends)
             cv2.line(image, a, b, colours[fam], 1, cv2.LINE_AA)
-            cv2.putText(image, f"{'ab'[fam]}{k}", a, cv2.FONT_HERSHEY_SIMPLEX, 0.35,
-                        colours[fam], 1)
+            cv2.putText(
+                image, f"{'ab'[fam]}{k}", a, cv2.FONT_HERSHEY_SIMPLEX, 0.35, colours[fam], 1
+            )
     return image
 
 
 def draw_detection(rgb, det: BoardDetection, extra=None) -> np.ndarray:
     """BGR image: ROI outline, grid lines, corners. ``extra``: [(pixels, BGR colour, label)]."""
     image = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2BGR)
-    contours, _ = cv2.findContours(det.roi.astype(np.uint8), cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        det.roi.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     cv2.drawContours(image, contours, -1, (255, 255, 0), 1)
     colours = [(0, 0, 255), (255, 0, 0)]
     h = image.shape[0]
@@ -846,16 +863,22 @@ def draw_detection(rgb, det: BoardDetection, extra=None) -> np.ndarray:
             t = mine @ d
             a = n * line.image[2] + d * (t.min() - 8)
             b = n * line.image[2] + d * (t.max() + 8)
-            cv2.line(image, tuple(int(x) for x in np.round(a)),
-                     tuple(int(x) for x in np.round(b)), colours[fam], 1, cv2.LINE_AA)
+            cv2.line(
+                image,
+                tuple(int(x) for x in np.round(a)),
+                tuple(int(x) for x in np.round(b)),
+                colours[fam],
+                1,
+                cv2.LINE_AA,
+            )
     for p in det.pixels:
         cv2.circle(image, tuple(int(x) for x in np.round(p)), 2, (0, 255, 0), -1)
     for row, (pixels, colour, label) in enumerate(extra or []):
         for p in pixels:
-            cv2.drawMarker(image, tuple(int(x) for x in np.round(p)), colour,
-                           cv2.MARKER_CROSS, 7, 1)
-        cv2.putText(image, label, (8, h - 10 - 16 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                    colour, 1)
+            cv2.drawMarker(
+                image, tuple(int(x) for x in np.round(p)), colour, cv2.MARKER_CROSS, 7, 1
+            )
+        cv2.putText(image, label, (8, h - 10 - 16 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1)
     return image
 
 
@@ -912,8 +935,12 @@ def object_points(frame, pose: Pose, settings) -> np.ndarray:
     (x0, x1), (y0, y1) = settings["object_box_m"]
     z0, z1 = settings["object_z_m"]
     keep = (
-        (world[:, 2] > z0) & (world[:, 2] < z1)
-        & (world[:, 0] > x0) & (world[:, 0] < x1) & (world[:, 1] > y0) & (world[:, 1] < y1)
+        (world[:, 2] > z0)
+        & (world[:, 2] < z1)
+        & (world[:, 0] > x0)
+        & (world[:, 0] < x1)
+        & (world[:, 1] > y0)
+        & (world[:, 1] < y1)
     )
     return voxel_down(world[keep], settings["voxel_m"])
 
@@ -1023,8 +1050,11 @@ def match_corners(det_a: BoardDetection, det_b: BoardDetection, world_a, world_b
     for di in range(-max_shift, max_shift + 1):
         for dj in range(-max_shift, max_shift + 1):
             key_b = {(int(i) + di, int(j) + dj): k for k, (i, j) in enumerate(det_b.index)}
-            pairs = [(k, key_b[(int(i), int(j))]) for k, (i, j) in enumerate(det_a.index)
-                     if (int(i), int(j)) in key_b]
+            pairs = [
+                (k, key_b[(int(i), int(j))])
+                for k, (i, j) in enumerate(det_a.index)
+                if (int(i), int(j)) in key_b
+            ]
             if len(pairs) < 6:
                 continue
             ia, ib = np.array(pairs).T
@@ -1081,8 +1111,9 @@ def level_cameras(frames, scene, settings) -> dict:
         intr = (frame.fx, frame.fy, frame.cx, frame.cy)
         roi = polygon_mask(frame.depth_m.shape, settings["board_roi"].get(name))
         exclude = cv2.dilate(roi.astype(np.uint8), np.ones((41, 41), np.uint8)) > 0
-        table = fit_table(frame.depth_m, intr, exclude, settings["max_range_m"],
-                          settings["table_threshold_m"])
+        table = fit_table(
+            frame.depth_m, intr, exclude, settings["max_range_m"], settings["table_threshold_m"]
+        )
         pivot = settings["overhead_pivot_xy"] if name == "overhead" else (0.3, 0.0)
         pose1 = level_pose(pose0, table, pivot)
         board = None
@@ -1097,8 +1128,7 @@ def level_cameras(frames, scene, settings) -> dict:
         out[name] = {
             "frame": frame,
             "intrinsics": intr,
-            "config_intrinsics_diff_px": round(float(np.abs(np.subtract(cfg_intr, intr)).max()),
-                                               3),
+            "config_intrinsics_diff_px": round(float(np.abs(np.subtract(cfg_intr, intr)).max()), 3),
             "table": table,
             "board": board or Plane(table.normal, table.offset - 0.003),
             "pose0": pose0,
@@ -1124,8 +1154,14 @@ def pose_change(a: Pose, b: Pose) -> dict:
     }
 
 
-def calibrate(fixture, scene_config=None, settings=None, test_fixtures=(), board_images=None,
-              out_dir: Path | None = None) -> dict:
+def calibrate(
+    fixture,
+    scene_config=None,
+    settings=None,
+    test_fixtures=(),
+    board_images=None,
+    out_dir: Path | None = None,
+) -> dict:
     """Full refinement. Returns the report (with the new poses under "proposal")."""
     settings = settings or load_settings()
     scene = load_scene_config(scene_config)
@@ -1141,10 +1177,12 @@ def calibrate(fixture, scene_config=None, settings=None, test_fixtures=(), board
     }
     for name in CAMERAS:
         report["planes"][name]["config_intrinsics_diff_px"] = cams[name][
-            "config_intrinsics_diff_px"]
+            "config_intrinsics_diff_px"
+        ]
         b = cams[name]["board"]
         report["planes"][name]["board_above_table_mm"] = round(
-            (cams[name]["table"].offset - b.offset) * 1000, 2)
+            (cams[name]["table"].offset - b.offset) * 1000, 2
+        )
 
     over, side = cams["overhead"], cams["side"]
     # Diagnostic only: register side object points (plates, bricks) onto overhead points.
@@ -1153,7 +1191,7 @@ def calibrate(fixture, scene_config=None, settings=None, test_fixtures=(), board
     yaw, shift, stats = register_xy_yaw(src, dst)
     report["object_registration"] = {
         "use": "diagnostic only: the two halves give different answers (round plates, "
-               "different visible faces), so it does not fix x, y, yaw",
+        "different visible faces), so it does not fix x, y, yaw",
         "yaw_deg": round(math.degrees(yaw), 3),
         "shift_mm": [round(v * 1000, 2) for v in shift],
         **stats,
@@ -1166,7 +1204,8 @@ def calibrate(fixture, scene_config=None, settings=None, test_fixtures=(), board
         report["board_check"] = board
         motion_ok = all(
             max(abs(v) for v in m["median_shift_px"]) < settings.get("max_motion_px", 0.5)
-            for m in board["camera_motion_vs_fixture"].values())
+            for m in board["camera_motion_vs_fixture"].values()
+        )
         if "_fit" in board and motion_ok and board["shared_corners"] >= 8:
             yaw_b, shift_b = board["_fit"]
             proposal["side"] = side["pose1"].turned(yaw_b, shift_b)
@@ -1186,35 +1225,40 @@ def calibrate(fixture, scene_config=None, settings=None, test_fixtures=(), board
         tframes = {f.camera: f for f in load_fixture(test)}
         entry = agreement(tframes, variants, settings)
         entry["camera_motion_vs_fit_fixture"] = {
-            name: camera_motion(frames[name].rgb, tframes[name].rgb) for name in CAMERAS}
+            name: camera_motion(frames[name].rgb, tframes[name].rgb) for name in CAMERAS
+        }
         tcams = level_cameras(tframes, scene, settings)
         entry["table_under_proposal"] = {
-            name: {"origin": plane_error(tcams[name]["table"], proposal[name], (0, 0)),
-                   "x0.3": plane_error(tcams[name]["table"], proposal[name], (0.3, 0))}
+            name: {
+                "origin": plane_error(tcams[name]["table"], proposal[name], (0, 0)),
+                "x0.3": plane_error(tcams[name]["table"], proposal[name], (0.3, 0)),
+            }
             for name in CAMERAS
         }
         report["cross_camera"][str(test)] = entry
 
-    report["proposal"] = {name: {**pose.as_dict(), "change": pose_change(cams[name]["pose0"],
-                                                                         pose)}
-                          for name, pose in proposal.items()}
+    report["proposal"] = {
+        name: {**pose.as_dict(), "change": pose_change(cams[name]["pose0"], pose)}
+        for name, pose in proposal.items()
+    }
     report["absolute_anchor"] = {
         "kept": "overhead x, y, yaw from the present config (SO-101 model fit, 05:09 UTC)",
         "levelling_pivot_xy": settings["overhead_pivot_xy"],
         "note": "The fixtures have no arm joint angles, and the arm and a hand hide the base. "
-                "This data cannot check x, y or yaw of the robot base frame.",
+        "This data cannot check x, y or yaw of the robot base frame.",
     }
     report["_poses"] = proposal
     report["_cams"] = cams
     return report
 
 
-
 def split_check(src, dst, side_pose=None) -> dict:
     median_y = float(np.median(src[:, 1]))
     out = {}
-    for label, fit_mask in (("fit_low_y", src[:, 1] < median_y),
-                            ("fit_high_y", src[:, 1] >= median_y)):
+    for label, fit_mask in (
+        ("fit_low_y", src[:, 1] < median_y),
+        ("fit_high_y", src[:, 1] >= median_y),
+    ):
         yaw, shift, _ = register_xy_yaw(src[fit_mask], dst)
         test = src[~fit_mask] @ rot_z(yaw).T + [shift[0], shift[1], 0]
         out[label] = {
@@ -1249,21 +1293,27 @@ def board_fit(cams, board_images, settings, out_dir) -> dict:
         rgb = rgb[..., ::-1]
         cam = cams[name]
         motion[name] = camera_motion(rgb, cam["frame"].rgb)
-        det = detect_board(rgb, cam["intrinsics"], cam["pose1"], cam["board"], name,
-                           roi_override=settings["board_roi"].get(name))
+        det = detect_board(
+            rgb,
+            cam["intrinsics"],
+            cam["pose1"],
+            cam["board"],
+            name,
+            roi_override=settings["board_roi"].get(name),
+        )
         dets[name] = det
         worlds[name] = corner_world(det, cam["intrinsics"], cam["pose1"], cam["board"])
         if out_dir is not None:
-            cv2.imwrite(str(Path(out_dir) / f"board-corners-{name}.png"),
-                        draw_detection(rgb, det))
+            cv2.imwrite(str(Path(out_dir) / f"board-corners-{name}.png"), draw_detection(rgb, det))
             cv2.imwrite(str(Path(out_dir) / f"board-topdown-{name}.png"), det.rectified)
     out: dict = {
         "images": {k: str(v) for k, v in board_images.items()},
         "camera_motion_vs_fixture": motion,
         "detections": {k: d.summary() for k, d in dets.items()},
     }
-    pairs, shift, rms, second = match_corners(dets["overhead"], dets["side"],
-                                              worlds["overhead"], worlds["side"])
+    pairs, shift, rms, second = match_corners(
+        dets["overhead"], dets["side"], worlds["overhead"], worlds["side"]
+    )
     if not pairs:
         out["result"] = "not enough shared corners"
         out["shared_corners"] = 0
@@ -1287,8 +1337,10 @@ def board_fit(cams, board_images, settings, out_dir) -> dict:
     holdout = {}
     for fam in (0, 1):
         cut = np.median(index_a[:, fam])
-        for label, train in ((f"family{fam}_low", index_a[:, fam] <= cut),
-                             (f"family{fam}_high", index_a[:, fam] > cut)):
+        for label, train in (
+            (f"family{fam}_low", index_a[:, fam] <= cut),
+            (f"family{fam}_high", index_a[:, fam] > cut),
+        ):
             if train.sum() < 4 or (~train).sum() < 2:
                 continue
             y2, s2 = rigid_fit_2d(src[train], dst[train])
@@ -1309,10 +1361,10 @@ def evaluate_board(out, cams, variants) -> None:
     dets, ia, ib = out["_pairs"]
     cam_o, cam_s = cams["overhead"], cams["side"]
     for label, (pose_o, pose_s) in variants.items():
-        wo = pose_o.to_world(cam_o["board"].intersect(dets["overhead"].pixels[ia],
-                                                       cam_o["intrinsics"]))
-        ws = pose_s.to_world(cam_s["board"].intersect(dets["side"].pixels[ib],
-                                                       cam_s["intrinsics"]))
+        wo = pose_o.to_world(
+            cam_o["board"].intersect(dets["overhead"].pixels[ia], cam_o["intrinsics"])
+        )
+        ws = pose_s.to_world(cam_s["board"].intersect(dets["side"].pixels[ib], cam_s["intrinsics"]))
         diff = (ws - wo) * 1000
         reproj = pose_s.project(wo, cam_s["intrinsics"]) - dets["side"].pixels[ib]
         out[label] = {
@@ -1324,8 +1376,12 @@ def evaluate_board(out, cams, variants) -> None:
 
 def _stats(values) -> dict:
     v = np.asarray(values, float)
-    return {"median": round(float(np.median(v)), 2), "p90": round(float(np.percentile(v, 90)), 2),
-            "max": round(float(v.max()), 2), "n": int(len(v))}
+    return {
+        "median": round(float(np.median(v)), 2),
+        "p90": round(float(np.percentile(v, 90)), 2),
+        "max": round(float(v.max()), 2),
+        "n": int(len(v)),
+    }
 
 
 # ------------------------------------------------------------------------------- outputs
@@ -1360,8 +1416,14 @@ def write_scene_poses(path: Path, poses: dict, note: str) -> None:
     """
     lines = Path(path).read_text().splitlines(keepends=True)
     for name, pose in poses.items():
-        start = next((i for i, line in enumerate(lines)
-                      if re.match(rf"^  {re.escape(name)}:\s*(#.*)?$", line)), None)
+        start = next(
+            (
+                i
+                for i, line in enumerate(lines)
+                if re.match(rf"^  {re.escape(name)}:\s*(#.*)?$", line)
+            ),
+            None,
+        )
         if start is None:
             raise ValueError(f"{path}: camera entry '{name}' not found.")
         end = start + 1
@@ -1373,8 +1435,11 @@ def write_scene_poses(path: Path, poses: dict, note: str) -> None:
             if not match:
                 continue
             key = match.group(2)
-            value = (_fmt(pose.position, 4) if key == "pos" else
-                     "[" + ", ".join(_fmt(row, 5) for row in pose.rotation) + "]")
+            value = (
+                _fmt(pose.position, 4)
+                if key == "pos"
+                else "[" + ", ".join(_fmt(row, 5) for row in pose.rotation) + "]"
+            )
             lines[i] = f"{match.group(1)}{key}: {value}\n"
             done.add(key)
         if done != {"pos", "rotation_cv"}:
@@ -1402,19 +1467,24 @@ def proposal_yaml(report, cams) -> str:
     ]
     for name in CAMERAS:
         b = planes[name]["before"]["origin"]
-        lines.append(f"# {name}: table before: tilt {b['tilt_deg']} deg, height at origin "
-                     f"{b['height_mm']} mm; after: 0 deg, 0 mm. Plane rms "
-                     f"{planes[name]['fit']['rms_mm']} mm.")
+        lines.append(
+            f"# {name}: table before: tilt {b['tilt_deg']} deg, height at origin "
+            f"{b['height_mm']} mm; after: 0 deg, 0 mm. Plane rms "
+            f"{planes[name]['fit']['rms_mm']} mm."
+        )
     for key, entry in fit.items():
         lines.append(
             f"# Cross-camera objects {Path(key).name}: median NN "
             f"{entry['present']['side_to_overhead'].get('median_mm')} mm (present) -> "
-            f"{entry['proposal']['side_to_overhead'].get('median_mm')} mm (proposal).")
+            f"{entry['proposal']['side_to_overhead'].get('median_mm')} mm (proposal)."
+        )
     if "board_check" in report and "proposal" in report["board_check"]:
         bc = report["board_check"]
-        lines.append(f"# Board corner check ({bc['shared_corners']} corners): median distance "
-                     f"{bc['present']['corner_distance_mm']['median']} mm (present) -> "
-                     f"{bc['proposal']['corner_distance_mm']['median']} mm (proposal).")
+        lines.append(
+            f"# Board corner check ({bc['shared_corners']} corners): median distance "
+            f"{bc['present']['corner_distance_mm']['median']} mm (present) -> "
+            f"{bc['proposal']['corner_distance_mm']['median']} mm (proposal)."
+        )
     lines.append("cameras:")
     for name in CAMERAS:
         lines += camera_entry_lines(name, poses[name], cams[name]["intrinsics"])
@@ -1429,8 +1499,10 @@ def overlay_image(frames, variants, settings, title) -> np.ndarray:
     w, h = int((y1 - y0) / res), int((x1 - x0) / res)
     for label, (pose_o, pose_s) in variants.items():
         panel = np.full((h, w, 3), 255, np.uint8)
-        for frame, pose, colour in ((frames["overhead"], pose_o, (200, 0, 200)),
-                                    (frames["side"], pose_s, (0, 160, 0))):
+        for frame, pose, colour in (
+            (frames["overhead"], pose_o, (200, 0, 200)),
+            (frames["side"], pose_s, (0, 160, 0)),
+        ):
             pts = object_points(frame, pose, settings)
             col = ((y1 - pts[:, 1]) / res).astype(int)  # image right = world -y
             row = ((x1 - pts[:, 0]) / res).astype(int)  # image down = world -x
@@ -1440,8 +1512,15 @@ def overlay_image(frames, variants, settings, title) -> np.ndarray:
         panels.append(panel)
     image = np.hstack([np.pad(p, ((0, 0), (0, 4), (0, 0))) for p in panels])
     bar = np.full((22, image.shape[1], 3), 255, np.uint8)
-    cv2.putText(bar, title + "  (magenta: overhead, green: side; top = +x, right = -y)", (5, 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 1)
+    cv2.putText(
+        bar,
+        title + "  (magenta: overhead, green: side; top = +x, right = -y)",
+        (5, 15),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
+        (0, 0, 0),
+        1,
+    )
     return np.vstack([bar, image])
 
 
@@ -1454,8 +1533,10 @@ def save_outputs(report, out_dir: Path, settings, test_fixtures) -> None:
     report.pop("_poses")
     board = report.get("board_check", {})
     pairs = board.pop("_pairs", None)
-    variants = {"present": (cams["overhead"]["pose0"], cams["side"]["pose0"]),
-                "proposal": (poses["overhead"], poses["side"])}
+    variants = {
+        "present": (cams["overhead"]["pose0"], cams["side"]["pose0"]),
+        "proposal": (poses["overhead"], poses["side"]),
+    }
     for fixture in [report["fixture"], *map(str, test_fixtures)]:
         frames = {f.camera: f for f in load_fixture(fixture)}
         image = overlay_image(frames, variants, settings, Path(fixture).name)
@@ -1472,8 +1553,9 @@ def save_outputs(report, out_dir: Path, settings, test_fixtures) -> None:
         ):
             px = pose_s.project(pose_o.to_world(wo), cam_s["intrinsics"])
             extra.append((px, colour, f"overhead corners in side image: {label}"))
-        cv2.imwrite(str(out_dir / "board-reprojection-side.png"),
-                    draw_detection(rgb, dets["side"], extra))
+        cv2.imwrite(
+            str(out_dir / "board-reprojection-side.png"), draw_detection(rgb, dets["side"], extra)
+        )
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, default=_json) + "\n")
 
 
@@ -1486,19 +1568,33 @@ def _json(value):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m brickcell.twin.calibrate",
-                                     description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="python -m brickcell.twin.calibrate", description=__doc__.split("\n\n")[0]
+    )
     parser.add_argument("--fixture", type=Path, required=True, help="fixture for the fit")
-    parser.add_argument("--test-fixture", type=Path, action="append", default=[],
-                        help="held-out fixture (same camera poses); may repeat")
+    parser.add_argument(
+        "--test-fixture",
+        type=Path,
+        action="append",
+        default=[],
+        help="held-out fixture (same camera poses); may repeat",
+    )
     parser.add_argument("--scene-config", type=Path, default=SCENE_CONFIG_PATH)
     parser.add_argument("--twin-config", type=Path, default=TWIN_CONFIG)
     parser.add_argument("--out", type=Path, default=REPO / "artifacts/twin-dev/calibration")
-    parser.add_argument("--board-image", action="append", default=[], metavar="CAMERA=PATH",
-                        help="colour image of the clear board from the same camera pose; "
-                             "used only as an independent check, not for the proposal")
-    parser.add_argument("--write", action="store_true",
-                        help="write the new overhead and side poses into --scene-config")
+    parser.add_argument(
+        "--board-image",
+        action="append",
+        default=[],
+        metavar="CAMERA=PATH",
+        help="colour image of the clear board from the same camera pose; "
+        "used only as an independent check, not for the proposal",
+    )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="write the new overhead and side poses into --scene-config",
+    )
     args = parser.parse_args(argv)
     settings = load_settings(args.twin_config)
     board_images = None
@@ -1507,24 +1603,33 @@ def main(argv=None) -> int:
         if set(board_images) != set(CAMERAS):
             parser.error("--board-image needs overhead=PATH and side=PATH")
     args.out.mkdir(parents=True, exist_ok=True)
-    report = calibrate(args.fixture, args.scene_config, settings, args.test_fixture,
-                       board_images, args.out)
+    report = calibrate(
+        args.fixture, args.scene_config, settings, args.test_fixture, board_images, args.out
+    )
     poses = report["_poses"]
     save_outputs(report, args.out, settings, args.test_fixture)
     if args.write:
-        note = (f"{report['time_utc']} by brickcell.twin.calibrate from "
-                f"{Path(report['fixture']).name}: table planes + "
-                f"{report['side_xy_yaw_source']}; "
-                "see artifacts/twin-dev/calibration/report.json.")
+        note = (
+            f"{report['time_utc']} by brickcell.twin.calibrate from "
+            f"{Path(report['fixture']).name}: table planes + "
+            f"{report['side_xy_yaw_source']}; "
+            "see artifacts/twin-dev/calibration/report.json."
+        )
         write_scene_poses(args.scene_config, poses, note)
     summary = {
-        "planes": {k: {"before": v["before"]["origin"], "pose_change": v["pose_change"]}
-                   for k, v in report["planes"].items()},
+        "planes": {
+            k: {"before": v["before"]["origin"], "pose_change": v["pose_change"]}
+            for k, v in report["planes"].items()
+        },
         "side_xy_yaw_source": report["side_xy_yaw_source"],
         "board_fit_residual_mm": report.get("board_check", {}).get("fit_residual_mm"),
-        "cross_camera": {Path(k).name: {lab: e[lab]["side_to_overhead"].get("median_mm")
-                                        for lab in ("present", "levelled_only", "proposal")}
-                         for k, e in report["cross_camera"].items()},
+        "cross_camera": {
+            Path(k).name: {
+                lab: e[lab]["side_to_overhead"].get("median_mm")
+                for lab in ("present", "levelled_only", "proposal")
+            }
+            for k, e in report["cross_camera"].items()
+        },
         "out": str(args.out),
     }
     print(json.dumps(summary, indent=1))

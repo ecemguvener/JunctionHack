@@ -18,9 +18,21 @@ from brickcell.twin.state import BrickState, PlateState, StationState, load_fixt
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "artifacts" / "twin-fixtures" / "fixture-001"
-SNAPSHOT = {"timestamp_utc": "2026-11-14T04:44:15+00:00", "arms": {"follower": {"joints": {
-    "shoulder_pan": {"raw": 1970}, "shoulder_lift": {"raw": 1246}, "elbow_flex": {"raw": 2992},
-    "wrist_flex": {"raw": 2263}, "wrist_roll": {"raw": 3217}, "gripper": {"raw": 1465}}}}}
+SNAPSHOT = {
+    "timestamp_utc": "2026-11-14T04:44:15+00:00",
+    "arms": {
+        "follower": {
+            "joints": {
+                "shoulder_pan": {"raw": 1970},
+                "shoulder_lift": {"raw": 1246},
+                "elbow_flex": {"raw": 2992},
+                "wrist_flex": {"raw": 2263},
+                "wrist_roll": {"raw": 3217},
+                "gripper": {"raw": 1465},
+            }
+        }
+    },
+}
 
 pytestmark = pytest.mark.skipif(not FIXTURE.is_dir(), reason="fixture-001 is not there")
 
@@ -50,8 +62,17 @@ def one_brick(frames, scene, config):
     assert all(f.depth_m.dtype == np.float32 and f.rgb.shape == (480, 640, 3) for f in frames)
     return StationState(
         timestamp=0.0,
-        bricks=[BrickState("part-001", "3437", [0.25, 0.0, 0.0], [1, 0, 0, 0], [0.8, 0.1, 0.1],
-                           confidence=0.9, cameras=["overhead"])],
+        bricks=[
+            BrickState(
+                "part-001",
+                "3437",
+                [0.25, 0.0, 0.0],
+                [1, 0, 0, 0],
+                [0.8, 0.1, 0.1],
+                confidence=0.9,
+                cameras=["overhead"],
+            )
+        ],
         plates=[PlateState("good", [0.25, -0.22, 0.0], 0.8)],
         diagnostics={"perception": {"ok": True}},
     )
@@ -59,14 +80,20 @@ def one_brick(frames, scene, config):
 
 def start(tmp_path, perception, arm_file=None, frames=None):
     config = station.load_station_config(
-        None, {"port": 0, "record_dir": str(tmp_path / "rec"), "frames": frames})
+        None, {"port": 0, "record_dir": str(tmp_path / "rec"), "frames": frames}
+    )
     arm_reader = None
     if arm_file:
         from brickcell.twin.arm import make_arm_reader
 
         arm_reader = make_arm_reader("file", arm_file, config)
-    st = station.Station(realsense.FixtureSource(FIXTURE), load_scene_config(), config,
-                         arm_reader, FakePerception(perception))
+    st = station.Station(
+        realsense.FixtureSource(FIXTURE),
+        load_scene_config(),
+        config,
+        arm_reader,
+        FakePerception(perception),
+    )
     st.open()
     server = station.serve(st, "127.0.0.1", 0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -87,8 +114,9 @@ def get(url, raw=False):
 
 
 def post(url, body):
-    req = urllib.request.Request(url, json.dumps(body).encode(), method="POST",
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        url, json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.status, json.loads(r.read())
@@ -131,19 +159,28 @@ def test_replay_http_end_to_end(tmp_path):
         n = get(url + "/health")["snapshots"]
         get(url + "/state?fresh=1")
         assert get(url + "/health")["snapshots"] == n + 1
-        for path, ctype in (("/frame/overhead.jpg", "image/jpeg"), ("/depth/side.png", "image/png"),
-                            ("/overlay/overhead.jpg", "image/jpeg"), ("/", "text/html")):
+        for path, ctype in (
+            ("/frame/overhead.jpg", "image/jpeg"),
+            ("/depth/side.png", "image/png"),
+            ("/overlay/overhead.jpg", "image/jpeg"),
+            ("/", "text/html"),
+        ):
             status, got, body = get(url + path, raw=True)
             assert status == 200 and got == ctype and len(body) > 100
         frame = cv2.imdecode(np.frombuffer(get(url + "/frame/overhead.jpg", True)[2], np.uint8), 1)
-        overlay = cv2.imdecode(np.frombuffer(get(url + "/overlay/overhead.jpg", True)[2], np.uint8), 1)
+        overlay = cv2.imdecode(
+            np.frombuffer(get(url + "/overlay/overhead.jpg", True)[2], np.uint8), 1
+        )
         assert frame.shape == overlay.shape == (480, 640, 3)
         assert np.abs(frame.astype(int) - overlay.astype(int)).sum() > 1000  # something drawn
         with pytest.raises(urllib.error.HTTPError) as err:
             get(url + "/frame/nope.jpg")
         assert err.value.code == 404
         assert post(url + "/live", {"enabled": True, "hz": 5})[0] == 400
-        assert post(url + "/live", {"enabled": True, "hz": 2}) == (200, {"enabled": True, "hz": 2.0})
+        assert post(url + "/live", {"enabled": True, "hz": 2}) == (
+            200,
+            {"enabled": True, "hz": 2.0},
+        )
         assert post(url + "/live", {"enabled": False}) == (200, {"enabled": False, "hz": 2.0})
     finally:
         stop()
@@ -165,8 +202,21 @@ def test_record_round_trip(tmp_path):
     meta = json.loads((tmp_path / "rec" / "fixture-001" / "meta.json").read_text())
     original = json.loads((FIXTURE / "meta.json").read_text())
     for cam in ("overhead", "side"):
-        for key in ("serial", "depth_scale_m", "width", "height", "fx", "fy", "cx", "cy",
-                    "distortion_model", "coeffs", "depth_stream", "frames", "firmware"):
+        for key in (
+            "serial",
+            "depth_scale_m",
+            "width",
+            "height",
+            "fx",
+            "fy",
+            "cx",
+            "cy",
+            "distortion_model",
+            "coeffs",
+            "depth_stream",
+            "frames",
+            "firmware",
+        ):
             assert meta[cam][key] == original[cam][key], (cam, key)
         a = np.load(FIXTURE / f"{cam}.npz")
         b = np.load(tmp_path / "rec" / "fixture-001" / f"{cam}.npz")
@@ -179,8 +229,10 @@ def test_record_round_trip(tmp_path):
 
 
 def test_missing_or_failing_perception_still_serves(tmp_path):
-    for behaviour, status, text in (("missing", "missing", "perception module missing"),
-                                    ("raise", "error", "RuntimeError: no plane found")):
+    for behaviour, status, text in (
+        ("missing", "missing", "perception module missing"),
+        ("raise", "error", "RuntimeError: no plane found"),
+    ):
         st, url, stop = start(tmp_path / behaviour, behaviour)
         try:
             state = StationState.from_dict(get(url + "/state?fresh=1"))
@@ -220,8 +272,9 @@ class FakeRs(types.ModuleType):
         self.format = types.SimpleNamespace(rgb8="rgb8", z16="z16")
         devices = [types.SimpleNamespace(get_info=lambda _k, s=s: s) for s in serials]
         self.context = lambda: types.SimpleNamespace(query_devices=lambda: devices)
-        self.config = lambda: types.SimpleNamespace(enable_device=lambda s: None,
-                                                    enable_stream=lambda *a: None)
+        self.config = lambda: types.SimpleNamespace(
+            enable_device=lambda s: None, enable_stream=lambda *a: None
+        )
 
         def start(config):
             raise RuntimeError(error)

@@ -92,7 +92,11 @@ def load_station_config(path: str | Path | None = None, overrides: dict | None =
     unknown = sorted(set(section) - set(DEFAULTS))
     if unknown:
         raise ValueError(f"{path}: unknown station keys {unknown}. Allowed: {sorted(DEFAULTS)}")
-    config = {**DEFAULTS, **section, **{k: v for k, v in (overrides or {}).items() if v is not None}}
+    config = {
+        **DEFAULTS,
+        **section,
+        **{k: v for k, v in (overrides or {}).items() if v is not None},
+    }
     config["live_hz"] = min(float(config["live_hz"]), MAX_LIVE_HZ)
     return config
 
@@ -167,16 +171,28 @@ def intrinsics_check(scene: SceneConfig, name: str, intrinsics: dict, tolerance:
     worst = max(abs(v) for v in diff.values())
     ok = worst <= tolerance and size_ok
     if not ok:
-        log.warning("camera %s: SDK intrinsics differ from %s by %.2f px (size ok: %s): %s",
-                    name, scene.source, worst, size_ok, diff)
+        log.warning(
+            "camera %s: SDK intrinsics differ from %s by %.2f px (size ok: %s): %s",
+            name,
+            scene.source,
+            worst,
+            size_ok,
+            diff,
+        )
     else:
         log.info("camera %s: SDK intrinsics match %s (max diff %.3f px)", name, scene.source, worst)
     return {"ok": ok, "max_diff_px": round(worst, 3), "diff_px": diff, "size_ok": size_ok}
 
 
 class Station:
-    def __init__(self, source, scene: SceneConfig, config: dict, arm_reader=None,
-                 perception: Perception | None = None):
+    def __init__(
+        self,
+        source,
+        scene: SceneConfig,
+        config: dict,
+        arm_reader=None,
+        perception: Perception | None = None,
+    ):
         self.source = source
         self.scene = scene
         self.config = config
@@ -278,8 +294,14 @@ class Station:
             self.arm_details = arm_details
             self.snapshots += 1
             self.last_snapshot_wall = time.time()
-        log.info("snapshot %d: grab %.2f s, perception %.2f s (%s), total %.2f s",
-                 self.snapshots, t1 - t0, t3 - t2, self.perception.status, t4 - t0)
+        log.info(
+            "snapshot %d: grab %.2f s, perception %.2f s (%s), total %.2f s",
+            self.snapshots,
+            t1 - t0,
+            t3 - t2,
+            self.perception.status,
+            t4 - t0,
+        )
         return state
 
     def _camera_info(self, cap: RawCapture, frame: RGBDFrame) -> dict:
@@ -342,8 +364,9 @@ class Station:
 
     # -- record
 
-    def record(self, directory: str | Path | None = None, name: str | None = None,
-               fresh: bool = False) -> dict:
+    def record(
+        self, directory: str | Path | None = None, name: str | None = None, fresh: bool = False
+    ) -> dict:
         if fresh or not self.captures:
             self.snapshot()
         with self.data_lock:
@@ -361,8 +384,11 @@ class Station:
             extra["arm"] = {**state.arm.__dict__, "details": self.arm_details}
         path = save_fixture(directory, captures, extra)
         log.info("recorded fixture %s", path)
-        return {"path": str(path), "cameras": sorted(captures),
-                "frames": {n: int(len(c.rgb)) for n, c in captures.items()}}
+        return {
+            "path": str(path),
+            "cameras": sorted(captures),
+            "frames": {n: int(len(c.rgb)) for n, c in captures.items()},
+        }
 
     # -- health
 
@@ -386,7 +412,9 @@ class Station:
 
 def next_fixture_dir(base: Path) -> Path:
     numbers = [
-        int(m.group(1)) for p in base.glob("fixture-*") if (m := re.fullmatch(r"fixture-(\d+)", p.name))
+        int(m.group(1))
+        for p in base.glob("fixture-*")
+        if (m := re.fullmatch(r"fixture-(\d+)", p.name))
     ]
     return base / f"fixture-{max(numbers, default=0) + 1:03d}"
 
@@ -412,8 +440,9 @@ def project_points(points, camera_pos, rotation_cv, fx, fy, cx, cy):
     return pixels, z > 1e-6
 
 
-def draw_overlay(frame: RGBDFrame, state: StationState | None, scene: SceneConfig,
-                 axis_m: float = 0.03) -> np.ndarray:
+def draw_overlay(
+    frame: RGBDFrame, state: StationState | None, scene: SceneConfig, axis_m: float = 0.03
+) -> np.ndarray:
     """BGR image: the state projected into the colour frame with the scene camera pose."""
     image = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2BGR)
     camera = scene.cameras.get(frame.camera)
@@ -530,7 +559,8 @@ def make_handler(station: Station):
                     rows = "".join(
                         f"<p>{c}: <img src=/frame/{c}.jpg width=320> "
                         f"<img src=/depth/{c}.png width=320> "
-                        f"<img src=/overlay/{c}.jpg width=320></p>" for c in station.source.cameras
+                        f"<img src=/overlay/{c}.jpg width=320></p>"
+                        for c in station.source.cameras
                     )
                     return self._send(200, INDEX.format(rows=rows).encode(), "text/html")
                 if path == "/health":
@@ -548,8 +578,12 @@ def make_handler(station: Station):
                         near, far = station.config["depth_range_m"]
                         image = colourise_depth(frame.depth_m, float(near), float(far))
                     else:
-                        image = draw_overlay(frame, station.state, station.scene,
-                                             float(station.config["overlay_axis_m"]))
+                        image = draw_overlay(
+                            frame,
+                            station.state,
+                            station.scene,
+                            float(station.config["overlay_axis_m"]),
+                        )
                     return self._image(image, "." + ext)
                 return self._error(404, f"no route {path}")
             except KeyError as exc:
@@ -569,8 +603,11 @@ def make_handler(station: Station):
                         raise ValueError('give {"enabled": true|false, "hz": <= 2}')
                     return self._json(station.set_live(bool(body["enabled"]), body.get("hz")))
                 if path == "/record":
-                    return self._json(station.record(body.get("dir"), body.get("name"),
-                                                     bool(body.get("fresh", False))))
+                    return self._json(
+                        station.record(
+                            body.get("dir"), body.get("name"), bool(body.get("fresh", False))
+                        )
+                    )
                 return self._error(404, f"no route {path}")
             except (ValueError, FileExistsError) as exc:
                 return self._error(400, str(exc))
@@ -595,8 +632,13 @@ def serve(station: Station, host: str, port: int) -> ThreadingHTTPServer:
 def build_station(args) -> Station:
     config = load_station_config(
         args.config,
-        {"port": args.port, "frames": args.frames, "record_dir": args.record_dir,
-         "arm_source": "none" if args.no_arm else args.arm_source, "arm_file": args.arm_file},
+        {
+            "port": args.port,
+            "frames": args.frames,
+            "record_dir": args.record_dir,
+            "arm_source": "none" if args.no_arm else args.arm_source,
+            "arm_file": args.arm_file,
+        },
     )
     scene = load_scene_config(args.scene_config)
     if args.fixture:
@@ -623,16 +665,19 @@ def parse_args(argv=None):
     parser.add_argument("--arm-file", type=Path, help="JSON file for --arm-source file")
     parser.add_argument("--frames", type=int, help="frames per snapshot (default 10)")
     parser.add_argument("--record-dir", type=Path, help="folder for POST /record fixtures")
-    parser.add_argument("--no-initial-snapshot", action="store_true",
-                        help="do not take a snapshot at start")
+    parser.add_argument(
+        "--no-initial-snapshot", action="store_true", help="do not take a snapshot at start"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     try:
         station = build_station(args)
         station.open()
@@ -649,8 +694,13 @@ def main(argv=None) -> int:
         station.close()
         return 2
     host, port = server.server_address[:2]
-    log.info("station service on http://%s:%s (mode %s, arm %s)", host, port,
-             station.source.mode, station.config["arm_source"])
+    log.info(
+        "station service on http://%s:%s (mode %s, arm %s)",
+        host,
+        port,
+        station.source.mode,
+        station.config["arm_source"],
+    )
 
     def stop(signum, frame):
         raise KeyboardInterrupt

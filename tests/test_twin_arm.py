@@ -83,8 +83,11 @@ def test_recorded_snapshot_to_cad_and_mujoco():
 
 def test_tick_layouts_and_file_reader(tmp_path):
     expected, _ = arm.ticks_from_json(SNAPSHOT)
-    armd = {"arm": "follower", "timestamp": 12.5,
-            "joints": {n: {"name": n, "position": int(v)} for n, v in expected.items()}}
+    armd = {
+        "arm": "follower",
+        "timestamp": 12.5,
+        "joints": {n: {"name": n, "position": int(v)} for n, v in expected.items()},
+    }
     assert arm.ticks_from_json(armd) == (expected, 12.5)
     assert arm.ticks_from_json({"joints": expected}) == (expected, 0.0)
     path = tmp_path / "joints.json"
@@ -112,8 +115,13 @@ def test_armd_reader_uses_state_endpoint():
 
         def do_GET(self):  # noqa: N802
             seen.append(("GET", self.path))
-            body = json.dumps({"arm": "follower", "timestamp": 5.0, "joints": {
-                n: {"position": int(v)} for n, v in expected.items()}}).encode()
+            body = json.dumps(
+                {
+                    "arm": "follower",
+                    "timestamp": 5.0,
+                    "joints": {n: {"position": int(v)} for n, v in expected.items()},
+                }
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -146,11 +154,21 @@ def test_gripper_and_wrap():
 
 
 def _rpy(r, p, y):
-    cr, sr, cp, sp, cy, sy = (math.cos(r), math.sin(r), math.cos(p), math.sin(p),
-                              math.cos(y), math.sin(y))
-    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-                     [-sp, cp * sr, cp * cr]])
+    cr, sr, cp, sp, cy, sy = (
+        math.cos(r),
+        math.sin(r),
+        math.cos(p),
+        math.sin(p),
+        math.cos(y),
+        math.sin(y),
+    )
+    return np.array(
+        [
+            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr],
+        ]
+    )
 
 
 def _axis_rotation(axis, angle):
@@ -172,11 +190,20 @@ class UrdfChain:
             t[:3, 3] = [float(v) for v in o.get("xyz").split()]
             axis = j.find("axis")
             axis = [float(v) for v in axis.get("xyz").split()] if axis is not None else None
-            self.joints.append((j.get("name"), j.get("type"), j.find("parent").get("link"),
-                                j.find("child").get("link"), t, axis))
+            self.joints.append(
+                (
+                    j.get("name"),
+                    j.get("type"),
+                    j.find("parent").get("link"),
+                    j.find("child").get("link"),
+                    t,
+                    axis,
+                )
+            )
         children = {j[3] for j in self.joints}
-        self.root = next(x.get("name") for x in root.findall("link")
-                         if x.get("name") not in children)
+        self.root = next(
+            x.get("name") for x in root.findall("link") if x.get("name") not in children
+        )
 
     def frames(self, q: dict) -> dict:
         out, todo = {self.root: np.eye(4)}, list(self.joints)
@@ -195,8 +222,9 @@ class UrdfChain:
 
 
 # Joint order of tools/so101_kinematics.ARM_JOINTS: CAD joint -> servo joint.
-CAD_JOINTS = dict(zip(("Revolute_1", "Revolute_2", "Revolute_3", "Revolute_2_5", "Revolute_4"),
-                      ARM_JOINTS))
+CAD_JOINTS = dict(
+    zip(("Revolute_1", "Revolute_2", "Revolute_3", "Revolute_2_5", "Revolute_4"), ARM_JOINTS)
+)
 # Points fixed in the wrist-roll link. The CAD link "Body3" and the Menagerie body "gripper"
 # have the same frame: the moving-jaw hinge is at (0.0202, ~0.019, -0.0234) in both.
 GRIPPER_POINTS = {
@@ -263,8 +291,10 @@ def world_model(tmp_path_factory):
 def test_cad_to_mujoco_fk_agreement(world_model):
     err, rot = fk_agreement(world_model)
     tcp = err[:, 1]
-    print(f"FK agreement over {len(err)} configs: TCP mean {tcp.mean():.2f} mm, "
-          f"max {tcp.max():.2f} mm; all points max {err.max():.2f} mm")
+    print(
+        f"FK agreement over {len(err)} configs: TCP mean {tcp.mean():.2f} mm, "
+        f"max {tcp.max():.2f} mm; all points max {err.max():.2f} mm"
+    )
     # Measured: TCP mean 1.0 mm, max 2.6 mm (small link-length differences of the two models).
     assert tcp.mean() < 1.5 and tcp.max() < 3.5 and err.max() < 3.5
     # Both base frames have +Z up (the base transform is a turn about Z only).

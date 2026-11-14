@@ -60,8 +60,10 @@ def median_depth(depth_raw: np.ndarray, depth_scale_m: float) -> np.ndarray:
     first = n - count
     lo = np.take_along_axis(ordered, (first + (count - 1) // 2).clip(0, n - 1)[None], 0)[0]
     hi = np.take_along_axis(ordered, (first + count // 2).clip(0, n - 1)[None], 0)[0]
-    med = (lo.astype(np.float32) * np.float32(depth_scale_m) + hi.astype(np.float32)
-           * np.float32(depth_scale_m)) / np.float32(2)
+    med = (
+        lo.astype(np.float32) * np.float32(depth_scale_m)
+        + hi.astype(np.float32) * np.float32(depth_scale_m)
+    ) / np.float32(2)
     med[count < max(1, n // 2)] = 0
     return med.astype(np.float32)
 
@@ -165,8 +167,19 @@ class FixtureSource:
                 depth=depth,
                 timestamps_ms=np.asarray(stamps, float),
                 depth_scale_m=float(info["depth_scale_m"]),
-                intrinsics={k: info.get(k) for k in (
-                    "width", "height", "fx", "fy", "cx", "cy", "distortion_model", "coeffs")},
+                intrinsics={
+                    k: info.get(k)
+                    for k in (
+                        "width",
+                        "height",
+                        "fx",
+                        "fy",
+                        "cx",
+                        "cy",
+                        "distortion_model",
+                        "coeffs",
+                    )
+                },
                 firmware=str(info.get("firmware", "")),
             )
         if not self.captures:
@@ -186,8 +199,9 @@ class FixtureSource:
 class RealSenseCamera:
     """One D415, opened by SDK serial. Colour 640x480 rgb8 + depth 1280x720 z16 at 30 fps."""
 
-    def __init__(self, name: str, serial: str, fps: int = 30, warmup: int = 45,
-                 timeout_ms: int = 5000):
+    def __init__(
+        self, name: str, serial: str, fps: int = 30, warmup: int = 45, timeout_ms: int = 5000
+    ):
         self.name, self.serial, self.fps = name, serial, fps
         self.warmup, self.timeout_ms = warmup, timeout_ms
         self.pipeline = None
@@ -226,8 +240,14 @@ class RealSenseCamera:
         stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
         k = stream.get_intrinsics()
         self.intrinsics = {
-            "width": k.width, "height": k.height, "fx": k.fx, "fy": k.fy, "cx": k.ppx,
-            "cy": k.ppy, "distortion_model": str(k.model), "coeffs": list(k.coeffs),
+            "width": k.width,
+            "height": k.height,
+            "fx": k.fx,
+            "fy": k.fy,
+            "cx": k.ppx,
+            "cy": k.ppy,
+            "distortion_model": str(k.model),
+            "coeffs": list(k.coeffs),
         }
         self.align = rs.align(rs.stream.color)
         self.pipeline = pipeline
@@ -278,7 +298,9 @@ class RealSenseSource:
 
     def __init__(self, serials: dict[str, str] | None = None, warmup: int = 45, fps: int = 30):
         serials = serials or CAMERA_SERIALS
-        self.devices = {n: RealSenseCamera(n, s, fps=fps, warmup=warmup) for n, s in serials.items()}
+        self.devices = {
+            n: RealSenseCamera(n, s, fps=fps, warmup=warmup) for n, s in serials.items()
+        }
         self.cameras = list(self.devices)
         self.lock = threading.Lock()
 
@@ -287,8 +309,13 @@ class RealSenseSource:
         try:
             for name, device in self.devices.items():
                 intrinsics[name] = device.open()
-                log.info("camera %s serial %s firmware %s intrinsics %s", name, device.serial,
-                         device.firmware, intrinsics[name])
+                log.info(
+                    "camera %s serial %s firmware %s intrinsics %s",
+                    name,
+                    device.serial,
+                    device.firmware,
+                    intrinsics[name],
+                )
         except Exception:
             self.close()
             raise

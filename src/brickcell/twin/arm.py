@@ -248,7 +248,11 @@ class ArmReader:
     def read(self) -> tuple[ArmState, dict]:
         ticks, stamp = self.ticks()
         return convert_ticks(
-            ticks, self.cal, stamp or time.time(), self.source, self.gripper_closed,
+            ticks,
+            self.cal,
+            stamp or time.time(),
+            self.source,
+            self.gripper_closed,
             self.gripper_open,
         )
 
@@ -366,4 +370,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
