@@ -1,5 +1,20 @@
 # Executed validation — 13 November 2026
 
+## Labelled board registration review — 14 November 2026
+
+Retrieved fresh RGB/point packets for the A/B/C/D labelled board under ignored
+`artifacts/labelled-board-review/`. Labels permit manual verification of the
+physical corner order. Extended the pilot script to accept explicit directory
+and corresponding pixel JSON, validate shapes, and retain pixels/SDK serials.
+Refitting yielded corner residuals 12.47, 22.14, 6.57 and 35.46 mm; registration
+remains `accepted: false`. Estimated board edge lengths differ between cameras
+by up to about 36 mm despite small plane residuals (1.31 mm top, 0.74 mm plate).
+Small plane residuals alone therefore do not establish metric registration.
+No cause was isolated; manual pixel selection, grazing view, uncorrected
+distortion and depth error remain possible contributors. The new provisional
+cloud is for review only; no live or robot transform was applied. A tilted
+board observation is the next planned check.
+
 ## Provisional orange-board outline registration — 14 November 2026
 
 After the operator repositioned the board, both full outlines were visible.
