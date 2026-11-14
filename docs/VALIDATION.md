@@ -1229,4 +1229,38 @@ Extended the simulated cell to three IKEA KALAS plates (`source` aquamarine blue
 - All 8-block clutter perception, contact-friction grasps, OpenVINO raw-distance evaluations, `Supervisor` cycles, and multi-node BabyROS runs above use **synthetic MuJoCo 4.0.1 simulation data**, not physical defect-detection accuracy, physical grasp reliability, or Intel GPU/NPU/XPU hardware benchmarks.
 - Physical bench connection (`ssh.md` / `hardware.md` / `arm-api.md`), real STS3215 servo motion, physical RealSense D415 / Sonix camera capture, and remote cloud training/inference were intentionally not executed prior to starting the hardware phase.
 
+## Live station twin dashboard — 14 November 2026
 
+`dashboard/` adds a read-only page (user service `twin-dashboard`, Intel `127.0.0.1:8096`):
+the Top camera as MuJoCo sim render or real D415 frames, the fused Top + Plate D415 point
+cloud in the robot base frame, and focus-block / anomaly overlays. See `dashboard/README.md`.
+
+Executed:
+
+- `pytest dashboard/tests` (uv, Python 3.12, numpy, OpenCV headless): 13 passed. Fake
+  upstream services; covers camera-to-world maths, packing, crop, table levelling, overlay
+  validation/expiry, stale depth, a dead source, frame long-poll, gzip cloud, MJPEG.
+- `ruff check dashboard` and `ruff format --check dashboard`: passed.
+- Deployed to Intel with `dashboard/deploy.sh`. Only the new service was added; the live depth
+  service (8094), the sim server (18081/19091/19092), armd and camui were not changed.
+- Live end-to-end in a browser through an SSH tunnel: real Top frames, sim `overhead` renders
+  and both D415 clouds (about 14k points each) updated. Measured over Wi-Fi: sim 3.9 fps
+  (source 4), real 5.5 fps (source 12, tunnel-limited), cloud 2.1 Hz, first frame 84 ms after
+  `T`. Checked sim/real toggle, 1×/2× zoom, full screen and `Esc`, depth presets
+  (`0 7 1 3`, `Ctrl`), orthographic `5`, drag orbit/pan, wheel zoom, gizmo click and the
+  bottom-left tool buttons.
+- Overlay stubs: posted labelled TEST boxes to `/api/anomalies` and `/api/focus`; the page drew
+  them, *Focus only* filtered to one, and they expired 5 s after the posts stopped.
+- Failure paths with a second local instance: a dead real source showed *No signal* with the
+  error and *Degraded*; a stopped server showed *Server unreachable* and removed all overlays;
+  the page recovered without reload.
+
+Found and limits:
+
+- The sim scene camera poses no longer match the table: the live table fit gives about 4° tilt
+  for Top and about 7° and 5 cm for Plate. The dashboard levels each cloud on the table, but the
+  Top and Plate clouds still disagree horizontally (duplicate plate rims), and the sim render
+  uses the same stale poses. A new camera calibration is needed.
+- The sim is not twin-synced; its bricks and arm do not follow the real station.
+- Focus block and anomaly detection are not integrated; the page shows *Not connected*.
+- Not measured: frame rate on the Intel display itself (no tunnel), or a long-run soak test.
