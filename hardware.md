@@ -49,6 +49,16 @@ wrist JPEGs from the focus helper's `/frame.jpg`. It runs from
 still owns the Sonix. Its image rotation is 180° and focus median is 15 frames.
 See `docs/MULTICAMERA.md` for acquisition and calibration limits.
 
+The RealSense SDK was verified on 2026-11-14 with transient `pyrealsense2`
+2.59.1 on Intel. Its device serials are `350122060653` (current overhead/top
+placement) and `243622060450` (current plate/side placement); these are the
+SDK serials to use for depth capture. They differ from the V4L2 by-id labels
+seen during the earlier RGB-only check, so depth code must enumerate and log
+the SDK serial rather than assume a `/dev/video*` number. Both cameras produced
+aligned 640×480 color/depth frames at a 1 mm depth scale and exported PLY point
+clouds. The RGB bench was stopped during this probe because one process should
+own each D415.
+
 | Device | Notes |
 |---|---|
 | `Intel IPU7 ISYS Capture` (`/dev/video0`–`/dev/video31`) | Built-in laptop camera pipeline. No sensor driver is attached, so these devices give no image. Do not use them as robot cameras. |

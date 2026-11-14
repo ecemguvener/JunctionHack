@@ -1,5 +1,18 @@
 # Executed validation — 13 November 2026
 
+## RealSense depth probe — 14 November 2026
+
+Stopped the temporary RGB bench so it released both D415 devices, then ran the
+hardware-only `scripts/realsense_depth_capture.py` on Intel with transient
+`pyrealsense2` 2.59.1. SDK serials `350122060653` (overhead/top placement) and
+`243622060450` (plate/side placement) both produced aligned 640×480 RGB and
+16-bit depth frames, 1 mm depth scale metadata, human-viewable depth previews,
+and RGB-colored PLY point clouds. The captures were real and non-synthetic;
+depth was not passed into PatchCore or used for a defect decision. The SDK
+serials differ from the earlier V4L2 by-id labels, so future hardware runs must
+enumerate and record the SDK identity. The RGB bench must be restarted after
+the depth process exits.
+
 ## Timed five-face capture — 14 November 2026
 
 Ran the operator-assisted sequence on Intel for `red-brick-001`, session

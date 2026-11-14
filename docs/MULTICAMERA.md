@@ -109,4 +109,34 @@ It binds to loopback only. Start it on the Intel laptop after verifying camera
 availability; the wrist helper must provide unannotated `/frame.jpg` frames.
 Only one process should own each video device. Preview dependencies remain
 separate from the trained-model core environment. Stop the service before
-another process opens either D415. No depth streams are used here.
+another process opens either D415.
+
+## D415 depth and point clouds
+
+The top and plate cameras are depth-capable D415s. The hardware-side utility
+`scripts/realsense_depth_capture.py` uses the RealSense SDK on Intel to align
+depth to color and save, per camera:
+
+- the RGB image;
+- a 16-bit depth PNG in millimetres;
+- a human-viewable depth preview;
+- an RGB-colored `.ply` point cloud; and
+- JSON metadata with depth scale and valid-depth range.
+
+Example on the Intel laptop (after stopping the RGB bench so it releases both
+D415 devices):
+
+```bash
+uv run --offline --no-project --python 3.12 \
+  --with pyrealsense2 --with numpy --with pillow \
+  python scripts/realsense_depth_capture.py \
+  --serial 350122060653 243622060450 \
+  --output /tmp/brickcell-depth --frames 30
+```
+
+The current probe produced real, non-synthetic 640×480 depth and point clouds
+from both cameras. Depth is not yet fed into PatchCore: that requires a
+separate depth/3D feature representation and calibration set. Keep RGB and
+depth files paired by capture timestamp and object/session ID; do not mix a
+depth snapshot from one pose with RGB from another. The wrist Sonix remains
+RGB-only.
