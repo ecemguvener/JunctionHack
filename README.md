@@ -6,6 +6,11 @@ The examples use **synthetic drawings and rendered camera images**. They demonst
 
 ## Watch the two-bowl inspection cell
 
+For hardware-independent preparation, use the [data and training workbench](docs/WORKBENCH.md)
+to review synchronized demonstrations, import labeled inspection images, and check
+training readiness. Start with the [station collection checklist](docs/STATION_COLLECTION.md)
+before recording real data. No hardware or cloud account is needed for the workbench.
+
 The SO-101 now picks, presents, inspects and sorts using **actual OpenVINO decisions from a rendered camera**, with contact-based grasp/release. With the existing local simulator environment and camera model:
 
 ```bash
@@ -17,7 +22,7 @@ PYTHONPATH=src MENAGERIE_CACHE_DIR="$PWD/.cache/menagerie" \
 uv run python -m brickcell.simulation.run --reset
 ```
 
-Open **http://127.0.0.1:19091/**. The two bowls are GOOD and DEFECTIVE; the panel shows the camera image, score and action. Motion uses scripted IK and known pickup poses, not a trained VLA. Only the front inspection face is evaluated. [Full setup, training, tests and limitations](docs/SIMULATION.md).
+Open **http://127.0.0.1:19091/**. The two bowls are GOOD and DEFECTIVE; the panel shows the camera image, score and action. Motion uses scripted IK and known pickup poses, not a trained VLA. Only one fixed inspection view is evaluated; no five-face verification is performed. [Full setup, training, tests and limitations](docs/SIMULATION.md).
 
 ## Install and verify
 

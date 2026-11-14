@@ -26,6 +26,8 @@ class Sample:
     mask_path: str | None = None
     defect_regions: list[list[int]] | None = None
     synthetic: bool = False
+    family: str | None = None
+    color: str | None = None
 
 
 @dataclass
