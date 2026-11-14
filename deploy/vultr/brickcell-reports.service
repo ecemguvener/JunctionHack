@@ -1,0 +1,20 @@
+[Unit]
+Description=Brickcell inspection report service on Vultr
+After=network-online.target
+[Service]
+Type=simple
+User=brickcell
+Group=brickcell
+WorkingDirectory=/opt/brickcell
+EnvironmentFile=/etc/brickcell/integrations.env
+ExecStart=/opt/brickcell/.venv/bin/python -m brickcell.integrations.report_server --output /var/lib/brickcell/integrations
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/brickcell/integrations
+UMask=0077
+[Install]
+WantedBy=multi-user.target

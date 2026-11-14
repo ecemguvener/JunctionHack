@@ -1,0 +1,4 @@
+# Replace with the DNS name pointing to your Vultr instance.
+reports.example.com {
+    reverse_proxy 127.0.0.1:18110
+}
