@@ -18,7 +18,39 @@ station:
   gripper_open_rad: 1.7453292   # MuJoCo gripper angle at 100 % (open). Assumption
 
 # --- perception: owner src/brickcell/twin/perception.py ---
-perception: {}
+# Only the keys you change are necessary; the other keys use the defaults in
+# perception.DEFAULT_CONFIG (load_perception_config merges them).
+perception:
+  workspace: {min: [-0.10, -0.65, -0.04], max: [0.85, 0.60, 0.25]}  # world box (m)
+  cameras:
+    reference: overhead     # the other cameras are checked against this one
+    max_disagreement: 0.02  # m; a camera whose plate centres differ more is not fused
+    exclude: []             # camera names that are never used
+  table:
+    correct: true           # move each camera pose so that its table plane is z = 0
+    max_tilt_deg: 5.0       # do not correct more tilt or offset than this
+    max_offset: 0.03
+  plates:
+    floor_z: 0.0031         # a brick on a plate stands at this height (sim collision floor)
+    # One or more colours per plate name; the nearest wins. First the real KALAS plates
+    # (fixture-001, 2026-11-14), then the sim colours. Other colours (blue plate) = no name.
+    colors:
+      good: ["#17825c", [0.62, 0.86, 0.76]]
+      defective: ["#c28fa1", [0.90, 0.72, 0.78]]
+    max_color_distance: 20.0
+    min_arc_deg: 160.0      # degrees of plate wall that must be seen
+  segment:
+    min_height: 0.005       # m above the table
+    min_height_plate: 0.006 # m above a plate floor
+    floor_color_tol: 14.0   # in a plate, points with the floor colour are floor
+    color_split: 18.0       # colour change that splits two touching bricks
+  fit:
+    max_points: 300         # ICP points per segment
+    min_score: 0.4          # explained x coverage
+    min_silhouette_iou: 0.2
+    silhouette_weight: 0.5  # 0 = do not use the colour outline to rank hypotheses
+    free_refine: false      # 6-DoF refinement for poses that are not stable (not tuned)
+  cache_dir: ~/.cache/brickcell/twin-perception  # closest-point grids of the meshes
 
 # --- sim: owner src/brickcell/twin/sim_sync.py and the sim server ---
 # The sim server copies the station: POST /twin/sync, POST /twin/live, "Station twin" panel.
@@ -40,4 +72,16 @@ sim:
     part-004: [-0.75, -0.75]
 
 # --- calibration: owner src/brickcell/twin/calibrate.py ---
-calibration: {}
+calibration:
+  max_range_m: 1.3              # depth points farther than this are not used
+  table_threshold_m: 0.004      # RANSAC inlier distance for the table plane
+  board_band_m: [-0.002, 0.007] # board pixels are this far above the table plane
+  overhead_pivot_xy: [0.0, 0.0] # the overhead levelling keeps x, y of this world point
+  object_z_m: [0.006, 0.12]     # plates and bricks for the side registration (world z)
+  object_box_m: [[0.0, 0.6], [-0.45, 0.25]]  # world x range, y range of those points
+  voxel_m: 0.002
+  # Board pattern polygon (pixels, inside the grey tape) per camera. Measured 2026-11-14.
+  # Change it if a camera moves. The table fit does not use this region.
+  board_roi:
+    overhead: [[147, 201], [255, 150], [358, 279], [244, 357]]
+    side: [[183, 173], [472, 192], [517, 20], [316, 18]]
