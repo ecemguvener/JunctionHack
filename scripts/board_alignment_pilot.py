@@ -3,6 +3,7 @@
 Specific to orange-corner-review-02. Not an automatic or accepted calibration.
 """
 
+import argparse
 import json
 from pathlib import Path
 
@@ -52,9 +53,25 @@ def plane_corners(packet, corners):
 
 
 def main():
-    folder = Path("artifacts/orange-corner-review-02")
-    top = np.array([[145, 197], [258, 152], [367, 300], [236, 359]], float)
-    plate = np.roll(np.array([[157, 327], [365, 245], [581, 274], [525, 407]], float), 1, axis=0)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--directory", type=Path, default=Path("artifacts/orange-corner-review-02"))
+    parser.add_argument(
+        "--corners",
+        type=Path,
+        help="JSON with top/plate pixels in identical physical landmark order",
+    )
+    args = parser.parse_args()
+    folder = args.directory
+    if args.corners:
+        corners = json.loads(args.corners.read_text())
+        top, plate = [np.asarray(corners[n], dtype=float) for n in ["top", "plate"]]
+        if top.shape != (4, 2) or plate.shape != (4, 2) or not np.isfinite([top, plate]).all():
+            raise ValueError("Require four finite corresponding pixels per view")
+    else:
+        top = np.array([[145, 197], [258, 152], [367, 300], [236, 359]], float)
+        plate = np.roll(
+            np.array([[157, 327], [365, 245], [581, 274], [525, 407]], float), 1, axis=0
+        )
     packets = {n: json.loads((folder / f"{n}-points.json").read_text()) for n in ["top", "plate"]}
     a, qa = plane_corners(packets["top"], top)
     b, qb = plane_corners(packets["plate"], plate)
@@ -69,6 +86,8 @@ def main():
         accepted=False,
         synthetic=False,
         method="manual outline + depth plane, provisional",
+        source_corner_pixels=dict(top=top.tolist(), plate=plate.tolist()),
+        sdk_serials={n: packets[n]["serial"] for n in packets},
         top_from_plate_R=R.tolist(),
         top_from_plate_t_m=t.tolist(),
         corner_residual_mm=errors.tolist(),
