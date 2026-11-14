@@ -11,10 +11,22 @@ Steps of ``apply_state``:
      brick has no contacts and gravity compensation (World.set_parked).
   3. Arm: set the joint angles, the actuator targets and the World command state. The World
      then holds these joint angles (World.hold_q) until the next move().
-  4. Relax: step the physics with zero velocity after each step. This pushes bricks out of
-     penetration and lets a brick that floats a little come down, without a bounce.
-  5. Settle: step the normal physics for ``settle_s``. Then compare the settled brick poses
-     with the measured poses. A large drift is a flag (for example, a pose that is not stable).
+  4. Separate (the never-overlap guard, ``separate_bricks``): the measured poses of touching
+     bricks can overlap by some millimetres. Before any physics step, move the bricks apart in
+     the support plane (x, y) by the smallest total move, until each brick is at least
+     ``min_clearance_m`` from each other brick and from each plate wall. The orientation and
+     the height do not change. Two measured bricks share a move equally; a plate wall does not
+     move. Then no brick touches another brick or a wall, so contact and friction between
+     bricks cannot push a brick in steps 5 and 6.
+  5. Relax: step the physics with zero velocity after each step. This pushes bricks out of the
+     table or a plate floor and lets a brick that floats a little come down, without a bounce.
+  6. Settle: step the normal physics for ``settle_s``. Then compare the settled brick poses
+     with the separated poses. A large drift is a flag (for example, a pose that is not stable).
+
+Brick colours (``color_mode``): "palette" gives each measured brick the albedo of its palette
+colour (configs/brick-palette.yaml): ``BrickState.color_name``, else the palette colour nearest
+to the observed colour. "observed" gives observed colour x ``color_gain``. "off" keeps the
+colours.
 """
 
 from __future__ import annotations
@@ -31,6 +43,7 @@ import mujoco
 import numpy as np
 import yaml
 
+from brickcell.palette import load_palette
 from brickcell.simulation.scene_config import color_hex
 from brickcell.simulation.world import PARK, PARK_PLATES
 from brickcell.twin.state import (
@@ -54,6 +67,12 @@ STABLE_POSES = ROOT / "assets" / "duplo" / "stable_poses.json"
 MAX_LIVE_HZ = 2.0
 PLATE_RADIUS = 0.085  # m; inner radius of the KALAS plate wall at the floor
 GRIPPER = "gripper"
+COLOR_MODES = ("palette", "observed", "off")
+# Never-overlap guard (separate_bricks).
+GROUNDED_MAX_Z = 0.008  # m; a brick with its lowest point below this stands on a floor
+SUPPORT_NZ = 0.8  # a contact normal with |z| above this is a support or a stack, not a side
+GAP_REPORT_M = 0.02  # min_gap_mm in the report is None if nothing is nearer than this
+SEPARATION_STEP_M = 0.003  # largest move of a brick in one round of the guard
 
 DEFAULT_SIM_CONFIG: dict = {
     "station_url": "http://127.0.0.1:8095",  # station service; GET {station_url}/state
@@ -64,11 +83,16 @@ DEFAULT_SIM_CONFIG: dict = {
     "settle_s": 0.5,  # normal physics after the relax step, arm held
     "max_drift_mm": 3.0,  # larger drift from the measured pose is a flag
     "max_drift_deg": 5.0,
-    "max_penetration_mm": 5.0,  # deeper measured penetration is a flag
-    # Brick colours: copy the observed colour of each measured brick to the sim brick.
-    "apply_colors": True,
-    # Observed camera colour -> sim albedo. The sim lights make a surface darker: an albedo of
-    # 0.68 renders as 0.631 (floor check, 2026-11-14), so the gain is 0.68 / 0.631.
+    "max_penetration_mm": 5.0,  # deeper penetration of the table or a plate floor is a flag
+    # Never-overlap guard (see separate_bricks). False = use the measured poses as they are.
+    "separate": True,
+    "min_clearance_m": 0.0005,  # smallest gap between two bricks, or a brick and a plate wall
+    "max_separation_mm": 10.0,  # a larger move of a brick by the guard is a flag
+    # Brick colours: "palette" (palette albedo of BrickState.color_name, else of the palette
+    # colour nearest to the observed colour), "observed" (observed colour x color_gain), "off".
+    "color_mode": "palette",
+    # Observed camera colour -> sim albedo ("observed" mode). The sim lights make a surface
+    # darker: an albedo of 0.68 renders as 0.631 (floor check, 2026-11-14), so 0.68 / 0.631.
     "color_gain": 1.08,
     # Change the sim colour only if a channel differs by more than this (0..1). A colour change
     # makes the browser viewer rebuild its meshes, so live mode must not do it each frame.
@@ -116,12 +140,24 @@ def resolve_sim_config(config: dict | None) -> dict:
     if isinstance(absent, str) or not all(name in park_plates for name in absent or []):
         raise ValueError(f"sim.park_absent_plates: names with a park_plates entry, not {absent!r}")
     result["park_absent_plates"] = list(absent or [])
-    result["apply_colors"] = bool(result["apply_colors"])
+    if result["color_mode"] not in COLOR_MODES:
+        raise ValueError(
+            f"sim.color_mode must be one of {COLOR_MODES}, not {result['color_mode']!r}"
+        )
+    result["separate"] = bool(result["separate"])
     for key in ("color_gain", "min_color_change"):
         result[key] = float(result[key])
     if result["color_gain"] <= 0:
         raise ValueError("sim.color_gain must be > 0")
-    for key in ("fetch_timeout_s", "fresh_timeout_s", "live_hz", "relax_s", "settle_s"):
+    for key in (
+        "fetch_timeout_s",
+        "fresh_timeout_s",
+        "live_hz",
+        "relax_s",
+        "settle_s",
+        "min_clearance_m",
+        "max_separation_mm",
+    ):
         result[key] = float(result[key])
         if result[key] < 0:
             raise ValueError(f"sim.{key} must be >= 0")
@@ -280,6 +316,248 @@ def _step(world, seconds: float, quasi_static: bool, dofs: list[int]) -> None:
         d.qvel[dofs] = 0
 
 
+# --------------------------------------------------------------------------- never-overlap guard
+
+
+def _plate_geoms(model) -> list[int]:
+    """Colliding geoms of all plates: the floor discs and the wall boxes."""
+    plates = {model.body(f"plate_{name}").id for name in PLATE_NAMES}
+    return [
+        g
+        for g in range(model.ngeom)
+        if model.geom_bodyid[g] in plates and (model.geom_contype[g] or model.geom_conaffinity[g])
+    ]
+
+
+def _geom_distance(m, d, g1: int, g2: int, distmax: float) -> tuple[float, np.ndarray]:
+    """Signed distance of two geoms (m; < 0 = penetration) and the unit normal from g1 to g2.
+
+    Needs mj_kinematics first. Meshes use their convex hulls, as the MuJoCo collision does.
+    """
+    fromto = np.zeros(6)
+    dist = float(mujoco.mj_geomDistance(m, d, g1, g2, distmax, fromto))
+    # fromto goes from g1 to g2 if dist > 0, and from g2 to g1 if dist < 0.
+    normal = (fromto[3:] - fromto[:3]) * np.sign(dist)
+    if abs(dist) < 1e-6 or np.linalg.norm(normal) < 1e-9:
+        # Touching: fromto has no direction. The normal is the gradient of the distance for a
+        # move of g2 (central differences).
+        h, centre = 1e-5, d.geom_xpos[g2].copy()
+        normal = np.zeros(3)
+        for axis in range(3):
+            for sign in (1.0, -1.0):
+                d.geom_xpos[g2] = centre
+                d.geom_xpos[g2, axis] += sign * h
+                normal[axis] += sign * mujoco.mj_geomDistance(m, d, g1, g2, distmax + h, None)
+        d.geom_xpos[g2] = centre
+    return dist, normal / max(float(np.linalg.norm(normal)), 1e-12)
+
+
+def _near_pairs(world, geoms: list[int], plates: list[int], distmax: float) -> list[dict]:
+    """Brick-brick and brick-plate geom pairs nearer than ``distmax``. Needs mj_kinematics.
+
+    Each pair: i, j (indices in ``geoms``; i = -1 for a plate geom, which is geom1), dist,
+    normal (unit, from geom1 to geom2) and kind:
+      "brick"   two bricks side by side: the guard separates them in x, y.
+      "stacked" one brick on the other (vertical normal, not both on a floor): not separated.
+      "wall"    a brick and a plate wall, or the side of a plate floor: separated in x, y.
+      "support" a brick on a plate floor (vertical normal): not separated.
+    """
+    m, d = world.model, world.data
+    table = m.geom("table").id
+    pos, radius = d.geom_xpos, m.geom_rbound
+    grounded = [mujoco.mj_geomDistance(m, d, table, g, 1.0, None) < GROUNDED_MAX_Z for g in geoms]
+    pairs = []
+
+    def add(i: int, j: int, g1: int, g2: int) -> None:
+        if np.linalg.norm(pos[g1] - pos[g2]) - radius[g1] - radius[g2] >= distmax:
+            return
+        dist, normal = _geom_distance(m, d, g1, g2, distmax)
+        if dist >= distmax:
+            return
+        vertical = abs(normal[2]) > SUPPORT_NZ
+        if i < 0:
+            kind = "support" if vertical else "wall"
+        else:
+            kind = "stacked" if vertical and not (grounded[i] and grounded[j]) else "brick"
+        pairs.append({"i": i, "j": j, "dist": dist, "normal": normal, "kind": kind})
+
+    for j, g2 in enumerate(geoms):
+        for i in range(j):
+            add(i, j, geoms[i], g2)
+        for g1 in plates:
+            add(-1, j, g1, g2)
+    return pairs
+
+
+def _min_norm_offsets(count: int, rows: list, sweeps: int = 500) -> np.ndarray:
+    """Smallest offsets x (count, 2) in the least-squares sense with g . (x[j] - x[i]) >= b.
+
+    ``rows``: (i, j, g, b); i = -1 for a fixed wall. Hildreth's method (dual coordinate ascent):
+    it converges to the minimum-norm point of the constraint set. Plain floats: the loop is
+    small, and numpy is slow for 2-vectors.
+    """
+    x = [[0.0, 0.0] for _ in range(count)]
+    data = [
+        (i, j, float(g[0]), float(g[1]), float(b), (2.0 if i >= 0 else 1.0) * float(g @ g))
+        for i, j, g, b in rows
+    ]
+    lam = [0.0] * len(data)
+    for _ in range(sweeps):
+        change = 0.0
+        for k, (i, j, gx, gy, b, norm2) in enumerate(data):
+            value = gx * x[j][0] + gy * x[j][1]
+            if i >= 0:
+                value -= gx * x[i][0] + gy * x[i][1]
+            step = max(-lam[k], (b - value) / norm2)
+            if step:
+                lam[k] += step
+                x[j][0] += step * gx
+                x[j][1] += step * gy
+                if i >= 0:
+                    x[i][0] -= step * gx
+                    x[i][1] -= step * gy
+                change = max(change, abs(step))
+        if change < 1e-7:  # m
+            break
+    return np.array(x, float).reshape(count, 2)
+
+
+def separate_bricks(world, object_ids, clearance: float, max_rounds: int = 40) -> dict:
+    """Never-overlap guard: move bricks apart in x, y until no brick is nearer than ``clearance``
+    to another brick or a plate wall. The orientation and the height of each brick stay.
+
+    Each round linearises the signed distances at the current poses and finds the smallest
+    total move from the measured poses (least squares; two bricks share a move equally, a
+    wall does not move). Then it measures again with the new poses. A group of touching bricks
+    is solved together. Bricks on other bricks ("stacked") are not moved. A brick moves at
+    most SEPARATION_STEP_M in one round, and each geom that it can touch in that round is a
+    constraint, so a brick cannot jump through a thin plate wall.
+
+    If the rounds do not find poses without overlap (for example, too many bricks in a plate),
+    the guard keeps the poses with the largest minimum gap and sets converged = False.
+
+    Returns per brick: separation_mm (move by the guard), overlap_mm (before), min_gap_mm
+    (after; None if nothing is nearer than GAP_REPORT_M), and the totals.
+    """
+    m, d = world.model, world.data
+    ids = list(object_ids)
+    geoms = [m.geom(f"{oid}-solid").id for oid in ids]
+    plates = _plate_geoms(m)
+    start = {oid: _body_pose(world, oid)[0] for oid in ids}
+    offset = np.zeros((len(ids), 2))
+    target = clearance + max(0.1 * clearance, 2e-5)  # a small margin for the linearisation
+    # Pairs this near are constraints: two bricks come at most 2 steps nearer in one round.
+    band = target + 2 * SEPARATION_STEP_M
+
+    def place() -> list[dict]:
+        for k, oid in enumerate(ids):
+            a, _ = _freejoint(m, oid)
+            d.qpos[a : a + 2] = start[oid][:2] + offset[k]
+        mujoco.mj_kinematics(m, d)
+        return _near_pairs(world, geoms, plates, band)
+
+    def min_gap(entries: list[dict]) -> float:
+        return min((p["dist"] for p in entries if p["kind"] in ("brick", "wall")), default=band)
+
+    before = place()
+    pairs, rounds, converged = before, 0, True
+    best = (min_gap(pairs), offset.copy())
+    while True:
+        sides = [p for p in pairs if p["kind"] in ("brick", "wall")]
+        if min_gap(pairs) > best[0]:
+            best = (min_gap(pairs), offset.copy())
+        if all(p["dist"] >= clearance - 1e-7 for p in sides):
+            break
+        if rounds == max_rounds:
+            converged = False
+            offset = best[1]
+            pairs = place()
+            break
+        rows = []
+        for p in sides:
+            i, j, g = p["i"], p["j"], p["normal"][:2].copy()
+            if np.linalg.norm(g) < 0.5:  # two bricks side by side, deep: the normal can be vertical
+                g = d.geom_xpos[geoms[j], :2] - d.geom_xpos[geoms[i], :2]
+                g /= max(float(np.linalg.norm(g)), 1e-12)
+            now = g @ offset[j] - (g @ offset[i] if i >= 0 else 0.0)
+            rows.append((i, j, g, target - p["dist"] + now))
+        step = _min_norm_offsets(len(ids), rows) - offset
+        # The same scale for all bricks: no linearised constraint becomes worse.
+        offset = offset + step * min(1.0, SEPARATION_STEP_M / max(np.abs(step).max(), 1e-12))
+        pairs = place()
+        rounds += 1
+
+    def worst(entries: list[dict], k: int) -> float | None:
+        dists = [
+            p["dist"] for p in entries if p["kind"] in ("brick", "wall") and k in (p["i"], p["j"])
+        ]
+        return min(dists) if dists else None
+
+    bricks = {}
+    for k, oid in enumerate(ids):
+        first, last = worst(before, k), worst(pairs, k)
+        bricks[oid] = {
+            "separation_mm": round(1000 * float(np.linalg.norm(offset[k])), 3),
+            "separation_xy_mm": [round(1000 * float(v), 3) for v in offset[k]],
+            "overlap_mm": round(max(0.0, -1000 * first), 3) if first is not None else 0.0,
+            "min_gap_mm": round(1000 * last, 3) if last is not None else None,
+        }
+    sides = [p for p in pairs if p["kind"] in ("brick", "wall")]
+    return {
+        "bricks": bricks,
+        "rounds": rounds,
+        "converged": converged,
+        "min_gap_mm": round(1000 * min(p["dist"] for p in sides), 3) if sides else None,
+        "stacked": sorted(
+            {tuple(sorted((ids[p["i"]], ids[p["j"]]))) for p in pairs if p["kind"] == "stacked"}
+        ),
+    }
+
+
+def brick_gaps(world, object_ids) -> dict[str, float | None]:
+    """Smallest distance (mm; < 0 = penetration) of each brick to another brick or a plate wall.
+
+    None if nothing is nearer than GAP_REPORT_M. Needs mj_kinematics first.
+    """
+    m = world.model
+    ids = list(object_ids)
+    geoms = [m.geom(f"{oid}-solid").id for oid in ids]
+    pairs = _near_pairs(world, geoms, _plate_geoms(m), GAP_REPORT_M)
+    gaps: dict[str, float | None] = dict.fromkeys(ids)
+    for p in pairs:
+        if p["kind"] not in ("brick", "wall"):
+            continue
+        for k in (p["i"], p["j"]):
+            if k >= 0:
+                old = gaps[ids[k]]
+                gaps[ids[k]] = p["dist"] if old is None else min(old, p["dist"])
+    return {oid: None if v is None else round(1000 * v, 3) for oid, v in gaps.items()}
+
+
+# --------------------------------------------------------------------------- colours
+
+
+def _brick_color(brick: BrickState, config: dict) -> tuple[np.ndarray | None, str | None, str]:
+    """(sim albedo or None, palette colour name, source) of a measured brick."""
+    mode = config["color_mode"]
+    observed = len(brick.color) == 3
+    if mode == "off":
+        return None, brick.color_name, "off"
+    if mode == "observed":
+        if not observed:
+            return None, brick.color_name, "none"
+        rgb = np.clip(np.asarray(brick.color, float) * config["color_gain"], 0.0, 1.0)
+        return rgb, brick.color_name, "observed"
+    palette = load_palette()
+    if brick.color_name in palette.colors:
+        name, source = brick.color_name, "state"
+    elif observed:
+        name, source = palette.nearest(brick.color)[0], "nearest"
+    else:
+        return None, None, "none"
+    return np.asarray(palette.albedo(name), float), name, source
+
+
 # --------------------------------------------------------------------------- public API
 
 
@@ -287,7 +565,8 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
     """Make ``world`` copy ``state``. Main thread of the World only. Returns a JSON report.
 
     ``config``: sim config (see DEFAULT_SIM_CONFIG); None loads configs/twin.yaml. Use
-    ``{"relax_s": 0, "settle_s": 0}`` to put the bricks exactly at the measured poses.
+    ``{"relax_s": 0, "settle_s": 0, "separate": False}`` to put the bricks exactly at the
+    measured poses. With ``separate`` (default) the guard moves overlapping bricks apart first.
     """
     config = load_sim_config() if config is None else resolve_sim_config(config)
     started = time.perf_counter()
@@ -300,6 +579,7 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
         "plates": {},
         "arm": None,
         "colors_changed": {},
+        "separation": None,
         "warnings": [],
         "flags": [],
     }
@@ -339,17 +619,27 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
                 f"{brick.object_id}: part {brick.part} given, the sim has {sim_part}"
             )
         measured[brick.object_id] = brick
+    colors: dict[str, dict] = {}
     for object_id in BRICK_IDS:
         if object_id in measured:
             b = measured[object_id]
             world.set_parked(object_id, False)
             _set_body_pose(world, object_id, *body_pose_from_mesh_pose(object_id, b.pos, b.quat))
-            if config["apply_colors"] and len(b.color) == 3:
-                rgb = np.clip(np.asarray(b.color, float) * config["color_gain"], 0.0, 1.0)
+            rgb, name, source = _brick_color(b, config)
+            if b.color_name is not None and source == "nearest":
+                report["warnings"].append(
+                    f"{object_id}: colour {b.color_name!r} is not in the palette, used {name!r}"
+                )
+            if rgb is not None:
                 old = np.asarray(world.bricks[object_id].rgba, float)
                 if np.abs(rgb - old).max() > config["min_color_change"]:
                     world.set_brick_color(object_id, [float(v) for v in rgb])
                     report["colors_changed"][object_id] = color_hex(rgb)
+            colors[object_id] = {
+                "color_name": name,
+                "color_source": source,
+                "color": color_hex(world.bricks[object_id].rgba),
+            }
         else:
             _park(world, object_id, config)
             report["hidden"].append(object_id)
@@ -363,35 +653,60 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
         # Hold the arm where it is, so that the settle does not move it.
         _hold_arm(world, d.qpos[world.ik.qpos_adr].copy(), world.grip)
 
+    # 4. Never-overlap guard: move the bricks apart before any physics step.
+    mujoco.mj_kinematics(m, d)
+    if config["separate"] and measured:
+        separation = separate_bricks(world, measured, config["min_clearance_m"])
+        report["separation"] = {k: v for k, v in separation.items() if k != "bricks"}
+        if not separation["converged"]:
+            report["flags"].append(
+                f"the guard did not separate all bricks: min gap {separation['min_gap_mm']} mm"
+            )
+    else:
+        separation = {"bricks": {}}
     mujoco.mj_forward(m, d)
+    # Penetration after the guard: only the table, the plate floors and stacked bricks remain.
     penetration = _penetration_mm(world, measured)
     after_set = {oid: _mesh_pose(world, oid) for oid in measured}
 
-    # 4 and 5. Relax, then settle. Velocities of the bricks and the arm stay zero in the relax.
+    # 5 and 6. Relax, then settle. Velocities of the bricks and the arm stay zero in the relax.
     dofs = [_freejoint(m, oid)[1] + k for oid in BRICK_IDS for k in range(6)] + _arm_dofs(world)
     _step(world, config["relax_s"], quasi_static=True, dofs=dofs)
     relaxed = {oid: _mesh_pose(world, oid) for oid in measured}
     _step(world, config["settle_s"], quasi_static=False, dofs=dofs)
     mujoco.mj_forward(m, d)
     world.target = world.ik.tcp(d).copy()
+    settled_gaps = brick_gaps(world, measured)
 
     for object_id, brick in measured.items():
         pos, quat = _mesh_pose(world, object_id)
         _, v = _freejoint(m, object_id)
+        set_pos, set_quat = after_set[object_id]
         drift_mm = 1000 * float(np.linalg.norm(pos - np.asarray(brick.pos, float)))
         drift_deg = rotation_angle_deg(quat_to_matrix(brick.quat), quat_to_matrix(quat))
+        # Movement by the physics only (relax and settle), from the separated pose.
+        physics_mm = 1000 * float(np.linalg.norm(pos - set_pos))
+        physics_deg = rotation_angle_deg(quat_to_matrix(set_quat), quat_to_matrix(quat))
+        guard = separation["bricks"].get(object_id, {})
         entry = {
             "measured": {"pos": list(map(float, brick.pos)), "quat": list(map(float, brick.quat))},
             "pos": pos.tolist(),
             "quat": quat.tolist(),
+            "overlap_mm": guard.get("overlap_mm"),
+            "separation_mm": guard.get("separation_mm", 0.0),
+            "separation_xy_mm": guard.get("separation_xy_mm", [0.0, 0.0]),
+            "min_gap_mm": guard.get("min_gap_mm"),
+            "settled_min_gap_mm": settled_gaps[object_id],
             "penetration_mm": round(penetration[object_id], 3),
-            "relax_dz_mm": round(
-                1000 * float(relaxed[object_id][0][2] - after_set[object_id][0][2]), 3
-            ),
+            "relax_dz_mm": round(1000 * float(relaxed[object_id][0][2] - set_pos[2]), 3),
+            # From the measured pose (the guard move included).
             "drift_mm": round(drift_mm, 3),
             "drift_xy_mm": round(1000 * float(np.linalg.norm(pos[:2] - brick.pos[:2])), 3),
             "drift_z_mm": round(1000 * float(pos[2] - brick.pos[2]), 3),
             "drift_deg": round(drift_deg, 3),
+            # From the separated pose: the movement by the physics (relax and settle).
+            "physics_drift_mm": round(physics_mm, 3),
+            "physics_drift_deg": round(physics_deg, 3),
             # Movement in the settle only (after the relax): a large value = not a stable pose.
             "settle_drift_mm": round(1000 * float(np.linalg.norm(pos - relaxed[object_id][0])), 3),
             "settle_drift_deg": round(
@@ -401,14 +716,19 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
             "support": _support(world, pos),
             "measured_support": brick.support,
             "stable_pose": match_stable_pose(object_id, quat),
+            **colors[object_id],
             "flags": [],
         }
-        if drift_mm > config["max_drift_mm"]:
-            entry["flags"].append(f"drift {drift_mm:.1f} mm > {config['max_drift_mm']} mm")
-        if drift_deg > config["max_drift_deg"]:
-            entry["flags"].append(f"rotation {drift_deg:.1f} deg > {config['max_drift_deg']} deg")
+        if physics_mm > config["max_drift_mm"]:
+            entry["flags"].append(f"drift {physics_mm:.1f} mm > {config['max_drift_mm']} mm")
+        if physics_deg > config["max_drift_deg"]:
+            entry["flags"].append(f"rotation {physics_deg:.1f} deg > {config['max_drift_deg']} deg")
+        if entry["separation_mm"] > config["max_separation_mm"]:
+            entry["flags"].append(
+                f"separation {entry['separation_mm']:.1f} mm > {config['max_separation_mm']} mm"
+            )
         if penetration[object_id] > config["max_penetration_mm"]:
-            entry["flags"].append(f"measured penetration {penetration[object_id]:.1f} mm")
+            entry["flags"].append(f"penetration {penetration[object_id]:.1f} mm")
         report["flags"] += [f"{object_id}: {flag}" for flag in entry["flags"]]
         report["bricks"][object_id] = entry
 

@@ -12,6 +12,7 @@ import pytest
 mujoco = pytest.importorskip("mujoco")
 pytest.importorskip("physicalai_mujoco_plugin")
 
+from brickcell.palette import load_palette  # noqa: E402
 from brickcell.simulation.world import (  # noqa: E402
     BOWLS,
     COPIES,
@@ -26,6 +27,7 @@ from brickcell.twin.sim_sync import (  # noqa: E402
     TwinConflict,
     TwinSync,
     apply_state,
+    brick_gaps,
     is_parked,
     load_sim_config,
     plate_is_parked,
@@ -311,23 +313,53 @@ def test_floor_is_visual_only(world):
 
 
 def test_apply_copies_observed_colour(world):
-    from brickcell.twin.sim_sync import apply_state
-    from brickcell.twin.state import BrickState, StationState
-
     red = [0.70, 0.05, 0.05]
     state = StationState(
         timestamp=1.0,
         bricks=[BrickState("part-002", "3011", [0.25, 0.0, 0.0], [1, 0, 0, 0], red)],
     )
-    report = apply_state(world, state, {"relax_s": 0, "settle_s": 0})
+    observed = {**EXACT, "color_mode": "observed"}
+    world.set_brick_color("part-002", [0.1, 0.9, 0.1])
+    report = apply_state(world, state, observed)
     assert "part-002" in report["colors_changed"]
     rgba = world.model.geom("part-002-solid").rgba[:3]
     assert np.allclose(rgba, np.clip(np.array(red) * 1.08, 0, 1), atol=1e-6)
+    assert report["bricks"]["part-002"]["color_source"] == "observed"
     # The same colour again: no change, so live mode does not rebuild the viewer each frame.
-    again = apply_state(world, state, {"relax_s": 0, "settle_s": 0})
+    again = apply_state(world, state, observed)
     assert again["colors_changed"] == {}
-    off = apply_state(world, state, {"relax_s": 0, "settle_s": 0, "apply_colors": False})
+    world.set_brick_color("part-002", [0.1, 0.9, 0.1])
+    off = apply_state(world, state, {**EXACT, "color_mode": "off"})
     assert off["colors_changed"] == {}
+    assert np.allclose(world.model.geom("part-002-solid").rgba[:3], [0.1, 0.9, 0.1])
+    with pytest.raises(ValueError):
+        resolve_sim_config({"color_mode": "rainbow"})
+
+
+def test_apply_palette_colour(world):
+    """Default mode: the palette albedo of color_name, else of the nearest palette colour."""
+    palette = load_palette()
+    bricks = [
+        brick("part-001", "upright", 0.30, -0.06),
+        brick("part-002", "upright", 0.32, 0.05),
+        brick("part-003", "wide_side_py", 0.40, -0.06),
+    ]
+    bricks[0].color, bricks[0].color_name = [0.5, 0.5, 0.5], "blue"  # the name wins
+    bricks[1].color = [0.702, 0.165, 0.155]  # a real red brick (fixture-002), no name
+    bricks[2].color, bricks[2].color_name = [0.141, 0.667, 0.749], "no-such-colour"
+    state = StationState(timestamp=1.0, bricks=bricks)
+    report = apply_state(world, state, EXACT)
+    expected = {"part-001": ("blue", "state"), "part-002": ("red", "nearest")}
+    expected["part-003"] = ("azure", "nearest")
+    for object_id, (name, source) in expected.items():
+        entry = report["bricks"][object_id]
+        assert (entry["color_name"], entry["color_source"]) == (name, source), entry
+        rgba = world.model.geom(f"{object_id}-solid").rgba[:3]
+        assert np.allclose(rgba, palette.albedo(name), atol=1e-6)
+    assert any("no-such-colour" in w for w in report["warnings"])
+    # A small change of the observed colour gives the same palette colour: no viewer rebuild.
+    bricks[1].color = [0.68, 0.17, 0.16]
+    assert apply_state(world, state, EXACT)["colors_changed"] == {}
 
 
 # --------------------------------------------------------------------------- copies, spare plate
@@ -461,7 +493,7 @@ def copies_state(with_spare=True):
 
 def test_apply_copies_and_spare_plate(world):
     state = copies_state()
-    report = apply_state(world, state, {"relax_s": 0.2, "settle_s": 1.0})
+    report = apply_state(world, state, {"relax_s": 0.2, "settle_s": 1.0, "color_mode": "observed"})
     assert report["ok"], report["flags"]
     for b in state.bricks:
         entry = report["bricks"][b.object_id]
@@ -516,3 +548,186 @@ def test_set_brick_color_per_copy(world):
     assert np.allclose(world.model.geom("part-003-4-solid").rgba[:3], rgb)
     assert np.allclose(world.model.geom("part-003-solid").rgba[:3], before)
     assert world.bricks["part-003-4"].rgba == rgb
+
+
+# --------------------------------------------------------------------------- never-overlap guard
+
+CLEARANCE_MM = 0.5  # sim.min_clearance_m default (0.0005 m) in mm
+STILL_MM, STILL_DEG = 0.5, 0.5  # physics drift limit for a separated brick in a stable pose
+
+
+def _brick_brick_contacts(world, object_ids):
+    """Contacts between two of the bricks (after mj_forward)."""
+    m, d = world.model, world.data
+    geoms = {m.geom(f"{oid}-solid").id for oid in object_ids}
+    return [
+        (d.contact[i].geom1, d.contact[i].geom2, d.contact[i].dist)
+        for i in range(d.ncon)
+        if d.contact[i].geom1 in geoms and d.contact[i].geom2 in geoms
+    ]
+
+
+def _width(world, a, b, axis):
+    """Size along ``axis`` of brick a + b: centre spacing at which the two touch."""
+    apply_state(world, StationState(timestamp=1.0, bricks=[a, b]), {**EXACT, "separate": False})
+    gap = brick_gaps(world, [a.object_id, b.object_id])[a.object_id]
+    return abs(b.pos[axis] - a.pos[axis]) - gap / 1000
+
+
+def _assert_separated_and_still(report, object_ids):
+    for object_id in object_ids:
+        entry = report["bricks"][object_id]
+        assert entry["min_gap_mm"] >= CLEARANCE_MM, (object_id, entry)
+        assert entry["settled_min_gap_mm"] >= CLEARANCE_MM - 0.05, (object_id, entry)
+        assert entry["physics_drift_mm"] < STILL_MM, (object_id, entry)
+        assert entry["physics_drift_deg"] < STILL_DEG, (object_id, entry)
+        assert entry["penetration_mm"] < 0.05, (object_id, entry)
+    assert report["separation"]["converged"]
+
+
+@pytest.mark.parametrize("overlap_mm", [5.0, 15.0])
+def test_guard_separates_two_overlapping_bricks(world, overlap_mm):
+    a = brick("part-002", "upright", 0.32, 0.00)
+    b = brick("part-002-2", "upright", 0.32, 0.05)
+    spacing = _width(world, a, b, axis=1) - overlap_mm / 1000
+    b.pos[1] = a.pos[1] + spacing
+    state = StationState(timestamp=1.0, bricks=[a, b])
+    report = apply_state(world, state, {})
+    ra, rb = report["bricks"]["part-002"], report["bricks"]["part-002-2"]
+    assert ra["overlap_mm"] == pytest.approx(overlap_mm, abs=0.3)
+    # Each brick moves about half, in opposite directions along y.
+    half = (overlap_mm + CLEARANCE_MM) / 2
+    for entry in (ra, rb):
+        assert entry["separation_mm"] == pytest.approx(half, abs=0.3), entry
+    assert ra["separation_xy_mm"][1] < 0 < rb["separation_xy_mm"][1]
+    assert abs(ra["separation_xy_mm"][0]) < 0.3 and abs(rb["separation_xy_mm"][0]) < 0.3
+    _assert_separated_and_still(report, ["part-002", "part-002-2"])
+    mujoco.mj_forward(world.model, world.data)
+    assert _brick_brick_contacts(world, ["part-002", "part-002-2"]) == []
+    assert report["ok"], report["flags"]
+
+
+def test_guard_three_bricks_in_a_row(world):
+    """Three touching bricks in a row: the middle brick stays, the outer bricks move out."""
+    ids = ["part-001", "part-001-2", "part-001-3"]
+    row = [brick(oid, "upright", 0.30, 0.0) for oid in ids]
+    row[1].pos[0] = 0.34
+    width = _width(world, row[0], row[1], axis=0)
+    overlap = 0.003
+    for k, b in enumerate(row):
+        b.pos[0] = 0.30 + k * (width - overlap)
+    report = apply_state(world, StationState(timestamp=1.0, bricks=row), {})
+    outer = 1000 * overlap + CLEARANCE_MM
+    sep = [report["bricks"][oid]["separation_xy_mm"] for oid in ids]
+    assert np.hypot(*sep[1]) < 0.3, sep
+    assert sep[0][0] == pytest.approx(-outer, abs=0.3) and sep[2][0] == pytest.approx(
+        outer, abs=0.3
+    )
+    _assert_separated_and_still(report, ids)
+    mujoco.mj_forward(world.model, world.data)
+    assert _brick_brick_contacts(world, ids) == []
+
+
+def test_guard_moves_brick_out_of_plate_wall(world):
+    centre = np.array([0.13, -0.18])
+    b = brick("part-001", "upright", centre[0] + 0.068, centre[1], PLATE_FLOOR_TOP)
+    b.support = "plate_good"
+    plates = [PlateState("good", [*centre, 0.0])]
+    report = apply_state(world, StationState(timestamp=1.0, bricks=[b], plates=plates), {})
+    entry = report["bricks"]["part-001"]
+    assert entry["overlap_mm"] > 1.0, entry
+    # The brick moves in, to the plate centre (-x); its height and orientation stay.
+    assert entry["separation_xy_mm"][0] < -1.0 and abs(entry["separation_xy_mm"][1]) < 0.3
+    assert entry["drift_z_mm"] == pytest.approx(0.0, abs=0.1)
+    assert entry["drift_deg"] < STILL_DEG
+    assert entry["support"] == "plate_good"
+    _assert_separated_and_still(report, ["part-001"])
+
+
+# Measured station state of fixture-002 (artifacts/twin-dev/e2e/state-002.json, 2026-11-14):
+# part-003 and part-004 overlap 15.8 mm, part-002 is 7 mm into the plate wall.
+STATE_002 = {
+    "timestamp": 1794635523.735638,
+    "bricks": [
+        {
+            "object_id": "part-002",
+            "part": "3011",
+            "pos": [0.33616, -0.15107, 0.0031],
+            "quat": [0.982248, 0.0, 0.0, 0.187589],
+            "color": [0.702, 0.1647, 0.1569],
+            "stable_pose": "upright",
+            "support": "plate_defective",
+        },
+        {
+            "object_id": "part-003",
+            "part": "76371",
+            "pos": [0.26828, -0.11469, 0.0191],
+            "quat": [0.131061, 0.694855, -0.131061, 0.694855],
+            "color": [0.749, 0.5686, 0.2039],
+            "stable_pose": "narrow_side_nx",
+            "support": "plate_defective",
+        },
+        {
+            "object_id": "part-004",
+            "part": "2302",
+            "pos": [0.27659, -0.13702, 0.0191],
+            "quat": [0.699743, 0.101786, 0.699743, -0.101786],
+            "color": [0.1275, 0.6745, 0.7529],
+            "stable_pose": "side_px",
+            "support": "plate_defective",
+        },
+    ],
+    "plates": [
+        {"name": "defective", "pos": [0.3076, -0.0956, 0.0], "confidence": 1.0},
+        {"name": "good", "pos": [0.3905, 0.1051, 0.0], "confidence": 1.0},
+    ],
+}
+
+
+def test_guard_measured_state_002(world):
+    state = StationState.from_dict(copy.deepcopy(STATE_002))
+    ids = [b.object_id for b in state.bricks]
+    # Without the guard, the overlap pushes the bricks by millimetres in the physics.
+    raw = apply_state(world, state, {"separate": False})
+    assert max(raw["bricks"][oid]["physics_drift_mm"] for oid in ids) > 2.0
+    report = apply_state(world, state, {})
+    assert report["bricks"]["part-003"]["overlap_mm"] > 10.0
+    assert report["bricks"]["part-002"]["overlap_mm"] > 5.0  # into the plate wall
+    _assert_separated_and_still(report, ids)
+    mujoco.mj_forward(world.model, world.data)
+    assert _brick_brick_contacts(world, ids) == []
+    deepest = min((world.data.contact[i].dist for i in range(world.data.ncon)), default=0.0)
+    assert deepest > -0.0001  # only the soft resting contacts on the plate floor
+    for oid in ids:
+        assert report["bricks"][oid]["support"] == "plate_defective"
+        assert report["bricks"][oid]["drift_deg"] < STILL_DEG  # the guard does not turn bricks
+    # Palette colours: the observed colours are red, yellow and azure bricks.
+    names = {oid: report["bricks"][oid]["color_name"] for oid in ids}
+    assert names == {"part-002": "red", "part-003": "yellow", "part-004": "azure"}
+    # The guard moves part-003 more than max_separation_mm (10 mm): a flag.
+    assert any("separation" in flag for flag in report["flags"])
+    assert report["compute_ms"] < 2000
+
+
+def test_guard_keeps_separate_bricks_and_twin_keeps_demo_physics(world):
+    """The guard does not move bricks that do not touch, and apply_state does not change the
+    contact physics of the model (the pick-and-sort demo uses the same model)."""
+    m = world.model
+    fields = ("geom_friction", "geom_margin", "geom_gap", "geom_solref", "geom_solimp")
+    fields += ("geom_priority", "geom_condim", "geom_contype", "geom_conaffinity")
+    before = {f: getattr(m, f).copy() for f in fields}
+    options = (m.opt.timestep, m.opt.iterations, m.opt.impratio, m.opt.cone, m.opt.integrator)
+    state = station_state()
+    report = apply_state(world, state, {})
+    for entry in report["bricks"].values():
+        assert entry["separation_mm"] == 0.0
+    for f in fields:
+        if f in ("geom_contype", "geom_conaffinity"):
+            continue  # set_parked changes these for the parked copies only
+        assert np.array_equal(getattr(m, f), before[f]), f
+    assert (m.opt.timestep, m.opt.iterations, m.opt.impratio, m.opt.cone, m.opt.integrator) == (
+        options
+    )
+    # A wrong config value is an error, not a silent default.
+    with pytest.raises(ValueError):
+        resolve_sim_config({"min_clearance_m": -1})

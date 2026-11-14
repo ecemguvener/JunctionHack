@@ -60,11 +60,21 @@ sim:
   fetch_timeout_s: 3.0
   fresh_timeout_s: 15.0   # for GET /state?fresh=1 (new frames)
   live_hz: 1.0            # live polling rate; at most 2
-  relax_s: 0.2            # zero-velocity steps: remove penetration, close gaps up to ~4 mm
+  # Never-overlap guard, before any physics: move overlapping bricks apart in x, y (smallest
+  # total move; orientation and height stay) until each brick is min_clearance_m from each
+  # other brick and each plate wall. Then contact and friction between bricks cannot move them.
+  separate: true
+  min_clearance_m: 0.0005
+  max_separation_mm: 10.0 # a larger move of a brick by the guard = flag
+  relax_s: 0.2            # zero-velocity steps: remove table / plate floor penetration, close gaps up to ~4 mm
   settle_s: 0.5           # normal physics after the relax, arm held
-  max_drift_mm: 3.0       # settled pose farther from the measured pose = flag in the report
+  max_drift_mm: 3.0       # settled pose farther from the separated pose = flag in the report
   max_drift_deg: 5.0
-  max_penetration_mm: 5.0 # deeper measured penetration = flag
+  max_penetration_mm: 5.0 # deeper penetration of the table or a plate floor = flag
+  # Brick colours: palette (albedo of the palette colour: BrickState.color_name, else the
+  # nearest to the observed colour; configs/brick-palette.yaml), observed (observed x
+  # color_gain), off.
+  color_mode: palette
   # Bricks that are not in the state go to a park spot (x, y on the table). No camera sees the
   # spots. Default: a 4 x 4 grid for all 16 brick bodies (world.PARK; part-001 at
   # [-1.05, 0.90]). Give only the entries to change, e.g. park: {part-001-2: [-1.65, 0.90]}.
