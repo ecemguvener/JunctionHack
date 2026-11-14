@@ -16,6 +16,7 @@ PROVIDERS = {
     "mongodb",
     "gemma",
     "verda",
+    "oxylabs",
 }
 
 

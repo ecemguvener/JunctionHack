@@ -121,8 +121,8 @@ class HTTP:
         except (URLError, TimeoutError, OSError):
             raise IntegrationError("Provider transport failed") from None
 
-    def json(self, url, payload=None, headers=None):
-        return json.loads(self.request(url, payload, headers))
+    def json(self, url, payload=None, headers=None, timeout=20):
+        return json.loads(self.request(url, payload, headers, timeout=timeout))
 
 
 @dataclass
