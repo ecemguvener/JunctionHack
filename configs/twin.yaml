@@ -4,13 +4,40 @@
 # Each section has one owner module. Edit only your own section.
 
 # --- station: owner src/brickcell/twin/station.py (Intel laptop, owns the D415s) ---
-station: {}
+station:
+  port: 8095                # HTTP port; the service binds 127.0.0.1 only (use an SSH tunnel)
+  frames: 10                # frames per snapshot and camera; depth = per-pixel median of valid
+  warmup: 45                # frames to drop after a camera opens (auto exposure)
+  serials: {overhead: "350122060653", side: "243622060450"}  # name in sim-scene.yaml -> serial
+  live_hz: 0.5              # default rate of POST /live (maximum 2)
+  record_dir: ~/twin-fixtures   # POST /record writes <record_dir>/fixture-NNN
+  intrinsics_tolerance_px: 0.5  # warn if the SDK intrinsics differ from sim-scene.yaml
+  depth_range_m: [0.15, 1.5]    # colour scale of /depth/<camera>.png
+  arm_source: none          # none, file, armd, servo (live arm reads need user approval)
+  gripper_closed_rad: 0.0   # MuJoCo gripper angle at 0 % (closed). Assumption, not measured
+  gripper_open_rad: 1.7453292   # MuJoCo gripper angle at 100 % (open). Assumption
 
 # --- perception: owner src/brickcell/twin/perception.py ---
 perception: {}
 
 # --- sim: owner src/brickcell/twin/sim_sync.py and the sim server ---
-sim: {}
+# The sim server copies the station: POST /twin/sync, POST /twin/live, "Station twin" panel.
+sim:
+  station_url: http://127.0.0.1:8095  # station service; the sim reads GET {station_url}/state
+  fetch_timeout_s: 3.0
+  fresh_timeout_s: 15.0   # for GET /state?fresh=1 (new frames)
+  live_hz: 1.0            # live polling rate; at most 2
+  relax_s: 0.2            # zero-velocity steps: remove penetration, close gaps up to ~4 mm
+  settle_s: 0.5           # normal physics after the relax, arm held
+  max_drift_mm: 3.0       # settled pose farther from the measured pose = flag in the report
+  max_drift_deg: 5.0
+  max_penetration_mm: 5.0 # deeper measured penetration = flag
+  # Bricks that are not in the state go here (x, y on the table). No world camera sees them.
+  park:
+    part-001: [-0.60, -0.60]
+    part-002: [-0.60, -0.75]
+    part-003: [-0.75, -0.60]
+    part-004: [-0.75, -0.75]
 
 # --- calibration: owner src/brickcell/twin/calibrate.py ---
 calibration: {}
