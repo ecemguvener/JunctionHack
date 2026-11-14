@@ -1,5 +1,18 @@
 # Executed validation — 13 November 2026
 
+## PR #11 integration into main — 14 November 2026
+
+Merged `ui/twin-dashboard` (`09da4a0`) into main after PR #10 and PR #12.
+Preserved both validation entries when resolving the documentation-only conflict.
+Rechecked the integrated tree: **28 dashboard Python tests**, **6 Node tests**,
+and **164 core tests passed, 5 skipped**. The core command excludes the existing
+optional `tests/test_block_inspector.py` (MuJoCo unavailable); model/live-simulator
+skips still require assets/services. JavaScript syntax and dashboard Ruff
+lint/format checks passed. The first sandbox run could not bind fake HTTP test
+sockets; the approved loopback-only rerun passed. No Intel deployment, service
+changes or robot commands were performed. The publisher evidence contract still
+needs coordinated integration before deploying the dashboard freshness changes.
+
 ## Read-only deployed inspection audit — 14 November 2026
 
 On branch `codex/inspection-handoff`, added the standalone stdlib
@@ -27,6 +40,19 @@ The remaining suite (`pytest --ignore=tests/test_block_inspector.py`) completed:
 Repository Ruff lint, formatting (104 files) and diff whitespace checks passed.
 Checks used the existing environment with `uv run --locked --no-sync`; an initial
 automatic editable rebuild could not download Hatchling through sandbox DNS.
+
+## Dashboard capture provenance follow-up — 14 November 2026
+
+Branch `codex/dashboard-evidence` builds on PR #10 (`ui/twin-dashboard`, b04e222).
+Added separate acquisition expiry, legacy/unverified display, scene-mode overlay
+filtering, explicit projected-object labels and publisher evidence documentation.
+Python tests cover repeated heartbeats, immutable known-frame acquisition times,
+legacy compatibility, source-image box suppression, validation and HTTP round-trip.
+Python dashboard suite: **28 passed** (fake services). Node tests exercise
+the same overlay rules used by the page: **6 passed**.
+JS syntax and Ruff checks passed. No real services were altered or deployed;
+tests use fake local upstreams. No browser visual review or hardware validation
+was performed. Existing legacy publishers will have hidden boxes until upgraded.
 
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
