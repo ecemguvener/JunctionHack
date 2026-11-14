@@ -1,0 +1,16 @@
+# Station twin config: real D415 cameras + arm joints -> MuJoCo scene.
+# Camera poses and intrinsics are NOT here: they are in configs/sim-scene.yaml (one source).
+# Frames and units: see src/brickcell/twin/state.py. Lengths in metres.
+# Each section has one owner module. Edit only your own section.
+
+# --- station: owner src/brickcell/twin/station.py (Intel laptop, owns the D415s) ---
+station: {}
+
+# --- perception: owner src/brickcell/twin/perception.py ---
+perception: {}
+
+# --- sim: owner src/brickcell/twin/sim_sync.py and the sim server ---
+sim: {}
+
+# --- calibration: owner src/brickcell/twin/calibrate.py ---
+calibration: {}
