@@ -19,11 +19,11 @@ colors:
   # ---- 12 main colours ----
   red:      {lego: Bright Red,          albedo: [0.79, 0.10, 0.04], observed: [[0.702, 0.165, 0.155]], seen: true,  main: true}
   blue:     {lego: Bright Blue,         albedo: [0.00, 0.33, 0.75], observed: [], seen: false, main: true}
-  azure:    {lego: Medium Azure,        albedo: [0.21, 0.68, 0.75], observed: [[0.141, 0.667, 0.749]], seen: true,  main: true}
+  azure:    {lego: Medium Azure,        albedo: [0.21, 0.68, 0.75], observed: [[0.141, 0.667, 0.749], [0.118, 0.384, 0.474]], seen: true,  main: true}  # fixture-002 brick in pink plate; fixture-001 brick in shade next to the arm
   yellow:   {lego: Bright Yellow,       albedo: [0.95, 0.80, 0.22], observed: [[0.753, 0.569, 0.204]], seen: true,  main: true}
   green:    {lego: Bright Green,        albedo: [0.29, 0.62, 0.29], observed: [], seen: false, main: true}
   orange:   {lego: Bright Orange,       albedo: [1.00, 0.54, 0.09], observed: [], seen: false, main: true}
-  white:    {lego: White,               albedo: [0.95, 0.95, 0.93], observed: [], seen: true,  main: true}
+  white:    {lego: White,               albedo: [0.95, 0.95, 0.93], observed: [[0.455, 0.573, 0.502]], seen: true,  main: true}  # fixture-002 off-white 2x4 in the green plate (green tint)
   black:    {lego: Black,               albedo: [0.05, 0.06, 0.07], observed: [], seen: false, main: true}
   brown:    {lego: Reddish Brown,       albedo: [0.35, 0.16, 0.07], observed: [], seen: true,  main: true}
   grey:     {lego: Light Bluish Gray,   albedo: [0.63, 0.65, 0.66], observed: [], seen: false, main: true}
