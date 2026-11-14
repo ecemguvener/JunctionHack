@@ -79,18 +79,23 @@ cameras:
     width: 640
     height: 480
 
-  # Real camera "Gripper" (Sonix USB camera on the gripper). The SO-101 robot profile already
-  # has a `wrist` camera: body camera_mount, pos [0, -0.055, -0.045], fovy 75, 256 x 256.
-  # To replace it, remove the "#" marks below and put in the measured values. The pose is in
-  # the camera_mount body frame, not in the world frame.
-  # wrist:
-  #   attach: camera_mount
-  #   pos: [0.0, -0.055, -0.045]
-  #   quat: [0.0, 0.0, -0.281157451295294, 0.9596616526574011]
-  #   fovy: 75
-  #   width: 256
-  #   height: 256
-  #
+  # Real camera "Gripper" (Sonix USB camera on the gripper). MEASURED 2026-11-14 04:44 UTC from one
+  # 1920x1080 frame: the four board labels A-D (3D from the Top camera) and PnP with a free focal
+  # length; label errors 5-16 px. The real lens is a fish-eye; this is a STANDARD PINHOLE camera with
+  # no distortion, as agreed. Pose is in the camera_mount body frame, so it moves with the gripper.
+  # Rendered at 640x360 (the real stream is 1920x1080; fx scaled by 1/3). Horizontal FOV ~101 deg.
+  wrist:
+    enabled: true
+    attach: camera_mount
+    pos: [-0.0256, -0.1042, 0.0777]
+    rotation_cv: [[-0.99409, 0.09895, 0.04463], [0.10637, 0.96991, 0.21900], [-0.02161, 0.22245, -0.97470]]
+    fx: 263.33
+    fy: 263.33
+    cx: 319.5
+    cy: 179.5
+    width: 640
+    height: 360
+
   # Example with measured OpenCV data (world camera):
   # overhead:
   #   pos: [0.262, 0.013, 0.845]

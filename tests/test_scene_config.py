@@ -35,7 +35,10 @@ def test_default_file_repeats_the_builtin_defaults():
         cam = file.cameras[name]
         assert (cam.width, cam.height) == (640, 480)
         assert 0.0 < cam.pos[2] < 1.0  # above the table, below the tripod limit
-    assert file.attached_cameras() == [] and "wrist" not in file.cameras
+    # The real "Gripper" camera: a standard pinhole camera on the gripper (no lens distortion).
+    assert [c.name for c in file.attached_cameras()] == ["wrist"]
+    wrist = file.cameras["wrist"]
+    assert wrist.attach == "camera_mount" and (wrist.width, wrist.height) == (640, 360)
     assert file.offscreen_size() == (640, 480)
 
 
