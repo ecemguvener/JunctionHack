@@ -1,5 +1,40 @@
 # Executed validation — 13 November 2026
 
+## PatchCore RGB/depth viewer integration — 14 November 2026
+
+Implemented `RGBDInspector` with separate modality models and explicit serial,
+crop and depth-encoding contracts. RGB keeps the existing image preprocessing;
+depth uses fixed 0.15–1.5 m encoding into three repeated uint8 channels, with
+invalid values zeroed. Inference is gated on frame identity/freshness, aligned
+shapes, RGB quality and valid depth. Synthetic models are refused; missing
+models/calibration cannot produce GOOD. Both calibrated definite channels are
+required for a combined per-camera decision. No cross-camera acceptance, object
+correspondence, wrist integration or controller sorting was added.
+
+Extended the Intel SDK service with `/snapshot/top` and `/snapshot/plate`,
+bundling RGB JPEG and uint16 depth PNG from one aligned frameset, with frame ID,
+serial, software receive time, depth scale and intrinsics. Verified live
+640×480 `I;16` depth decoding from both D415s at ages 0.034/0.024 s during the
+probe. Different cameras are still not hardware synchronized. Existing point,
+RGB and provisional merged endpoints remain available.
+
+Started `scripts/patchcore_depth_viewer.py` on Mac loopback port 18097 against
+the forwarded SDK service on 18094. Verified both API paths and RGB/depth input
+previews, explicit REINSPECT with missing crop, crop application, and plate
+valid-depth fraction 0.9946 for the diagnostic crop `[320,30,410,125]` (not a
+calibrated object crop). No trained real RGB/depth model was configured; only a
+synthetic exported local model was found and was not used. Real model inference,
+depth training, threshold calibration and real defect accuracy remain untested.
+
+Executed `uv sync --locked`, `uv run --locked pytest -q`: **94 passed, 5 optional
+integration tests skipped**; Ruff lint/format checks passed for `src tests
+scripts`. New injected tests cover distinct modality inputs, fixed encoding,
+synthetic/contract rejection, missing thresholds, stale frames, missing depth,
+camera mismatch, decisions and lossless depth snapshot decoding. Live viewer
+JavaScript parsed successfully and the HTML was opened in the Mac browser;
+automated visual interaction remains unavailable. All operations used CPU/core
+dependencies on Mac and the separate existing SDK environment on Intel.
+
 ## Brick-002 opposite side and collection pause — 14 November 2026
 
 Saved fresh RGB previews/subsampled point packets under ignored

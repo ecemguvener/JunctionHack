@@ -115,6 +115,9 @@ follow [the real-camera walkthrough](docs/REAL_CAMERA.md). Start with
 `uv run python -m brickcell.sources.camera --help`. This sends no robot commands.
 For the Intel laptop's two D415s and upright wrist camera together, see
 [three-camera capture and conservative decision fusion](docs/MULTICAMERA.md).
+For matched D415 RGB/depth previews and separately configured RGB/depth PatchCore
+models, see [the depth-aware PatchCore viewer](docs/RGBD_VIEWER.md). Its default
+configuration has no trained real models and returns REINSPECT.
 
 Organize captures with globally stable physical object IDs and session IDs:
 
