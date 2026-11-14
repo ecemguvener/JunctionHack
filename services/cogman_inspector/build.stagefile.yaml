@@ -1,0 +1,15 @@
+version: 1
+stages:
+  - name: cogman-inspector
+    from: python:3.12-slim
+    workdir: /app
+    install:
+      pip:
+        - packages:
+            - babyros==0.1.10
+            - pillow>=10.1
+            - numpy>=2.0,<3
+    copy:
+      - from: local
+        paths: [cogman_node.py]
+    cmd: [python3, -u, /app/cogman_node.py]

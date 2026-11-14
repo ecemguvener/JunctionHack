@@ -1,0 +1,84 @@
+name: so101-block-inspector
+services:
+  camera-pub:
+    build: ./services/camera_pub
+    network_mode: host
+    ipc: shareable
+    shm_size: "512m"
+    group_add: ["video", "plugdev"]
+    devices:
+      # Explicitly mount RealSense #1 (32..37), RealSense #2 (38..43), Wrist UVC (44..45) & USB bus;
+      # NEVER mount /dev/video0..31 (dummy Intel IPU7 ISYS Capture nodes).
+      - /dev/bus/usb:/dev/bus/usb
+      - /dev/video32:/dev/video32
+      - /dev/video33:/dev/video33
+      - /dev/video34:/dev/video34
+      - /dev/video35:/dev/video35
+      - /dev/video36:/dev/video36
+      - /dev/video37:/dev/video37
+      - /dev/video38:/dev/video38
+      - /dev/video39:/dev/video39
+      - /dev/video40:/dev/video40
+      - /dev/video41:/dev/video41
+      - /dev/video42:/dev/video42
+      - /dev/video43:/dev/video43
+      - /dev/video44:/dev/video44
+      - /dev/video45:/dev/video45
+    volumes:
+      - /dev/v4l/by-id:/dev/v4l/by-id:ro
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  frax-mujoco-twin:
+    build: ./services/frax_mujoco_twin
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub]
+    environment:
+      JAX_PLATFORMS: cpu
+      JAX_ENABLE_X64: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      XLA_FLAGS: "--xla_cpu_multi_thread_eigen=false --xla_cpu_scheduler_type=CPU_SCHEDULER_TYPE_MEMORY_OPTIMIZED"
+    volumes:
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  xpu-perception-policy:
+    build: ./services/xpu_perception_policy
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub, frax-mujoco-twin]
+    group_add: ["render", "video"]
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/accel/accel0:/dev/accel/accel0
+    volumes:
+      - ./calibration:/data/calibration:ro
+      - inspection-data:/data/reports
+    restart: unless-stopped
+
+  armd-bridge:
+    build: ./services/armd_bridge
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [frax-mujoco-twin]
+    environment:
+      ARMD_BASE_URL: "http://127.0.0.1:8765"
+      SAFE_GRIPPER_MIN_RAW: "1339"
+      FOLLOWER_CALIB_JSON: "/data/calibration/robots/so_follower/follower.json"
+      KINEMATICS_ALIGNMENT_JSON: "/data/calibration/kinematics_alignment.json"
+    volumes:
+      - ./calibration:/data/calibration:ro
+    restart: unless-stopped
+
+  cogman-inspector:
+    build: ./services/cogman_inspector
+    network_mode: host
+    ipc: "service:camera-pub"
+    depends_on: [camera-pub, frax-mujoco-twin, xpu-perception-policy, armd-bridge]
+    volumes:
+      - inspection-data:/data/reports
+    restart: unless-stopped
+
+volumes:
+  inspection-data:

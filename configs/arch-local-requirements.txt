@@ -1,0 +1,27 @@
+# Cross-platform Python 3.12 simulation, Frax IK, Real2Sim & runtime environment
+# Provision in an isolated venv (`artifacts/arch-venv`) so root `pyproject.toml`
+# (`anomalib==2.7.0`) and `uv.lock` remain untouched per AGENTS.md.
+mujoco==4.0.1
+mujoco-menagerie>=2026.0
+frax[ik]==0.2.0
+elastiqp>=0.2.0
+jax>=0.4.30
+jaxlib>=0.4.30
+babyros==0.1.10
+eclipse-zenoh>=1.0.0
+openvino==2026.4.1
+jsonschema>=4.20.0
+numpy>=2.0.0
+scipy>=1.13.0
+scikit-learn>=1.5.0
+trimesh>=4.4.0
+opencv-python-headless>=4.10.0
+pillow>=10.3.0
+pyyaml>=6.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+httpx>=0.27.0
+websockets>=13.0
+msgpack-numpy>=0.4.8
+pytest>=8.2.0
+ruff>=0.6.0

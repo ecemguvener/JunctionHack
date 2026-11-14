@@ -32,6 +32,8 @@ def encode_depth(depth, scale, encoding=DEPTH_ENCODING):
 class RGBDInspector:
     """Viewer-only inspector: separate real RGB/depth detectors, no robot actions."""
 
+    modalities = ("rgb", "depth")
+
     def __init__(self, serial, crop=None, detectors=None, min_depth_fraction=0.6, quality=None):
         self.serial, self.crop, self.detectors = serial, crop, detectors or {}
         self.quality = quality or QualityConfig()
@@ -39,7 +41,7 @@ class RGBDInspector:
         if not 0 < min_depth_fraction <= 1:
             raise ValueError("Depth fraction must be in (0,1]")
         for modality, detector in self.detectors.items():
-            if modality not in ("rgb", "depth") or detector.metadata.get("synthetic", True):
+            if modality not in self.modalities or detector.metadata.get("synthetic", True):
                 raise ValueError("Only explicitly real RGB/depth models are supported")
             expected = dict(serial=serial, crop=crop, modality=modality)
             if modality == "depth":
@@ -73,14 +75,14 @@ class RGBDInspector:
                 rgb.dtype != np.uint8
                 or rgb.ndim != 3
                 or rgb.shape[2] != 3
-                or depth.shape != rgb.shape[:2]
+                or ("depth" in self.modalities and depth.shape != rgb.shape[:2])
             ):
                 raise ValueError("RGB and aligned depth shapes/types do not match")
             if self.crop is None:
                 result["reason"] = "Set an explicit brick crop before inference"
                 return result, previews
             x0, y0, x1, y1 = self.crop
-            h, w = depth.shape
+            h, w = rgb.shape[:2]
             if (
                 not all(isinstance(v, int) for v in self.crop)
                 or not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h)
@@ -88,18 +90,23 @@ class RGBDInspector:
             ):
                 raise ValueError("Crop must be inside image and at least 16x16")
             rgb = rgb[y0:y1, x0:x1]
-            depth = depth[y0:y1, x0:x1]
-            encoded, valid = encode_depth(depth, scale)
-            previews.update(rgb=rgb, depth=encoded)
-            fraction = float(valid.mean())
-            result["depth_fraction"] = fraction
+            previews["rgb"] = rgb
+            inputs = {"rgb": rgb}
+            fraction = None
+            if "depth" in self.modalities:
+                depth = depth[y0:y1, x0:x1]
+                encoded, valid = encode_depth(depth, scale)
+                inputs["depth"] = encoded
+                previews["depth"] = encoded
+                fraction = float(valid.mean())
+                result["depth_fraction"] = fraction
             quality = check_view(rgb, self.quality)
-            if not quality.valid or fraction < self.min_depth_fraction:
+            if not quality.valid or (fraction is not None and fraction < self.min_depth_fraction):
                 result["reason"] = "Invalid RGB view or insufficient depth: " + ",".join(
                     quality.reasons
                 )
                 return result, previews
-            for modality, image in [("rgb", rgb), ("depth", encoded)]:
+            for modality, image in inputs.items():
                 detector = self.detectors.get(modality)
                 if detector is None:
                     result["channels"][modality] = dict(
@@ -128,10 +135,12 @@ class RGBDInspector:
                         raise ValueError("Nonfinite anomaly map")
                     previews[modality + "_map"] = amap
             decisions = [c["decision"] for c in result["channels"].values()]
-            if len(decisions) == 2 and all(d in ("GOOD", "DEFECTIVE") for d in decisions):
+            if len(decisions) == len(self.modalities) and all(
+                d in ("GOOD", "DEFECTIVE") for d in decisions
+            ):
                 result["decision"] = "DEFECTIVE" if "DEFECTIVE" in decisions else "GOOD"
             result["reason"] = (
-                "Separate RGB and depth decisions; no cross-camera coverage or object identity verified"
+                "Per-modality decisions; no cross-camera coverage or object identity verified"
             )
         except Exception as exc:
             result.update(decision="ERROR", reason=str(exc))
@@ -139,3 +148,12 @@ class RGBDInspector:
             result["depth_used_for_anomaly_score"] = False
             previews = {}
         return result, previews
+
+
+class RGBInspector(RGBDInspector):
+    """RGB-only camera review with the same crop, provenance and quality gates."""
+
+    modalities = ("rgb",)
+
+    def inspect(self, rgb, captured_at, serial, frame_id, now=None):
+        return super().inspect(rgb, None, None, captured_at, serial, frame_id, now)
