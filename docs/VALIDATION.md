@@ -253,3 +253,76 @@ only READ instructions; no homing, limit, torque or goal-position registers
 were written and no robot services were started/stopped. No automatic physical
 pose command, grasp, inspection or sorting success was tested. A subsequent
 supervised physical pose/TCP check is still needed to measure the alignment error.
+
+## Offline data/training workbench — 2026-11-14
+
+Built on `codex/data-training-workbench`, initially from `6408aad` and fast-forwarded
+to the team's non-overlapping alignment commit `3526b29` before publication.
+No changes to arm-api, calibration files, or hardware-control scripts are part of
+this workbench diff. No hardware connection or cloud training was performed.
+
+Executed on the existing native M4 / Python 3.12 environment:
+
+- Core pytest: **103 passed, 5 skipped** (34 workbench tests). Default skips are four
+  model tests and one live-simulator test. Ruff lint/format checks passed.
+- Separately ran the existing live MuJoCo/OpenVINO sorting integration test against
+  an isolated local simulator on ports 18083/19093: **1 passed, 105 deselected,
+  71.32 seconds** at that invocation. This verifies simulated sorting after UI
+  changes, not physical success. The isolated test server was stopped afterward.
+- Generated a new offline fixture, imported its 36 inspection images through CSV,
+  preserved family/color metadata, and reviewed its three synchronized 30-frame
+  demonstration-format episodes. Strict readiness passed for these software
+  fixtures. They do not represent a learned grasp or realistic defect benchmark.
+- Reviewed the existing six MuJoCo teacher episodes (2,250 frames) and the 48-image
+  two-bowl camera dataset. Inspection remained smoke-trainable but lacked named
+  five-face metadata. All six policy episodes failed the conservative joint-limit
+  readiness gate. No archived data or limits were altered to conceal findings.
+- Compared directly with the composed simulator model: largest wrist-flex observed
+  excess per episode ranges from **0.000158 to 0.003070 rad**; commanded excess is
+  about **0.00000274 rad**. These small boundary/precision/soft-constraint effects
+  are not evidence of collision or an explanation for the earlier failed ACT
+  rollouts. The report gives the exact frame indices, bounds, maximum excess and
+  explicit numerical tolerance (1e-6 rad) for review.
+- Used the emitted inspection config to train PatchCore on the imported synthetic
+  fixture successfully. Used the emitted policy command with `--steps 2` to run
+  an ACT CPU optimizer/checkpoint-reload smoke on the format fixture successfully
+  (reload maximum difference 0). Neither measurement is a real-task success claim.
+  The known PyAV/OpenCV duplicate AVFoundation warnings appeared in the isolated
+  policy environment; the command completed.
+- Browser verification: next-frame stepping advanced both camera frames and joint
+  values; Play/Pause advanced to frame 123; selecting the validation episode reset
+  playback to its own frame zero. Image label/split filters returned six defective
+  validation images; selecting the absent top face returned zero. Final responsive
+  layout and compact metadata cards were inspected. The simulator visibly showed
+  synthetic/scripted mode and one fixed view with **0/5 confirmed named faces**.
+- Wheel and source archive built successfully. The first sandbox build could not
+  resolve PyPI; approved native execution completed the build. No dependency or
+  lockfile changes were necessary.
+- Extracted the source archive into a clean temporary directory, installed with
+  `uv sync --locked` into a new environment, and successfully ran fixture generation,
+  CSV import, and both strict review commands. The archive includes workbench
+  modules, configs and handoff docs; datasets, artifacts and unrelated `ssh.md`
+  are excluded. The wheel includes all eight workbench modules.
+
+Representative executed commands (from repo root; output directories must be new):
+
+```bash
+uv run pytest
+uv run ruff check src tests scripts policy
+uv run ruff format --check src tests scripts policy
+uv run python -m brickcell.workbench demo --output data/workbench-example
+uv run python -m brickcell.workbench import-inspection --csv data/workbench-example/inspection/capture.csv --output data/workbench-example/inspection/imported.json
+uv run python -m brickcell.workbench inspection --manifest data/workbench-example/inspection/imported.json --output artifacts/workbench/example-inspection --strict
+uv run python -m brickcell.workbench policy --manifest data/workbench-example/policy/manifest.json --limits configs/workbench-sim-limits.json --output artifacts/workbench/example-policy --strict
+uv run python -m brickcell train --config artifacts/workbench/example-inspection/patchcore-review.yaml
+PYTHONPATH=src TORCH_HOME="$PWD/.cache/torch" policy/.venv/bin/python policy/train_act.py --manifest data/workbench-example/policy/manifest.json --output artifacts/workbench/example-policy/training-run --steps 2
+BRICKCELL_MODEL_CONFIG=configs/patchcore-sim.yaml BRICKCELL_QUALITY_CONFIG=configs/inspection-sim.yaml BRICKCELL_SIMULATION_URL=http://127.0.0.1:18083 uv run pytest -m simulation -q
+uv build --out-dir artifacts/workbench-dist
+```
+
+Real recording-format conversion, sensor synchronization, physical coordinate and
+limit profiles, camera visibility, five-face robot presentations and reliable
+learned motion still need station validation. Static reports suit small pilot
+batches; they embed every preview frame and are not a large-dataset streaming UI.
+See `WORKBENCH.md` and `STATION_COLLECTION.md` for the reproducible workflow and
+operator handoff.
