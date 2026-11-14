@@ -28,6 +28,7 @@ import mujoco
 import numpy as np
 import yaml
 
+from brickcell.simulation.scene_config import color_hex
 from brickcell.twin.state import (
     ARM_JOINTS,
     PARTS,
@@ -59,6 +60,14 @@ DEFAULT_SIM_CONFIG: dict = {
     "max_drift_mm": 3.0,  # larger drift from the measured pose is a flag
     "max_drift_deg": 5.0,
     "max_penetration_mm": 5.0,  # deeper measured penetration is a flag
+    # Brick colours: copy the observed colour of each measured brick to the sim brick.
+    "apply_colors": True,
+    # Observed camera colour -> sim albedo. The sim lights make a surface darker: an albedo of
+    # 0.68 renders as 0.631 (floor check, 2026-11-14), so the gain is 0.68 / 0.631.
+    "color_gain": 1.08,
+    # Change the sim colour only if a channel differs by more than this (0..1). A colour change
+    # makes the browser viewer rebuild its meshes, so live mode must not do it each frame.
+    "min_color_change": 0.06,
     # Park positions (x, y) on the table for bricks that are not in the state. No world camera
     # (overhead, side, overview, inspection) sees these positions.
     "park": {
@@ -96,6 +105,11 @@ def resolve_sim_config(config: dict | None) -> dict:
         if name not in PARTS or len(xy) not in (2, 3):
             raise ValueError(f"Bad park entry {name!r}: {xy!r}")
         park[name] = [float(v) for v in xy[:2]]
+    result["apply_colors"] = bool(result["apply_colors"])
+    for key in ("color_gain", "min_color_change"):
+        result[key] = float(result[key])
+    if result["color_gain"] <= 0:
+        raise ValueError("sim.color_gain must be > 0")
     for key in ("fetch_timeout_s", "fresh_timeout_s", "live_hz", "relax_s", "settle_s"):
         result[key] = float(result[key])
         if result[key] < 0:
@@ -269,6 +283,7 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
         "hidden": [],
         "plates": {},
         "arm": None,
+        "colors_changed": {},
         "warnings": [],
         "flags": [],
     }
@@ -299,6 +314,12 @@ def apply_state(world, state: StationState, config: dict | None = None) -> dict:
         if object_id in measured:
             b = measured[object_id]
             _set_body_pose(world, object_id, *body_pose_from_mesh_pose(object_id, b.pos, b.quat))
+            if config["apply_colors"] and len(b.color) == 3:
+                rgb = np.clip(np.asarray(b.color, float) * config["color_gain"], 0.0, 1.0)
+                old = np.asarray(world.bricks[object_id].rgba, float)
+                if np.abs(rgb - old).max() > config["min_color_change"]:
+                    world.set_brick_color(object_id, [float(v) for v in rgb])
+                    report["colors_changed"][object_id] = color_hex(rgb)
         else:
             _park(world, object_id, config)
             report["hidden"].append(object_id)

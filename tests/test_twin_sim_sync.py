@@ -291,3 +291,23 @@ def test_floor_is_visual_only(world):
     corner = np.median(rgb[5:20, 5:20].reshape(-1, 3), axis=0)  # only the floor is in this corner
     r, g, b = corner
     assert r > g > b and r > 100  # light brown, as the real wooden table
+
+
+def test_apply_copies_observed_colour(world):
+    from brickcell.twin.sim_sync import apply_state
+    from brickcell.twin.state import BrickState, StationState
+
+    red = [0.70, 0.05, 0.05]
+    state = StationState(
+        timestamp=1.0,
+        bricks=[BrickState("part-002", "3011", [0.25, 0.0, 0.0], [1, 0, 0, 0], red)],
+    )
+    report = apply_state(world, state, {"relax_s": 0, "settle_s": 0})
+    assert "part-002" in report["colors_changed"]
+    rgba = world.model.geom("part-002-solid").rgba[:3]
+    assert np.allclose(rgba, np.clip(np.array(red) * 1.08, 0, 1), atol=1e-6)
+    # The same colour again: no change, so live mode does not rebuild the viewer each frame.
+    again = apply_state(world, state, {"relax_s": 0, "settle_s": 0})
+    assert again["colors_changed"] == {}
+    off = apply_state(world, state, {"relax_s": 0, "settle_s": 0, "apply_colors": False})
+    assert off["colors_changed"] == {}

@@ -319,6 +319,11 @@ class SimulationServer:
 
     def twin_applied(self, report: dict) -> None:
         """Main thread only: show a twin state in the browser viewer."""
+        if report.get("colors_changed"):
+            # apply_state already changed the model colours; show them in the viewer and pickers.
+            self.apply_brick_colors(
+                {part: self.world.bricks[part].rgba for part in report["colors_changed"]}
+            )
         moved = [name for name, plate in report["plates"].items() if plate["moved_mm"] > 0]
         if moved:
             model, data = self.world.model, self.world.data
