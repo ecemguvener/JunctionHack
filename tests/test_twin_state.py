@@ -75,3 +75,26 @@ def test_body_conversion_matches_mujoco_geom():
         p_mesh = w.data.geom_xpos[g] - r_mesh @ off
         assert np.allclose(mp, p_mesh, atol=1e-6), object_id
         assert np.allclose(quat_to_matrix(mq), r_mesh, atol=1e-6), object_id
+
+
+def test_brick_copies():
+    from brickcell.twin.state import BRICK_IDS, INSTANCES_PER_PART, instance_id, part_of
+
+    assert len(BRICK_IDS) == len(set(BRICK_IDS)) == 4 * INSTANCES_PER_PART
+    assert BRICK_IDS[:4] == tuple(PARTS)  # first copies first, with the plain part ids
+    assert instance_id("part-002", 1) == "part-002" and instance_id("part-002", 2) == "part-002-2"
+    assert part_of("part-002-3") is PARTS["part-002"]
+    p, q = body_pose_from_mesh_pose("part-003-2", [0, 0, 0], [1, 0, 0, 0])
+    assert np.allclose(p, body_pose_from_mesh_pose("part-003", [0, 0, 0], [1, 0, 0, 0])[0])
+    s = StationState(
+        1.0, bricks=[BrickState("part-002-2", "3011", [0, 0, 0], [1, 0, 0, 0], [1, 0, 0])]
+    )
+    assert StationState.from_json(s.to_json()) == s
+    bad = s.to_dict()
+    bad["bricks"][0]["part"] = "3437"
+    with pytest.raises(ValueError):
+        StationState.from_dict(bad)
+    missing = s.to_dict()
+    del missing["bricks"][0]["color"]
+    with pytest.raises(ValueError):
+        StationState.from_dict(missing)

@@ -13,6 +13,12 @@ Frames and units
 
   Plate pose = position of the plate body origin (centre of the plate, on the table). Plates
   turn about Z only; a KALAS plate is round, so yaw is not observable and is not stored.
+  Plates: "good" (green, sort target), "defective" (pink, sort target), "spare" (blue, not a
+  sort target).
+
+  Brick copies: the sim has INSTANCES_PER_PART bodies of each part. The first copy has the
+  part id ("part-002"); the others add "-2", "-3", ... ("part-002-2"). The pick-and-sort demo
+  uses only the first copies. ``part_of(object_id)`` gives the Part of any copy.
 
   Arm = follower joint angles in the MuJoCo joint convention (radians), names as in the model:
   shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll; gripper as the MuJoCo joint
@@ -30,7 +36,9 @@ import numpy as np
 
 SCHEMA_VERSION = 1
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
-PLATE_NAMES = ("good", "defective")
+PLATE_NAMES = ("good", "defective", "spare")
+SORT_PLATES = ("good", "defective")  # the pick-and-sort targets
+INSTANCES_PER_PART = 4
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,31 @@ PARTS: dict[str, Part] = {
     "part-004": Part("part-004", "2302", "duplo_2x3_curved_top_2302", -math.pi / 2, 0.0105),
 }
 PART_BY_NUMBER = {p.part: p for p in PARTS.values()}
+
+
+def instance_id(part_id: str, index: int) -> str:
+    """Body name of copy ``index`` (1-based) of a part: 1 -> "part-002", 2 -> "part-002-2"."""
+    if part_id not in PARTS or not 1 <= index <= INSTANCES_PER_PART:
+        raise ValueError(f"No brick copy {index} of {part_id!r}")
+    return part_id if index == 1 else f"{part_id}-{index}"
+
+
+# All brick bodies of the sim, first copies first: part-001..part-004, part-001-2, ...
+BRICK_IDS: tuple[str, ...] = tuple(
+    instance_id(part_id, k) for k in range(1, INSTANCES_PER_PART + 1) for part_id in PARTS
+)
+_PART_OF_ID = {
+    instance_id(part_id, k): part_id for part_id in PARTS for k in range(1, INSTANCES_PER_PART + 1)
+}
+
+
+def part_of(object_id: str) -> Part:
+    """The Part of a brick body (any copy)."""
+    try:
+        return PARTS[_PART_OF_ID[object_id]]
+    except KeyError:
+        raise ValueError(f"Unknown brick {object_id!r}") from None
+
 
 # D415 serials (RealSense SDK) -> camera names in configs/sim-scene.yaml.
 CAMERA_SERIALS = {"overhead": "350122060653", "side": "243622060450"}
@@ -101,7 +134,7 @@ def rotation_angle_deg(a, b) -> float:
 
 def body_pose_from_mesh_pose(object_id: str, pos, quat) -> tuple[np.ndarray, np.ndarray]:
     """MuJoCo body (pos, quat) of a brick from its mesh-frame pose in the world."""
-    part = PARTS[object_id]
+    part = part_of(object_id)
     r_mesh = quat_to_matrix(quat)
     r_body = r_mesh @ rot_z(-part.mesh_yaw)
     p_body = np.asarray(pos, float) + r_body @ np.array([0.0, 0.0, part.grip_z])
@@ -110,7 +143,7 @@ def body_pose_from_mesh_pose(object_id: str, pos, quat) -> tuple[np.ndarray, np.
 
 def mesh_pose_from_body_pose(object_id: str, pos, quat) -> tuple[np.ndarray, np.ndarray]:
     """Inverse of ``body_pose_from_mesh_pose``."""
-    part = PARTS[object_id]
+    part = part_of(object_id)
     r_body = quat_to_matrix(quat)
     p_mesh = np.asarray(pos, float) - r_body @ np.array([0.0, 0.0, part.grip_z])
     return p_mesh, matrix_to_quat(r_body @ rot_z(part.mesh_yaw))
@@ -180,7 +213,7 @@ def load_fixture(directory: str | Path, reduce: str = "median") -> list[RGBDFram
 
 @dataclass
 class BrickState:
-    object_id: str  # sim body name "part-00N"
+    object_id: str  # sim body name: "part-00N" or a copy "part-00N-K" (see BRICK_IDS)
     part: str  # DUPLO part number
     pos: list[float]  # mesh-frame origin in the world (m)
     quat: list[float]  # mesh-frame orientation in the world (w, x, y, z)
@@ -194,7 +227,7 @@ class BrickState:
 
 @dataclass
 class PlateState:
-    name: str  # "good" or "defective"
+    name: str  # "good", "defective" or "spare"
     pos: list[float]  # plate body origin in the world (m); z = 0 on the table
     confidence: float = 0.0
 
@@ -227,20 +260,24 @@ class StationState:
     def from_dict(cls, raw: dict) -> StationState:
         if raw.get("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
             raise ValueError(f"Unsupported station state schema {raw.get('schema_version')}")
-        bricks = [BrickState(**b) for b in raw.get("bricks", [])]
+        try:
+            bricks = [BrickState(**b) for b in raw.get("bricks", [])]
+            plates = [PlateState(**p) for p in raw.get("plates", [])]
+            arm = ArmState(**raw["arm"]) if raw.get("arm") else None
+        except TypeError as exc:
+            raise ValueError(f"Bad station state: {exc}") from None
         for b in bricks:
-            if b.object_id not in PARTS:
+            if b.object_id not in _PART_OF_ID:
                 raise ValueError(f"Unknown brick {b.object_id!r}")
+            if b.part != part_of(b.object_id).part:
+                raise ValueError(f"{b.object_id} is part {part_of(b.object_id).part}, not {b.part}")
             if len(b.pos) != 3 or len(b.quat) != 4:
                 raise ValueError(f"Bad pose for {b.object_id}")
             if not all(math.isfinite(v) for v in (*b.pos, *b.quat)):
                 raise ValueError(f"Non-finite pose for {b.object_id}")
-        plates = [PlateState(**p) for p in raw.get("plates", [])]
         for p in plates:
             if p.name not in PLATE_NAMES or len(p.pos) != 3:
                 raise ValueError(f"Bad plate {p.name!r}")
-        arm = raw.get("arm")
-        arm = ArmState(**arm) if arm else None
         if arm is not None and set(arm.joints) - set(ARM_JOINTS):
             raise ValueError(f"Unknown arm joints {sorted(set(arm.joints) - set(ARM_JOINTS))}")
         return cls(
