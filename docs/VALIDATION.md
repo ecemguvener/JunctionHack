@@ -1,5 +1,19 @@
 # Executed validation — 13 November 2026
 
+## Clearer labelled-board plate view — 14 November 2026
+
+Retrieved RGB and point packets in `artifacts/tilted-board-review/` after the
+operator changed the setup. The board appears flat and the plate perspective
+is higher, so do not assume the previously estimated camera extrinsics remain
+valid. Used visually reviewed pattern-boundary pixels in A/B/C/D order;
+corrected the initial top selections to exclude the gray tape border.
+Provisional corner residuals are 15.78, 4.31, 7.73 and 6.48 mm. Top plane RMS
+is 1.35 mm; plate plane RMS is 0.84 mm. Saved input corner JSON, packets,
+`provisional-transform.json` (`accepted: false`) and a provisional scene PLY.
+This is improved coarse registration, not independent validation or calibrated
+millimetre defect measurement. No live transform was applied. No source code
+changed during this capture/analysis run.
+
 ## Labelled board registration review — 14 November 2026
 
 Retrieved fresh RGB/point packets for the A/B/C/D labelled board under ignored
