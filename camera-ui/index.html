@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera wall</title>
+<style>
+  :root {
+    --gap: clamp(8px, 1.2vw, 28px);
+    --bg: #0a0c0f;
+    --panel: rgba(20, 24, 30, 0.92);
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #e8ecf1;
+    --muted: #8b95a3;
+    --none: #7b8594;
+    --ok: #34c77b;
+    --bad: #ff4d4f;
+    --stale: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+
+  /* Two large views side by side at the top. The gripper view is smaller, centred below them.
+     The status panel has its own row, so it never covers a picture. */
+  .wall { height: 100vh; padding: var(--gap); display: grid; gap: var(--gap);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr) minmax(0, var(--small-h, 30vh)) auto;
+    grid-template-areas: "a b" "c c" "s s"; }
+  .tile { min-width: 0; min-height: 0; display: flex; container-type: size; }
+  .slot-a { grid-area: a; justify-content: flex-end; align-items: flex-end; }
+  .slot-b { grid-area: b; justify-content: flex-start; align-items: flex-end; }
+  .slot-c { grid-area: c; justify-content: center; align-items: flex-start; }
+  .frame { --ar: 4 / 3; position: relative; aspect-ratio: var(--ar); flex: none;
+    width: min(100cqw, 100cqh * var(--arn, 1.3333));
+    background: #12161b; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--line); transition: box-shadow .25s; }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+    display: block; transition: opacity .25s, filter .25s; }
+  .frame img:not([src]) { visibility: hidden; }
+  .label { position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 6px;
+    background: rgba(0, 0, 0, 0.55); font-size: 13px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; backdrop-filter: blur(4px); }
+  .nosignal { position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+    color: var(--muted); font-size: 15px; padding: 16px; }
+  .tile.down img { opacity: .25; filter: grayscale(1); }
+  .tile.down .nosignal { display: grid; }
+
+  body.state-malformed .frame { box-shadow: 0 0 0 2px var(--bad); }
+
+  /* Small status panel, bottom centre. */
+  .status { grid-area: s; justify-self: center;
+    display: flex; align-items: center; gap: 14px; min-width: 300px; max-width: min(560px, 90vw);
+    padding: 14px 22px 14px 18px; border-radius: 14px; background: var(--panel);
+    border: 1px solid var(--line); box-shadow: 0 10px 40px rgba(0, 0, 0, .5);
+    backdrop-filter: blur(10px); transition: border-color .25s, background .25s; }
+  .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--none); }
+  .title { font-size: 17px; font-weight: 650; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 1px; }
+  .status[data-state="ok"] .dot { background: var(--ok); }
+  .status[data-state="stale"] .dot { background: var(--stale); }
+  .status[data-state="malformed"] { border-color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 22%, var(--panel)); }
+  .status[data-state="malformed"] .dot { background: var(--bad); animation: pulse 1s ease-in-out infinite; }
+  .status[data-state="offline"] .dot { background: var(--stale); }
+  @keyframes pulse { 50% { transform: scale(1.35); opacity: .7; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body class="state-none">
+<main class="wall" id="wall">
+  <div class="status" id="status" data-state="none" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <div>
+      <div class="title" id="status-title">No model result</div>
+      <div class="sub" id="status-sub">Malform detection is not connected</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const wall = document.getElementById('wall');
+const tiles = {};
+
+// Camera order from the server: first = top left, second = top right, third = small, below.
+const SLOTS = ['a', 'b', 'c'];
+
+function addTile(cam, index) {
+  const tile = document.createElement('section');
+  tile.className = `tile down slot-${SLOTS[index] || 'c'}`;
+  tile.innerHTML = `<div class="frame"><img alt=""><span class="label"></span>
+    <div class="nosignal">No signal</div></div>`;
+  tile.querySelector('.label').textContent = cam.label;
+  const img = tile.querySelector('img');
+  img.alt = cam.label + ' camera';
+  wall.append(tile);
+  tiles[cam.name] = { tile, img };
+  pull(cam.name, tiles[cam.name]);
+}
+
+// Get frames one at a time. The server holds each request until a new frame is ready.
+async function pull(name, t) {
+  let seq = -1;
+  const frame = t.tile.querySelector('.frame');
+  for (;;) {
+    try {
+      const r = await fetch(`/frame/${name}?after=${seq}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      seq = Number(r.headers.get('X-Frame-Seq'));
+      const url = URL.createObjectURL(await r.blob());
+      const next = new Image();
+      next.src = url;
+      await next.decode();
+      const old = t.img.src;
+      t.img.src = url;
+      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+      frame.style.setProperty('--ar', `${next.naturalWidth} / ${next.naturalHeight}`);
+      frame.style.setProperty('--arn', next.naturalWidth / next.naturalHeight);
+    } catch (e) {
+      console.warn(`Camera ${name}: ${e}`);
+      await new Promise(ok => setTimeout(ok, 1000));
+    }
+  }
+}
+
+const TEXT = {
+  none:      ['No model result', 'Malform detection is not connected'],
+  ok:        ['No malform detected', ''],
+  malformed: ['Malform detected', ''],
+  stale:     ['Model result is old', ''],
+  offline:   ['Camera wall server offline', 'Trying again'],
+};
+
+function showDetection(d) {
+  const state = d ? d.state : 'offline';
+  const [title, sub] = TEXT[state] || TEXT.none;
+  const el = document.getElementById('status');
+  el.dataset.state = state;
+  document.body.className = 'state-' + state;
+  document.getElementById('status-title').textContent = title;
+  let detail = sub;
+  if (d && d.detail && state !== 'none') detail = d.detail;
+  if (state === 'stale' && d.age_s != null) detail = `Last result ${Math.round(d.age_s)} s ago`;
+  const subEl = document.getElementById('status-sub');
+  subEl.textContent = detail;
+  subEl.hidden = !detail;
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    const s = await r.json();
+    for (const [i, cam] of s.cameras.entries()) {
+      if (!tiles[cam.name]) addTile(cam, i);
+      const t = tiles[cam.name];
+      t.tile.classList.toggle('down', !cam.live);
+      t.tile.querySelector('.nosignal').textContent = cam.live ? '' : `No signal · ${cam.error}`;
+    }
+    showDetection(s.detection);
+  } catch (e) {
+    showDetection(null);
+    for (const t of Object.values(tiles)) t.tile.classList.add('down');
+  }
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>

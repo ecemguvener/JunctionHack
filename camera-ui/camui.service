@@ -1,0 +1,10 @@
+[Unit]
+Description=Camera wall: three camera feeds and malform status (127.0.0.1:8093)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/camera-ui/camui.py --host 127.0.0.1 --port 8093
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
