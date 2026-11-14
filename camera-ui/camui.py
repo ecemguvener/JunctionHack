@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -194,6 +195,15 @@ def make_handler(feeds: dict[str, Feed], detection: Detection):
     return Handler
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # A browser that closes a connection early is normal. Do not log it.
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
+
+
 def parse_camera(spec: str) -> tuple[str, str, str]:
     parts = spec.split("=", 2)
     if len(parts) != 3 or not all(parts) or not parts[0].isidentifier():
@@ -225,8 +235,7 @@ def main() -> None:
 
     feeds = {name: Feed(name, label, url, args.fps) for name, label, url in cameras}
     detection = Detection(args.stale_after)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(feeds, detection))
-    server.daemon_threads = True
+    server = Server((args.host, args.port), make_handler(feeds, detection))
     print(f"Camera wall ready on http://{args.host}:{args.port}/", flush=True)
     try:
         server.serve_forever()

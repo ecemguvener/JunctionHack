@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Deploy the camera wall from this computer to the Intel laptop.
 #
-# Usage: camera-ui/deploy.sh [--dry-run] [--no-show]
+# Usage: camera-ui/deploy.sh [--dry-run] [--show]
 #   --dry-run  Show what rsync would copy. Do not change the server.
-#   --no-show  Do not open the kiosk window on the laptop display.
+#   --show     Also open the page full screen on the laptop display.
 #
 # The script:
 #   1. Copies camera-ui/ to intel:/home/intel/camera-ui/ with rsync.
 #   2. Installs and restarts the systemd user service "camui" (127.0.0.1:8093).
-#   3. Opens the page full screen on the laptop display (show.sh).
+#   3. With --show only: opens the page full screen on the laptop display (show.sh).
 # The program uses the Python standard library only. It installs no packages.
 set -euo pipefail
 
@@ -18,11 +18,11 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15)
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
-SHOW=1
+SHOW=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
-    --no-show) SHOW=0 ;;
+    --show) SHOW=1 ;;
     -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $arg" >&2; exit 2 ;;
   esac

@@ -25,7 +25,7 @@
      The status panel has its own row, so it never covers a picture. */
   .wall { height: 100vh; padding: var(--gap); display: grid; gap: var(--gap);
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: minmax(0, 1fr) minmax(0, var(--small-h, 30vh)) auto;
+    grid-template-rows: minmax(0, 1fr) minmax(0, var(--small-h, 45vh)) auto;
     grid-template-areas: "a b" "c c" "s s"; }
   .tile { min-width: 0; min-height: 0; display: flex; container-type: size; }
   .slot-a { grid-area: a; justify-content: flex-end; align-items: flex-end; }

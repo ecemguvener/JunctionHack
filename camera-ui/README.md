@@ -50,8 +50,8 @@ curl -X POST http://127.0.0.1:8093/api/detection \
 From the repository root, on a computer with SSH access to `intel`:
 
 ```bash
-camera-ui/deploy.sh             # Copy, restart the service, open the page on the laptop display.
-camera-ui/deploy.sh --no-show   # Do not open the page on the laptop display.
+camera-ui/deploy.sh             # Copy and restart the service. The laptop display does not change.
+camera-ui/deploy.sh --show      # Also open the page full screen on the laptop display.
 camera-ui/deploy.sh --dry-run   # Show what rsync copies. Do not change the server.
 ```
 
