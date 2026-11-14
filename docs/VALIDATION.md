@@ -1,5 +1,51 @@
 # Executed validation — 13 November 2026
 
+## Extensive saved-scan reconstruction audit — 14 November 2026
+
+Implemented offline geometry diagnostics in `brickcell.reconstruction` and
+executed `scripts/reconstruction_audit.py` on the five saved brick-001 pose
+clouds. Preserved raw captures and hashes; retained exact Python/package
+versions, cleanup counts, fitted transforms, random seed and split counts in
+ignored `artifacts/brick-001-reconstruction-audit/audit-report.json`.
+
+Compared largest-connected-cluster cleanup (9 mm DBSCAN radius, three-point
+minimum) for two-camera clouds and plate-only clouds. Cleanup can discard real
+disconnected surfaces; counts are reported rather than treated as ground truth.
+Aligned each pose against the upright reference using 24 proper PCA rotation
+seeds and up to 50 trimmed ICP iterations. Fitting uses 80% of source and target
+points, with the other 20% withheld from fitting. Candidate selection uses
+bidirectional fitting distances; held-out point distances are reported
+separately. This random point holdout is NOT independent object, session or
+pose validation, and no inspection dataset split was created or changed.
+
+Both-camera held-out symmetric mean distances were 8.57 mm narrow, 10.18 mm
+back, 9.29 mm repeat underside and 9.32 mm initial lying pose. Plate-only
+distances were 8.72, 6.30, 5.71 and 6.00 mm respectively. Plate-only performs
+better on three of four fits but not the narrow pose. Similar scores from
+different seeds demonstrate unresolved orientation ambiguity. These distances
+are sparse nearest-neighbor interpolation diagnostics, not physical accuracy.
+
+Exported cleaned source clouds, per-pose aligned clouds, two exploratory
+composites, comparison plots and an interactive HTML review. The new composites
+contain 1,302 two-camera or 869 plate-only points, excluding the repeated
+underside from their coverage. All results remain `accepted: false`; no solid
+mesh, missing surface, calibrated defect result or automatic robot action is
+inferred. The plate-only view avoids the approximate cross-camera transform
+within each source scan but does not resolve cross-pose registration ambiguity.
+
+Added tests for proper rigid transforms, isolated outlier removal, invalid
+coordinates, bidirectional partial-surface metrics and recovery of a known
+asymmetric pose with fitting/holdout accounting. All five focused tests passed.
+The report/UI distinguish real scans from unverified registration. Viewer HTML
+syntax and served assets are checked separately; browser automation is
+unavailable, so rendered interaction has not been automated.
+
+Final checks for this change: **85 passed, 5 optional integration tests skipped**;
+Ruff lint and format checks on `src tests scripts`, and diff whitespace checks
+passed. The generated viewer JavaScript parsed successfully; HTML, JSON report,
+three selectable PLY assets and both plotted comparisons returned HTTP 200
+from the loopback review server. Opened the new HTML in the Mac default browser.
+
 ## Brick-001 repeat underside and multi-pose candidate — 14 November 2026
 
 Captured `artifacts/brick-001-other-side-review/` following the operator's
