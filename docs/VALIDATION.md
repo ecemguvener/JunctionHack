@@ -1,5 +1,24 @@
 # Executed validation — 13 November 2026
 
+## Brick-001 matched raised/clean experiment — 14 November 2026
+
+Captured the operator-confirmed raised change and then its clean reference
+with plate SDK serial `243622060450`, 640×480 aligned RGB/depth. Captures are
+`brick-001-raised-DGMCha` and `brick-001-matched-clean-GhBs4I`, retained on Intel
+under `/home/intel/brickcell-captures/` and locally in ignored artifacts with
+SDK metadata and PLYs. RGB review shows gray material among the studs in the
+first and its absence in the second; placement appears closely matched.
+
+Direct raw-depth comparison in manually selected ROI `[410,302,444,324]`
+has 432 paired valid pixels (57.8%); median signed difference is 0 mm and
+95th-percentile absolute difference is approximately 6 mm. Front control ROI
+`[385,344,439,370]` has 947 paired valid pixels (67.5%), median signed difference
+0 mm, and 95th-percentile absolute difference 1 mm. This is an uncalibrated
+diagnostic, with no registration, repeated noise baseline, defect threshold or
+accuracy claim. Missing depth and pose variation remain confounders. Keep both
+captures grouped as the same physical `brick-001` in any future partitioning.
+Restored the RGB bench and verified its HTTP status endpoint after capture.
+
 ## Brick-region 3D extraction — 14 November 2026
 
 Executed `scripts/compare_depth_scans.py` on the existing clean and later
