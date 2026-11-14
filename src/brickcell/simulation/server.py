@@ -46,6 +46,7 @@ from brickcell.simulation.scene_config import (
 )
 from brickcell.simulation.world import OBJECTS, PLATES, World, inspection_crop
 from brickcell.twin.sim_sync import TwinSync, load_sim_config
+from brickcell.workbench.status import SIMULATION_STATUS, coverage_status
 
 CAMERA_PATH = re.compile(r"/camera/([A-Za-z0-9_][A-Za-z0-9_-]*)\.png")
 THUMBNAIL_WIDTH = 240  # pixels; the GUI panel is 250 wide
@@ -108,6 +109,8 @@ class SimulationServer:
         self.viewer.gui.main_panel.dock_right()
         self.viewer.gui.main_panel.set_width(250)
         self.viewer.gui.add_markdown("## See → Detect → Sort\nTwo plates · SO-101 · MuJoCo")
+        self.viewer.gui.add_markdown(SIMULATION_STATUS)
+        self.coverage_panel = self.viewer.gui.add_markdown(coverage_status(False))
         self.panel = self.viewer.gui.add_markdown(
             "Ready. Start the camera-driven inspection loop below."
         )
@@ -463,6 +466,9 @@ class SimulationServer:
                 self.run_active = True
                 self.twin.stop_live("a pick run started")
                 self.inspected = self.last_capture = None
+                self.coverage_panel.content = coverage_status(False)
+                self.decision_panel.content = "New object: no inspection decision yet."
+                self.camera_panel.image = np.zeros((130, 160, 3), dtype=np.uint8)
             self.panel.content = f"**{obj}** · {op.replace('_', ' ').upper()}"
             self.world.action(op, obj)
             self.count_panel.content = f"Good: {self.world.counts['good']} · Defective: {self.world.counts['defective']}\n\nPlate occupancy is checked in simulation; physical success remains unverified."
@@ -476,6 +482,7 @@ class SimulationServer:
                 raise ValueError("Arm is outside inspection pose")
             rgb = inspection_crop(self.world.camera())
             self.camera_panel.image = rgb
+            self.coverage_panel.content = coverage_status(True)
             buffer = io.BytesIO()
             Image.fromarray(rgb).save(buffer, format="PNG")
             self.sequence += 1
@@ -501,6 +508,9 @@ class SimulationServer:
             self.show_plates(["spare"])  # reset parks the spare plate
             self.scene.update_from_mjdata(self.world.data)
             self.inspected = self.last_capture = None
+            self.coverage_panel.content = coverage_status(False)
+            self.decision_panel.content = "No inspection yet."
+            self.camera_panel.image = np.zeros((130, 160, 3), dtype=np.uint8)
             self.run_id = uuid.uuid4().hex
             self.panel.content = "Reset · ready for four camera-driven inspections"
             self.count_panel.content = "Good: 0 · Defective: 0"

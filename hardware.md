@@ -20,14 +20,44 @@ This document tells an agent which hardware is connected to the team Intel serve
 
 ## Connected hardware
 
-Last check: 2026-11-13.
+Last check: 2026-11-14. Both D415 color streams were captured at 640×480;
+the Sonix was observed through its existing focus-assistance stream.
 
 | Device | USB ID | Where | Linux device | Notes |
 |---|---|---|---|---|
 | Intel RealSense D415 depth camera | `8086:0ad3` | Hub port 3, USB 3 (5 Gbit/s) | `/dev/video32`–`/dev/video37`. Stable names are in `/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_415_*` | Serial number `318123021715`. Driver: `uvcvideo`. |
+| Second Intel RealSense D415 | `8086:0ad3` | USB 3 hub | Color stream resolved to `/dev/video42` during check; select stable by-id path containing serial and `-video-index0`. | Serial `344223025431`. Side view of robot during check. |
+| Sonix USB2.0_CAM1 wrist camera | `05a3:9230` | USB 2 hub | `/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0` | Existing `focus_assist.py` owns the device and serves a preview on server `127.0.0.1:8091`. Do not open concurrently. |
 | USB-C hub: VIA Labs VL822 and Realtek RTS5411 | `2109:0822`, `2109:2822`, `0bda:0411`, `0bda:5411` | Laptop USB-C port 2 | — | 7 free ports for devices. If a device does not show, make sure that the hub has power. |
 
 ### Built-in devices (ignore these for the robot work)
+
+The first D415's by-id `-video-index0` resolved to `/dev/video36` and returned
+640×480 color during the 2026-11-14 check. Stable symlinks can change target
+numbers after reconnects. The images showed an overhead view for serial
+`318123021715`, side view for `344223025431`, and an upside-down wrist view
+for the Sonix. These are current placements, not permanent camera roles.
+
+The documented `~/miniforge3/envs/lerobot` environment was absent during this
+check. Do not assume it exists. OpenCV 5.0 was already available in the running
+focus helper's uv environment; no drivers/packages were installed remotely.
+
+The three-camera bench now owns both D415 color devices and reads upright raw
+wrist JPEGs from the focus helper's `/frame.jpg`. It runs from
+`/tmp/brickcell-multicam` on server loopback port 8092, forwarded locally to
+18092. Stop the bench before another process opens a D415. The wrist helper
+still owns the Sonix. Its image rotation is 180° and focus median is 15 frames.
+See `docs/MULTICAMERA.md` for acquisition and calibration limits.
+
+The RealSense SDK was verified on 2026-11-14 with transient `pyrealsense2`
+2.59.1 on Intel. Its device serials are `350122060653` (current overhead/top
+placement) and `243622060450` (current plate/side placement); these are the
+SDK serials to use for depth capture. They differ from the V4L2 by-id labels
+seen during the earlier RGB-only check, so depth code must enumerate and log
+the SDK serial rather than assume a `/dev/video*` number. Both cameras produced
+aligned 640×480 color/depth frames at a 1 mm depth scale and exported PLY point
+clouds. The RGB bench was stopped during this probe because one process should
+own each D415.
 
 | Device | Notes |
 |---|---|
