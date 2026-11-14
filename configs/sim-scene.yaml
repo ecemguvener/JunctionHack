@@ -118,3 +118,9 @@ bricks:
 plates:
   good: {color: [0.62, 0.86, 0.76]}
   defective: {color: [0.90, 0.72, 0.78]}
+
+# Floor colour: the table surface at z = 0 under the bricks and plates. Light brown, as the real
+# wooden table: under the sim lights it renders as RGB (161, 118, 61), the median wood colour in
+# the real D415 images (fixture-001, 2026-11-14).
+# It changes the rendered images: train the detector again after a change.
+floor: {color: [0.68, 0.50, 0.26]}

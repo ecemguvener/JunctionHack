@@ -313,3 +313,16 @@ def test_load_from_path_environment_and_objects(tmp_path, monkeypatch):
         load_scene_config(path)
     path.write_text("")  # an empty file gives the built-in defaults
     assert load_scene_config(path).cameras.keys() == {"inspection", "overview"}
+
+
+def test_floor_color():
+    file = load_scene_config(sc.DEFAULT_PATH)
+    assert file.floor_color == parse_scene_config({}).floor_color == sc.DEFAULT_FLOOR_COLOR
+    r, g, b = sc.DEFAULT_FLOOR_COLOR
+    assert r > g > b  # light brown, as the real wooden table
+    config = parse_scene_config({"floor": {"color": "#102030"}})
+    assert sc.color_hex(config.floor_color) == "#102030"
+    assert config.as_dict()["floor"]["color"] == "#102030"
+    for bad in ({"floor": "#000000"}, {"floor": {"colour": "#000000"}}, {"floor": {"color": "x"}}):
+        with pytest.raises(SceneConfigError, match="floor"):
+            parse_scene_config(bad)

@@ -91,6 +91,11 @@ RELEASE_GRIP = 0.3  # open the moving jaw only a little at release; full open af
 # Default colours. configs/sim-scene.yaml (see scene_config.py) can change them for a World.
 PLATE_RGBA = {name: f"{_vec(rgb)} 1" for name, rgb in DEFAULT_PLATE_COLORS.items()}
 INSPECTION = np.array([0.25, 0.0, 0.15])
+# Visual floor: a thin box with its top face at z = 0, FLOOR_HALF m from the base in each
+# direction. It has no contacts; the "table" plane does the physics. The plane is in geom group 3,
+# which MuJoCo renders and the browser viewer (mjviser) do not show by default: mjviser shows a
+# plane only as a grid, so the box is the floor in every view.
+FLOOR_HALF = 5.0
 
 
 @dataclass(frozen=True)
@@ -237,16 +242,18 @@ def scene_xml(directory: Path, scene: SceneConfig | None = None) -> str:
     )
     cameras = "".join(camera.xml() for camera in scene.world_cameras())
     width, height = scene.offscreen_size()  # a Renderer cannot be larger than this buffer
+    floor = _vec(scene.floor_color)
     p = PHYSICS
     return f"""<mujoco model="Brickcell two plate inspection">
       <compiler angle="radian" autolimits="true"/>
       <option timestep="{p["timestep"]}" gravity="{_vec(p["gravity"])}" integrator="{p["integrator"]}" cone="{p["cone"]}" iterations="{p["iterations"]}" ls_iterations="{p["ls_iterations"]}" impratio="{p["impratio"]}"/>
       <visual><global offwidth="{width}" offheight="{height}"/><headlight ambient=".4 .4 .4" diffuse=".5 .5 .5" specular="0 0 0"/></visual>
       <default><geom rgba=".9 .48 .08 1" condim="4" friction="1 .01 .001"/></default>
-      <asset>{assets}</asset>
+      <asset>{assets}<material name="floor" rgba="{floor} 1" specular="0" shininess="0" reflectance="0"/></asset>
       <worldbody>
         <light pos=".4 -.3 1" dir="0 0 -1" diffuse=".7 .7 .7" castshadow="false"/>
-        <geom name="table" type="plane" size="1 1 .01" rgba=".15 .18 .22 1" {_contact("table", 2)}/>
+        <geom name="table" type="plane" size="1 1 .01" group="3" rgba="{floor} 1" {_contact("table", 2)}/>
+        <geom name="floor" type="box" size="{FLOOR_HALF} {FLOOR_HALF} .005" pos="0 0 -.005" material="floor" rgba="{floor} 1" contype="0" conaffinity="0"/>
         {plates}{bricks}<frame name="robot_mount"/>
         {cameras}
       </worldbody></mujoco>"""
@@ -333,6 +340,11 @@ class World:
         self.target = self.ik.tcp(self.data).copy()
         self.grip = 0.5
         self.yaw = np.pi / 2
+        # Station twin hooks (brickcell.twin.sim_sync). hold_q: hold these arm joint angles and
+        # do not run the IK (a measured arm pose need not have the fingers down). The next move()
+        # clears it. bowls: plate positions; the twin can move the plates.
+        self.hold_q: np.ndarray | None = None
+        self.bowls = {name: pos.copy() for name, pos in BOWLS.items()}
         self.renderers: dict[tuple[int, int], mujoco.Renderer] = {}  # one per (width, height)
         self.active: str | None = None
         self.destination: str | None = None
@@ -363,7 +375,10 @@ class World:
         return self.data.xpos[self.model.body(object_id).id].copy()
 
     def tick(self) -> None:
-        self.q, _ = self.ik.solve(self.q, self.target, self.yaw, iters=32)
+        if self.hold_q is None:
+            self.q, _ = self.ik.solve(self.q, self.target, self.yaw, iters=32)
+        else:
+            self.q = self.hold_q.copy()
         self.data.ctrl[self.actuators] = [*self.q, self.grip]
         # Recorder observes the state and commanded action before applying physics.
         self.before_step()
@@ -375,6 +390,7 @@ class World:
             self.tick()
 
     def move(self, target: np.ndarray, speed: float = 0.12) -> None:
+        self.hold_q = None
         start = self.target.copy()
         steps = max(1, int(np.linalg.norm(target - start) / speed / 0.02))
         for i in range(1, steps + 1):
@@ -411,7 +427,7 @@ class World:
             brick = BRICKS[object_id]
             side, y = SLOTS[self.counts[self.destination] % len(SLOTS)]
             x = side * min(0.008 + brick.half_x, 0.062 - brick.half_x)
-            goal = BOWLS[self.destination] + [x, y, brick.grip_z]
+            goal = self.bowls[self.destination] + [x, y, brick.grip_z]
             goal += self.ik.tcp(self.data) - self.position(object_id)
             self.move(np.array([goal[0], goal[1], 0.18]))
             self.move(goal, speed=0.06)
@@ -433,7 +449,7 @@ class World:
             velocity = self.model.joint(f"{object_id}-joint").dofadr[0]
             if (
                 self.destination is None
-                or np.max(np.abs(p[:2] - BOWLS[self.destination][:2])) > 0.055
+                or np.max(np.abs(p[:2] - self.bowls[self.destination][:2])) > 0.055
                 or p[2] > 0.08
                 or np.linalg.norm(self.data.qvel[velocity : velocity + 3]) > 0.01
             ):

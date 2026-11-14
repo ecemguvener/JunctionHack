@@ -4,6 +4,12 @@ Scene endpoints (cameras and colours, see docs/SIMULATION.md):
   GET  /scene                 cameras (pose, intrinsics) and brick / plate colours
   GET  /camera/<name>.png     full image of a sim camera, for viewing only
   POST /brick_color           {"object_id": "part-001", "color": "#ff0000"}
+
+Station twin endpoints (brickcell.twin.sim_sync; refused with HTTP 409 while a run is active):
+  POST /twin/state            StationState JSON: apply it to the sim, return the report
+  POST /twin/sync             {"fresh": false}: GET {station_url}/state once and apply it
+  POST /twin/live             {"enabled": true, "hz": 1.0}: poll the station (max 2 Hz)
+  GET  /twin/status           last state and its age, last report, live on/off, last error
 """
 
 from __future__ import annotations
@@ -23,9 +29,11 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import mujoco
 import numpy as np
 import viser
 from mjviser import ViserMujocoScene
+from mjviser.conversions import get_body_name
 from PIL import Image
 
 from brickcell.simulation.model_viewer import add_camera_frustums, rgb255
@@ -36,12 +44,26 @@ from brickcell.simulation.scene_config import (
     parse_brick_color_arg,
     parse_color,
 )
-from brickcell.simulation.world import BOWLS, OBJECTS, World, inspection_crop
+from brickcell.simulation.world import OBJECTS, World, inspection_crop
+from brickcell.twin.sim_sync import TwinSync, load_sim_config
 
 CAMERA_PATH = re.compile(r"/camera/([A-Za-z0-9_][A-Za-z0-9_-]*)\.png")
 THUMBNAIL_WIDTH = 240  # pixels; the GUI panel is 250 wide
 THUMBNAIL_TICKS = 10  # one thumbnail for each 10 ticks of 20 ms: 5 images per second
 COLOR_DELAY = 0.25  # s; a drag in the colour picker makes many values, apply only the last
+
+
+def hide_plane_grids(viewer: viser.ViserServer, model: mujoco.MjModel) -> None:
+    """mjviser shows each plane geom as a grid at z = 0, on top of the floor box.
+
+    Replace each grid node with an empty frame of the same name. Do this again after
+    ``rebuild_visual_handles``, because it makes the grids again.
+    """
+    for geom in range(model.ngeom):
+        if model.geom_type[geom] == mujoco.mjtGeom.mjGEOM_PLANE:
+            body = get_body_name(model, int(model.geom_bodyid[geom]))
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom)
+            viewer.scene.add_frame(f"/fixed_bodies/{body}/{name}", show_axes=False)
 
 
 def thumbnail(rgb: np.ndarray) -> np.ndarray:
@@ -51,7 +73,12 @@ def thumbnail(rgb: np.ndarray) -> np.ndarray:
 
 class SimulationServer:
     def __init__(
-        self, api_port: int, viewer_port: int, directory: Path, scene_config: object = None
+        self,
+        api_port: int,
+        viewer_port: int,
+        directory: Path,
+        scene_config: object = None,
+        twin_config: dict | None = None,
     ):
         self.world = World(directory, scene_config)
         self.commands: queue.Queue = queue.Queue()
@@ -76,6 +103,7 @@ class SimulationServer:
         self.scene = ViserMujocoScene(self.viewer, self.world.model, num_envs=1)
         self.scene.camera_tracking_enabled = False
         self.scene.set_refresh_handler(lambda: None)
+        hide_plane_grids(self.viewer, self.world.model)
         self.viewer.gui.configure_theme(dark_mode=True, show_share_button=False)
         self.viewer.gui.main_panel.dock_right()
         self.viewer.gui.main_panel.set_width(250)
@@ -98,12 +126,9 @@ class SimulationServer:
         @button.on_click
         def replay(_):
             with self.lock:
-                if (
-                    self.busy
-                    or self.run_active
-                    or (self.process is not None and self.process.poll() is None)
-                ):
+                if self.run_in_progress():
                     return
+                self.twin.stop_live("the replay run started")
                 output = directory / "viewer-replay.log"
                 with output.open("a") as log:
                     self.process = subprocess.Popen(
@@ -153,10 +178,46 @@ class SimulationServer:
                 "`configs/sim-scene.yaml`."
             )
 
-        for name, pos in BOWLS.items():
-            self.viewer.scene.add_label(
+        self.twin = TwinSync(
+            self.world,
+            twin_config,
+            call_on_main=lambda function: self.call_on_main(function, timeout=30),
+            run_active=self.run_in_progress,
+            on_applied=self.twin_applied,
+            on_change=self.twin_changed,
+        )
+        self.twin_text_dirty = True
+        with gui.add_folder("Station twin"):
+            sync = gui.add_button(
+                "Sync from cameras",
+                hint="Copy the real station once: bricks, plates and arm from the station service.",
+            )
+            self.twin_live_box = gui.add_checkbox(
+                "Live", False, hint="Copy the real station again and again (at most 2 Hz)."
+            )
+            self.twin_text = gui.add_markdown(self.twin.status_text())
+
+            @sync.on_click
+            def sync_from_cameras(_):
+                try:
+                    self.twin.sync()
+                except Exception:  # the status text shows the error
+                    pass
+
+            @self.twin_live_box.on_update
+            def live_changed(_):
+                if self.twin_live_box.value != self.twin.live:
+                    try:
+                        self.twin.set_live(self.twin_live_box.value)
+                    except Exception:
+                        self.twin_live_box.value = False
+
+        self.plate_labels = {
+            name: self.viewer.scene.add_label(
                 f"/labels/{name}", name.upper(), position=(pos[0], pos[1], 0.06)
             )
+            for name, pos in self.world.bowls.items()
+        }
         self.viewer.scene.add_label("/labels/inspection", "INSPECTION", position=(0.25, 0, 0.23))
 
         @self.viewer.on_client_connect
@@ -186,7 +247,7 @@ class SimulationServer:
                     response = owner.request(method, self.path, payload)
                     status = 200
                 except Exception as exc:
-                    response, status = {"error": str(exc)}, 400
+                    response, status = {"error": str(exc)}, getattr(exc, "status", 400)
                 if isinstance(response, bytes):
                     raw, kind = response, "image/png"
                 else:
@@ -219,6 +280,7 @@ class SimulationServer:
             self.world.set_brick_color(part, rgb)
         # The viewer bakes geom colours into its meshes, so make the meshes again.
         self.scene.rebuild_visual_handles()
+        hide_plane_grids(self.viewer, self.world.model)
         self.scene.update_from_mjdata(self.world.data)
         if update_pickers:  # not for a change that came from a picker: the user can be dragging
             for part in colors:
@@ -241,11 +303,43 @@ class SimulationServer:
         Image.fromarray(self.world.camera(name)).save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def call_on_main(self, function):
+    def call_on_main(self, function, timeout: float = 5):
         """Run a scene request on the main thread and wait for its result."""
         future = Future()
         self.calls.put((function, future))
-        return future.result(timeout=5)
+        return future.result(timeout=timeout)
+
+    def run_in_progress(self) -> bool:
+        """True while an action, a pick run or the replay process is active."""
+        return bool(
+            self.busy
+            or self.run_active
+            or (self.process is not None and self.process.poll() is None)
+        )
+
+    def twin_applied(self, report: dict) -> None:
+        """Main thread only: show a twin state in the browser viewer."""
+        moved = [name for name, plate in report["plates"].items() if plate["moved_mm"] > 0]
+        if moved:
+            model, data = self.world.model, self.world.data
+            plate_bodies = {model.body(f"plate_{name}").id for name in moved}
+            # mjviser places fixed bodies once; move their meshes, or make them again.
+            handles = getattr(self.scene, "_fixed_geom_handles", None)
+            if handles is None:
+                self.scene.rebuild_visual_handles()
+                hide_plane_grids(self.viewer, model)
+            else:
+                for (body, _, _), handle in handles.items():
+                    if body in plate_bodies:
+                        handle.position = data.xpos[body]
+            for name in moved:
+                pos = self.world.bowls[name]
+                self.plate_labels[name].position = (pos[0], pos[1], 0.06)
+        self.scene.update_from_mjdata(self.world.data)
+
+    def twin_changed(self) -> None:
+        """Any thread: the twin status changed. The main thread shows it."""
+        self.twin_text_dirty = True
 
     def serve_scene(self) -> None:
         """Main thread only: scene requests, colour changes from the GUI, live camera view."""
@@ -264,6 +358,11 @@ class SimulationServer:
                     colors, self.pending_colors = self.pending_colors, {}
                 self.apply_brick_colors(colors, update_pickers=False)
                 self.color_time = time.monotonic()
+            if self.twin_text_dirty or self.tick_count % 50 == 0:
+                self.twin_text_dirty = False
+                self.twin_text.content = self.twin.status_text()
+                if self.twin_live_box.value != self.twin.live:
+                    self.twin_live_box.value = self.twin.live
             name = self.view_select.value
             show = self.tick_count % THUMBNAIL_TICKS == 0 and self.viewer.get_clients()
             if name != "Off" and show:
@@ -287,6 +386,8 @@ class SimulationServer:
         self.last_tick = time.monotonic()
 
     def request(self, method: str, path: str, payload: dict) -> dict | bytes:
+        if path.startswith("/twin/"):
+            return self.twin.request(method, path, payload)
         if method == "GET" and path == "/scene":
             return self.call_on_main(self.scene_state)
         if method == "GET" and (match := CAMERA_PATH.fullmatch(path)):
@@ -349,6 +450,7 @@ class SimulationServer:
                 authorize_sort(self.inspected, op, obj)
             if op == "pick":
                 self.run_active = True
+                self.twin.stop_live("a pick run started")
                 self.inspected = self.last_capture = None
             self.panel.content = f"**{obj}** · {op.replace('_', ' ').upper()}"
             self.world.action(op, obj)
@@ -444,6 +546,14 @@ if __name__ == "__main__":
         help="YAML with cameras and colours (default: configs/sim-scene.yaml)",
     )
     parser.add_argument(
+        "--twin-config",
+        type=Path,
+        help="YAML with a `sim:` section for the station twin (default: configs/twin.yaml)",
+    )
+    parser.add_argument(
+        "--station-url", help="station service URL (default: sim.station_url in the twin config)"
+    )
+    parser.add_argument(
         "--brick-color",
         action="append",
         default=[],
@@ -455,9 +565,12 @@ if __name__ == "__main__":
         scene = load_scene_config(args.scene_config).with_brick_colors(
             dict(parse_brick_color_arg(value) for value in args.brick_color)
         )
+        twin = load_sim_config(
+            args.twin_config, {"station_url": args.station_url} if args.station_url else None
+        )
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        SimulationServer(args.api_port, args.viewer_port, args.output, scene).run()
+        SimulationServer(args.api_port, args.viewer_port, args.output, scene, twin).run()
     except KeyboardInterrupt:
         pass

@@ -44,6 +44,10 @@ DEFAULT_PLATE_COLORS: dict[str, tuple[float, float, float]] = {
     "good": (0.62, 0.86, 0.76),
     "defective": (0.90, 0.72, 0.78),
 }
+# Floor: the table surface at z = 0 that bricks and plates stand on. Light brown, as the real
+# wooden table: the rendered colour matches the median wood colour RGB (161, 118, 61) of the real
+# D415 images (fixture-001, 2026-11-14) under the sim lights.
+DEFAULT_FLOOR_COLOR: tuple[float, float, float] = (0.68, 0.50, 0.26)
 DEFAULT_CAMERAS: dict[str, dict] = {
     "inspection": {
         "pos": [0.55, 0, 0.24],
@@ -398,6 +402,7 @@ class SceneConfig:
     brick_colors: dict[str, tuple[float, float, float]]
     plate_colors: dict[str, tuple[float, float, float]]
     source: str = "built-in defaults"
+    floor_color: tuple[float, float, float] = DEFAULT_FLOOR_COLOR
 
     def world_cameras(self) -> list[Camera]:
         """Enabled cameras that are fixed in the world."""
@@ -434,6 +439,7 @@ class SceneConfig:
             "cameras": [camera.as_dict() for camera in self.cameras.values()],
             "bricks": _colors_dict(self.brick_colors),
             "plates": _colors_dict(self.plate_colors),
+            "floor": _colors_dict({"floor": self.floor_color})["floor"],
         }
 
 
@@ -442,10 +448,11 @@ def parse_scene_config(raw: object, source: str = "dict") -> SceneConfig:
     raw = {} if raw is None else raw
     if not isinstance(raw, Mapping):
         raise SceneConfigError(f"Scene config ({source}): the top level must be a mapping.")
-    unknown = sorted(set(raw) - {"cameras", "bricks", "plates"})
+    unknown = sorted(set(raw) - {"cameras", "bricks", "plates", "floor"})
     if unknown:
         raise SceneConfigError(
-            f"Scene config ({source}): unknown keys {unknown}. Allowed: cameras, bricks, plates."
+            f"Scene config ({source}): unknown keys {unknown}. "
+            "Allowed: cameras, bricks, plates, floor."
         )
     try:
         entries = {**DEFAULT_CAMERAS, **_mapping(raw.get("cameras"), "cameras")}
@@ -460,6 +467,7 @@ def parse_scene_config(raw: object, source: str = "dict") -> SceneConfig:
             brick_colors=_colors(raw.get("bricks"), DEFAULT_BRICK_COLORS, "bricks", "part id"),
             plate_colors=_colors(raw.get("plates"), DEFAULT_PLATE_COLORS, "plates", "plate"),
             source=source,
+            floor_color=_floor_color(raw.get("floor")),
         )
     except SceneConfigError as exc:
         raise SceneConfigError(f"Scene config ({source}): {exc}") from None
@@ -567,6 +575,14 @@ def _colors(value: object, defaults: Mapping, where: str, kind: str) -> dict:
             )
         colors[key] = parse_color(entry["color"], f"{where}: '{key}' color")
     return colors
+
+
+def _floor_color(value: object) -> tuple[float, float, float]:
+    if value is None:
+        return DEFAULT_FLOOR_COLOR
+    if not isinstance(value, Mapping) or set(value) != {"color"}:
+        raise SceneConfigError('floor: must be a mapping with one key, e.g. color: "#050505".')
+    return parse_color(value["color"], "floor color")
 
 
 def _colors_dict(colors: Mapping) -> dict:

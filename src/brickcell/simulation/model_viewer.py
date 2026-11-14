@@ -31,6 +31,7 @@ from brickcell.simulation.world import (
     ASSETS,
     BOWLS,
     BRICKS,
+    FLOOR_HALF,
     INSPECTION,
     PLATE_RGBA,
     brick_xml,
@@ -146,10 +147,11 @@ def build_drop_model(
         if root.find(tag) is not None
     )
     bricks = "".join(brick_xml(i, name, b) for i, (name, b) in enumerate(BRICKS.items()))
+    floor = " ".join(f"{v:g}" for v in load_scene_config(scene).floor_color)
     xml = f"""<mujoco model="Brickcell model viewer drop test">{keep}
       <worldbody>
         <light pos="0 -.3 1" dir="0 .3 -1" diffuse=".7 .7 .7" castshadow="false"/>
-        <geom name="table" type="plane" size="1 1 .01" rgba=".15 .18 .22 1"/>
+        <geom name="table" type="plane" size="1 1 .01" rgba="{floor} 1"/>
         {plate_xml(plate_name, np.zeros(3))}{bricks}
         <camera name="check" pos=".22 -.30 .22" xyaxes=".81 .59 0 -.30 .41 .86" fovy="40"/>
       </worldbody></mujoco>"""
@@ -381,6 +383,15 @@ class ModelViewer:
         """Cameras, arm base, plates and brick start positions in the robot base frame."""
         scene = self.server.scene
         handles = [
+            # Black floor of the station (world.FLOOR_HALF), just below the grid lines.
+            scene.add_box(
+                "/station/floor",
+                color=rgb255(self.scene_config.floor_color),
+                dimensions=(2 * FLOOR_HALF, 2 * FLOOR_HALF, 0.01),
+                position=(0, 0, -0.0054),
+                cast_shadow=False,
+                receive_shadow=False,
+            ),
             scene.add_frame("/station/base", axes_length=0.05, axes_radius=0.0015),
             scene.add_label(
                 "/station/base-label",
