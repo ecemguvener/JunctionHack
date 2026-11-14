@@ -2,6 +2,12 @@
 
 These files are the LeRobot 0.7.0 calibration of the two SO-101 arms on the Intel server. They were made on 2026-11-13 with `lerobot-calibrate`.
 
+The separate physical/CAD alignment was captured on 2026-11-14 through manual
+visual reference matching. Both arms' signs and zero offsets are recorded in
+`kinematics_alignment.json`; the original LeRobot files below are unchanged.
+See [ALIGNMENT_REPORT.md](ALIGNMENT_REPORT.md) for the mapping table, evidence,
+generated URDFs, checks, and measurement limitations.
+
 | File | Arm | LeRobot settings |
 |---|---|---|
 | `robots/so_follower/follower.json` | Follower (12 V) | `--robot.type=so101_follower --robot.id=follower` |

@@ -1,0 +1,31 @@
+{
+  "arm": "follower",
+  "joint": "wrist_flex",
+  "accepted": true,
+  "before": "before-follower-wrist-flex-01.json",
+  "after": "after-follower-wrist-flex-01.json",
+  "physical_direction_tested": "tilt gripper tip upward, forearm fixed",
+  "physical_direction_for_increasing_value": "tilt gripper tip downward, forearm fixed",
+  "encoder_delta_ticks": -472,
+  "encoder_delta_degrees": -41.484375,
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": -2,
+    "follower/shoulder_lift": 1,
+    "follower/elbow_flex": 2,
+    "follower/wrist_flex": -472,
+    "follower/wrist_roll": 2,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": -1,
+    "leader/shoulder_lift": 0,
+    "leader/elbow_flex": 0,
+    "leader/wrist_flex": 0,
+    "leader/wrist_roll": 0,
+    "leader/gripper": 0
+  },
+  "cad_motion_sign": -1,
+  "cad_sign": 1,
+  "cad_direction_check": {
+    "forward_axis_point_height_derivative_m_per_positive_cad_rad_at_extended_reference": -0.14119999999714916
+  },
+  "cad_at_zero_rad": null
+}

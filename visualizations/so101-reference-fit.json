@@ -14,19 +14,21 @@
     "shoulder_lift": 183.1306829338506,
     "elbow_flex": -179.5121844781468,
     "wrist_flex": 1.482089611701561,
-    "wrist_roll": -90,
+    "wrist_roll": 90,
     "gripper": 0
   },
+  "original_wrist_roll_reference_degrees": -90,
+  "user_requested_display_correction_degrees": 180,
   "assumptions": [
     "Shoulder pan is zero only to choose a display orientation; actual CAD yaw is unknown.",
     "The principal axes of the upper-arm and forearm meshes are approximated as level, extended toward CAD -Y.",
     "The wrist-roll axis is approximated as horizontal.",
-    "Wrist-roll CAD -90 degrees is the user-supplied approximate reference.",
+    "Original wrist-roll reference -90 degrees, with user-requested display correction 180 degrees; candidate display is 90 degrees.",
     "CAD gripper angle remains zero; geometry clearance is not a measured contact model."
   ],
   "wrist_roll_zero_offset_hypotheses_rad": {
-    "if_cad_sign_positive": -3.3509810311361834,
-    "if_cad_sign_negative": 0.20938837754639006
+    "if_cad_sign_positive": -0.20938837754639006,
+    "if_cad_sign_negative": 3.3509810311361834
   },
   "observed_nonoverlapping_gripper_closed_raw": 1339,
   "gripper_calibration_range_min_raw": 1329,

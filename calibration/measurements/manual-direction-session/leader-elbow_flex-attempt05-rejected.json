@@ -1,0 +1,21 @@
+{
+  "arm": "leader",
+  "joint": "elbow_flex",
+  "accepted": false,
+  "before": "before-leader-elbow-05.json",
+  "after": "after-leader-elbow-05.json",
+  "reason": "Leader shoulder and wrist-flex changed beyond the isolation tolerance; follower excluded by user instruction",
+  "non_target_violations_encoder_degrees": {
+    "shoulder_lift": 4.921875,
+    "wrist_flex": 70.3125
+  },
+  "all_leader_delta_ticks": {
+    "shoulder_pan": -27,
+    "shoulder_lift": 56,
+    "elbow_flex": -122,
+    "wrist_flex": 800,
+    "wrist_roll": -2,
+    "gripper": 0
+  },
+  "cad_sign_recorded": null
+}

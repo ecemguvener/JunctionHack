@@ -30,9 +30,15 @@ class CalibrationTests(unittest.TestCase):
                 cal.validate_limits(cal.upper+1e-6)
 
     def test_alignment_is_not_inferred_from_homing_offset(self):
-        for arm in ('leader', 'follower'):
-            with self.assertRaisesRegex(ValueError, 'not confirmed'):
-                CalibratedSO101Kinematics(arm)
+        data = json.loads(ALIGNMENT_PATH.read_text())
+        with tempfile.TemporaryDirectory(prefix='so101-unconfirmed-test-') as tmp:
+            path = Path(tmp)/'alignment.json'
+            for arm in ('leader', 'follower'):
+                data['arms'][arm]['confirmed'] = False
+            path.write_text(json.dumps(data))
+            for arm in ('leader', 'follower'):
+                with self.assertRaisesRegex(ValueError, 'not confirmed'):
+                    CalibratedSO101Kinematics(arm, alignment_path=path)
 
     def test_matches_installed_lerobot_degree_normalization(self):
         try:
@@ -109,6 +115,20 @@ class CalibrationTests(unittest.TestCase):
             path = Path(tmp)/'alignment.json'
             path.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError, 'does not match'):
+                CalibratedSO101Kinematics('follower', alignment_path=path)
+
+    def test_changed_cad_model_binding_is_rejected(self):
+        data = json.loads(ALIGNMENT_PATH.read_text())
+        profile = data['arms']['follower']
+        profile.update(confirmed=True,
+                       calibration_sha256=ServoCalibration('follower').fingerprint,
+                       cad_sign={n: 1 for n in MOTOR_NAMES},
+                       cad_at_zero_rad={n: 0. for n in MOTOR_NAMES},
+                       reference_model_sha256='not-the-current-CAD-model')
+        with tempfile.TemporaryDirectory(prefix='so101-model-binding-test-') as tmp:
+            path = Path(tmp)/'alignment.json'
+            path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, 'CAD model archive'):
                 CalibratedSO101Kinematics('follower', alignment_path=path)
 
 

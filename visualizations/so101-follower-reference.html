@@ -92,7 +92,7 @@ if(!after.some((p,i)=>Math.hypot(...p.map((x,k)=>x-before[i][k]))>.005))throw Er
 root.querySelector('#so-reset').click();
 console.info('SO101 interaction check passed: shoulder slider changes geometry; zero pose restored.');
 // Injected into the viewer's existing scope after its interaction smoke check.
-const referenceAngles=[0.0, 183.1, -179.5, 1.5, -90.0, 0.0];
+const referenceAngles=[0.0, 183.1, -179.5, 1.5, 90.0, 0.0];
 const referenceNames=['Revolute_1','Revolute_2','Revolute_3','Revolute_2_5','Revolute_4','Revolute_5'];
 root.querySelector('.so-toolbar span').textContent='Follower reference fit · provisional CAD angles';
 root.querySelector('#so-reset').textContent='Reference pose';
@@ -116,7 +116,7 @@ root.querySelector('#so-front').onclick=()=>fitReferenceView([-1,.02,.12]);
 root.querySelector('#so-perspective').onclick=()=>fitReferenceView([-.75,.65,.4]);
 new ResizeObserver(()=>fitReferenceView()).observe(stage);
 referencePose();
-console.info('Reference fit loaded: wrist roll -90 CAD degrees; other reference angles are visual hypotheses, not confirmed actuator alignment.');
+console.info(`Reference fit loaded: wrist roll ${referenceAngles[4]} CAD degrees; display orientation includes the user correction. Other reference angles are visual hypotheses, not confirmed actuator alignment.`);
 
 }catch(e){root.querySelector('#so-error').textContent=e.message;console.error(e)}
 })();

@@ -23,4 +23,4 @@ root.querySelector('#so-front').onclick=()=>fitReferenceView([-1,.02,.12]);
 root.querySelector('#so-perspective').onclick=()=>fitReferenceView([-.75,.65,.4]);
 new ResizeObserver(()=>fitReferenceView()).observe(stage);
 referencePose();
-console.info('Reference fit loaded: wrist roll -90 CAD degrees; other reference angles are visual hypotheses, not confirmed actuator alignment.');
+console.info(`Reference fit loaded: wrist roll ${referenceAngles[4]} CAD degrees; display orientation includes the user correction. Other reference angles are visual hypotheses, not confirmed actuator alignment.`);

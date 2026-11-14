@@ -1,0 +1,31 @@
+{
+  "arm": "follower",
+  "joint": "elbow_flex",
+  "accepted": true,
+  "before": "before-follower-elbow-01.json",
+  "after": "after-follower-elbow-01.json",
+  "physical_direction_tested": "lower forearm and gripper by rotating only the elbow",
+  "physical_direction_for_increasing_value": "lower forearm and gripper at the elbow",
+  "encoder_delta_ticks": 350,
+  "encoder_delta_degrees": 30.76171875,
+  "all_joint_delta_ticks": {
+    "follower/shoulder_pan": 5,
+    "follower/shoulder_lift": -3,
+    "follower/elbow_flex": 350,
+    "follower/wrist_flex": -3,
+    "follower/wrist_roll": 0,
+    "follower/gripper": 0,
+    "leader/shoulder_pan": 1,
+    "leader/shoulder_lift": 0,
+    "leader/elbow_flex": 0,
+    "leader/wrist_flex": 0,
+    "leader/wrist_roll": 0,
+    "leader/gripper": 0
+  },
+  "cad_motion_sign": 1,
+  "cad_sign": 1,
+  "cad_direction_check": {
+    "wrist_pitch_height_derivative_m_per_positive_cad_rad_at_extended_reference": -0.13478616837370172
+  },
+  "cad_at_zero_rad": null
+}
