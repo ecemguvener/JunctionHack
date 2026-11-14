@@ -38,6 +38,10 @@ WORKSPACE = ((-0.15, 0.65), (-0.55, 0.45), (-0.02, 0.35))
 MAX_CLOUD_POINTS = 40000
 MAX_BODY = 64 * 1024
 MAX_ITEMS = 50
+# Table levelling: each camera's table plane must lie within this band and tilt of z = 0.
+TABLE_BAND_M = 0.08
+MAX_TILT_DEG = 8.0
+LEVEL_PERIOD_S = 10.0
 SENSOR_IDS = {"top": 0, "plate": 1}
 
 
@@ -255,6 +259,75 @@ def unpack(data: bytes) -> np.ndarray:
 
 
 @dataclass(frozen=True)
+class Level:
+    """Rigid correction that puts one camera's table plane on z = 0: w' = R (w - c) + (cx, cy, 0)."""
+
+    rotation: np.ndarray
+    centre: np.ndarray
+    tilt_deg: float
+    offset_mm: float
+    inliers: int
+
+    def apply(self, xyz: np.ndarray) -> np.ndarray:
+        out = (xyz - self.centre) @ self.rotation.T
+        out[:, :2] += self.centre[:2]
+        return out
+
+    def as_dict(self) -> dict:
+        return dict(
+            tilt_deg=round(self.tilt_deg, 2),
+            offset_mm=round(self.offset_mm, 1),
+            inliers=self.inliers,
+        )
+
+
+def rotation_to_z(normal: np.ndarray) -> np.ndarray:
+    """Proper rotation that turns the unit vector `normal` (z > 0) into +z."""
+    z = np.array([0.0, 0.0, 1.0])
+    axis = np.cross(normal, z)
+    s, c = np.linalg.norm(axis), float(normal @ z)
+    if s < 1e-12:
+        return np.eye(3)
+    k = axis / s
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + s * K + (1 - c) * K @ K
+
+
+def fit_table(xyz: np.ndarray, rng, band=TABLE_BAND_M, tol=0.005, iters=300) -> Level | None:
+    """RANSAC plane on points near z = 0. None if no table plane is reliable enough."""
+    near = xyz[np.abs(xyz[:, 2]) < band]
+    if len(near) < 300:
+        return None
+    sample = near[rng.choice(len(near), min(len(near), 4000), replace=False)]
+    best, best_count = None, 0
+    for _ in range(iters):
+        a, b, c = sample[rng.choice(len(sample), 3, replace=False)]
+        n = np.cross(b - a, c - a)
+        norm = np.linalg.norm(n)
+        if norm < 1e-9:
+            continue
+        n /= norm
+        if n[2] < 0:
+            n = -n
+        if n[2] < math.cos(math.radians(MAX_TILT_DEG)):
+            continue
+        count = int((np.abs((sample - a) @ n) < tol).sum())
+        if count > best_count:
+            best, best_count = (n, a), count
+    if best is None or best_count < 0.3 * len(sample):
+        return None
+    n, a = best
+    inliers = sample[np.abs((sample - a) @ n) < tol]
+    centre = inliers.mean(0)  # least-squares refinement on the inliers
+    n = np.linalg.svd(inliers - centre, full_matrices=False)[2][-1]
+    n = n if n[2] > 0 else -n
+    tilt = math.degrees(math.acos(min(1.0, float(n[2]))))
+    if tilt > MAX_TILT_DEG or abs(centre[2]) > band:
+        return None
+    return Level(rotation_to_z(n), centre, tilt, float(centre[2] * 1000), len(inliers))
+
+
+@dataclass(frozen=True)
 class CloudSource:
     sensor: str  # live depth name: "top" or "plate"
     scene_camera: str  # sim scene name: "overhead" or "side"
@@ -291,6 +364,16 @@ class CloudWorker:
             s.sensor: dict(ok=False, error="not fetched") for s in sources
         }
         self.rng = np.random.default_rng(0)
+        self.levels: dict[str, tuple[float, Level | None]] = {}
+
+    def level(self, sensor: str, xyz: np.ndarray) -> Level | None:
+        """Table plane fit per camera, refreshed every LEVEL_PERIOD_S. Keeps the last good fit."""
+        at, previous = self.levels.get(sensor, (-math.inf, None))
+        if time.monotonic() - at < LEVEL_PERIOD_S:
+            return previous
+        fit = fit_table(xyz, self.rng)
+        self.levels[sensor] = (time.monotonic(), fit or previous)
+        return fit or previous
 
     def fetch_camera(self, source: CloudSource) -> tuple[np.ndarray, np.ndarray, dict]:
         camera = self.scene.camera(source.scene_camera)
@@ -303,9 +386,13 @@ class CloudWorker:
         points = np.asarray(payload["points"], float).reshape(-1, 6)
         points = points[np.isfinite(points).all(axis=1)]
         xyz = to_world(points[:, :3], camera)
+        level = self.level(source.sensor, xyz)
+        if level is not None:
+            xyz = level.apply(xyz)
         keep = crop(xyz)
         info = dict(
             ok=True,
+            table=level.as_dict() if level else None,
             points=int(keep.sum()),
             raw_points=len(points),
             age_s=round(age, 3),

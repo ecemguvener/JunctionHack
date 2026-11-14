@@ -319,3 +319,28 @@ def test_overlay_push_endpoints(stack):
     )
     assert code == 400 and "inside" in reply["error"]
     assert post(base + "/api/nothing", {})[0] == 404
+
+
+def test_fit_table_levels_tilted_low_table():
+    rng = np.random.default_rng(1)
+    xy = rng.uniform([-0.1, -0.5], [0.6, 0.4], (5000, 2))
+    tilt = math.radians(4)
+    z = -0.04 + np.tan(tilt) * xy[:, 0] + rng.normal(0, 0.001, len(xy))  # 40 mm low, 4 deg tilt
+    table = np.column_stack([xy, z])
+    brick = np.column_stack([rng.uniform(0.2, 0.25, (300, 2)), np.full(300, 0.0)])
+    brick[:, 2] = -0.04 + np.tan(tilt) * brick[:, 0] + 0.03  # 30 mm above the table
+    level = dash.fit_table(np.vstack([table, brick]), rng)
+    assert level is not None and abs(level.tilt_deg - 4) < 0.3
+    # offset = table height at the inlier centre
+    assert abs(level.offset_mm - (-40 + np.tan(tilt) * level.centre[0] * 1000)) < 1
+    fixed = level.apply(np.vstack([table, brick]))
+    assert np.abs(fixed[:5000, 2]).max() < 0.006  # table now on z = 0
+    assert abs(np.median(fixed[5000:, 2]) - 0.03 * math.cos(tilt)) < 0.003  # brick height kept
+
+
+def test_fit_table_refuses_without_table():
+    rng = np.random.default_rng(2)
+    assert dash.fit_table(rng.uniform(0.2, 0.3, (2000, 3)), rng) is None  # nothing near z = 0
+    steep = np.column_stack([rng.uniform(-0.05, 0.05, (2000, 2)), np.zeros(2000)])
+    steep[:, 2] = steep[:, 0] * np.tan(math.radians(30))  # 30 deg: too steep to be the table
+    assert dash.fit_table(steep, rng) is None
