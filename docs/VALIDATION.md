@@ -1,5 +1,30 @@
 # Executed validation — 13 November 2026
 
+## Brick-region 3D extraction — 14 November 2026
+
+Executed `scripts/compare_depth_scans.py` on the existing clean and later
+operator-labeled defective plate captures with manually reviewed pixel ROI
+`382 262 437 311`. Exported separate vertex-only PLYs, RGB crops, a static 3D
+comparison and a report retaining source PLY hashes under ignored artifacts.
+The clean ROI contains 1,985 points with 73.65% usable depth pixels; the later
+ROI contains 2,139 points with 79.37% usable depth pixels. RGB review shows
+the studs and later added material at the top. These are partial visible-surface
+scans; ROI edges can contain background. No table-plane segmentation or pose
+registration was performed. Intrinsics are fixed to the recorded plate SDK
+640×480 probe; the parser supports that SDK PLY layout only.
+
+Correction to the earlier conversational conclusion: a zero median depth
+difference across a broad image region does NOT establish that a defect is
+appearance-only. Missing depths, background pixels, pose changes and sensor
+noise must be handled before attributing any difference to a defect. No depth
+defect threshold or accuracy has been measured. Physical object/session identity
+for these older generic clean/defective folders is unconfirmed, so these are
+review artifacts and must not enter formal train/val/test partitions yet.
+
+Software verification: `uv run --locked pytest -q` passed 80 tests with five
+optional integration tests skipped; Ruff lint and format checks passed on
+`src tests scripts`. No new camera or robot access occurred for this extraction.
+
 ## RealSense depth probe — 14 November 2026
 
 Stopped the temporary RGB bench so it released both D415 devices, then ran the
