@@ -1,5 +1,23 @@
 # Executed validation — 13 November 2026
 
+## Provisional orange-board outline registration — 14 November 2026
+
+After the operator repositioned the board, both full outlines were visible.
+Fresh RGB and SDK point packets were saved in ignored
+`artifacts/orange-corner-review-02/`. SIFT with a 0.7 ratio test found zero
+matches. Testing the eight possible outline orientations with normalized
+red-green image correlation produced a best coefficient of 0.664 versus
+0.155 or lower for alternatives; this is supporting evidence, not calibration.
+
+Executed capture-specific `scripts/board_alignment_pilot.py`: manually chosen
+corresponding outline pixels, board depth-plane RANSAC at 3 mm, pinhole ray-plane
+intersection, then a rigid transform. Top plane: 1,415/1,508 inliers, 1.36 mm
+RMS. Plate plane: 2,300/2,306 inliers, 0.63 mm RMS. Corresponding corner residuals
+are 15.98, 8.03, 14.57 and 9.86 mm. Exported `provisional-transform.json` with
+`accepted: false` and `provisional-merged-scene.ply`. This is a rough scene
+alignment only, with no independent validation, distortion correction or
+defect-scale accuracy. It is not applied to the live viewer or robot control.
+
 ## Orange-board color corner candidates — 14 November 2026
 
 Fetched fresh RGB frames from both live-depth review endpoints and executed
