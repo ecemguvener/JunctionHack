@@ -1,5 +1,16 @@
 # Executed validation — 13 November 2026
 
+## Brick-002 accepted back and next-pose guide — 14 November 2026
+
+Saved fresh RGB previews and subsampled point packets under ignored
+`artifacts/brick-002-back-review/`. Visual review confirms the blue brick's
+hollow underside and circular tubes facing the plate camera, unobstructed.
+Corrected the guide's simplified smooth-back wording to match the actual
+underside. Retained brick-002 and its existing session group, with no model
+decision, partition or cross-camera transform applied. Updated the existing
+HTML pages to show this saved photo and a 90-degree clockwise side-view target.
+The served guide returned HTTP 200; no core source changed.
+
 ## Brick-002 orientation guide and accepted studs-facing view — 14 November 2026
 
 Captured RGB previews and subsampled point packets under ignored
