@@ -37,6 +37,26 @@ def rodrigues(omega) -> np.ndarray:
     return np.eye(3) + math.sin(angle) * kx + (1 - math.cos(angle)) * kx @ kx
 
 
+def rot_z_batch(angles: np.ndarray) -> np.ndarray:
+    """Rotations (N, 3, 3) about Z by the angles (N,) in radians."""
+    c, s = np.cos(angles), np.sin(angles)
+    out = np.zeros((len(c), 3, 3))
+    out[:, 0, 0], out[:, 0, 1], out[:, 1, 0], out[:, 1, 1], out[:, 2, 2] = c, -s, s, c, 1.0
+    return out
+
+
+def rodrigues_batch(omega: np.ndarray) -> np.ndarray:
+    """Rotation matrices (N, 3, 3) of the rotation vectors (N, 3)."""
+    omega = np.asarray(omega, float)
+    angle = np.linalg.norm(omega, axis=1)
+    k = omega / np.maximum(angle, 1e-12)[:, None]
+    kx = np.zeros((len(omega), 3, 3))
+    kx[:, 0, 1], kx[:, 0, 2], kx[:, 1, 2] = -k[:, 2], k[:, 1], -k[:, 0]
+    kx[:, 1, 0], kx[:, 2, 0], kx[:, 2, 1] = k[:, 2], -k[:, 1], k[:, 0]
+    s, c = np.sin(angle)[:, None, None], (1 - np.cos(angle))[:, None, None]
+    return np.eye(3)[None] + s * kx + c * (kx @ kx)
+
+
 def rotation_angle_deg(a, b) -> float:
     """Angle of the rotation between two rotation matrices, degrees."""
     r = np.asarray(a, float).T @ np.asarray(b, float)
@@ -134,12 +154,21 @@ class ClosestPointGrid:
 
     def lookup(self, points: np.ndarray) -> np.ndarray:
         """Nearest sample index for each point (part frame); -1 outside the grid."""
-        cell = np.rint((points - self.origin) / self.resolution).astype(np.int64)
-        shape = np.array(self.index.shape)
-        inside = np.all((cell >= 0) & (cell < shape), axis=1)
-        out = np.full(len(points), -1, np.int64)
-        c = cell[inside]
-        out[inside] = self.index[c[:, 0], c[:, 1], c[:, 2]]
+        shape = self.index.shape
+        cell = np.floor((points - (self.origin - 0.5 * self.resolution)) / self.resolution)
+        inside = (
+            (cell[:, 0] >= 0)
+            & (cell[:, 0] < shape[0])
+            & (cell[:, 1] >= 0)
+            & (cell[:, 1] < shape[1])
+            & (cell[:, 2] >= 0)
+            & (cell[:, 2] < shape[2])
+        )
+        c = cell.astype(np.int64)
+        flat = (c[:, 0] * shape[1] + c[:, 1]) * shape[2] + c[:, 2]
+        flat[~inside] = 0
+        out = self.index.reshape(-1)[flat].astype(np.int64)
+        out[~inside] = -1
         return out
 
 
@@ -204,11 +233,17 @@ def project(points_world: np.ndarray, rotation: np.ndarray, position, fx, fy, cx
 
 
 def fit_plane_ransac(
-    points: np.ndarray, threshold: float, iterations: int = 200, seed: int = 0
+    points: np.ndarray,
+    threshold: float,
+    iterations: int = 200,
+    seed: int = 0,
+    refine_points: int | None = None,
 ) -> tuple[np.ndarray, float, np.ndarray] | None:
     """Plane n . p + d = 0 (unit n with n_z >= 0) with the most inliers, refined by SVD.
 
-    Returns (n, d, inlier mask) or None if there are fewer than 3 points.
+    ``refine_points``: if set, the SVD refinement uses a random sample of this many points
+    (faster for large clouds). Returns (n, d, inlier mask over all points) or None if there
+    are fewer than 3 points.
     """
     if len(points) < 3:
         return None
@@ -222,18 +257,24 @@ def fit_plane_ransac(
         return None
     normals = normals[ok] / norm[ok, None]
     ds = -np.einsum("ij,ij->i", normals, a[ok])
-    probe = points[rng.choice(len(points), min(len(points), 4000), replace=False)]
+    probe = np.take(points, rng.choice(len(points), min(len(points), 4000), replace=False), axis=0)
     counts = (np.abs(probe @ normals.T + ds) < threshold).sum(0)
     best = int(np.argmax(counts))
     n, d = normals[best], ds[best]
+    refine = points
+    if refine_points is not None and len(points) > refine_points:
+        refine = np.take(points, rng.integers(0, len(points), refine_points), axis=0)
     for _ in range(3):
-        inliers = np.abs(points @ n + d) < threshold
+        inliers = np.abs(refine @ n + d) < threshold
         if inliers.sum() < 3:
             break
-        sel = points[inliers]
+        sel = np.take(refine, np.flatnonzero(inliers), axis=0).astype(float)
         centre = sel.mean(0)
-        _, _, vt = np.linalg.svd(sel - centre, full_matrices=False)
-        n = vt[2]
+        q = sel - centre
+        # Normal = eigenvector of the smallest eigenvalue of the 3x3 scatter matrix (the same
+        # as the last right singular vector of q, but much faster for many points).
+        _, vectors = np.linalg.eigh(q.T @ q)
+        n = vectors[:, 0]
         d = -float(n @ centre)
     if n[2] < 0:
         n, d = -n, -d
@@ -334,6 +375,37 @@ def angular_coverage_deg(xy: np.ndarray, centre, bins: int = 36, min_count: int 
     return float((hist >= min_count).sum() * 360.0 / bins)
 
 
+# ----------------------------------------------------------------------------- polygons
+
+
+def convex_hull_2d(xy: np.ndarray) -> np.ndarray:
+    """Vertices (K, 2) of the convex hull of 2D points, in order."""
+    hull = cv2.convexHull(np.ascontiguousarray(xy, np.float32))
+    return hull[:, 0, :].astype(float)
+
+
+def polygon_overlap(p: np.ndarray, q: np.ndarray) -> tuple[float, np.ndarray]:
+    """Overlap depth of two convex polygons and the direction to move ``q`` out of ``p``.
+
+    Separating axis test on the edge normals of both polygons. Returns (depth, unit
+    direction). depth > 0: the polygons overlap, and moving ``q`` by depth along the
+    direction separates them (the smallest such move). depth <= 0: they do not overlap;
+    -depth is the gap along the direction.
+    """
+    edges = np.concatenate((np.roll(p, -1, 0) - p, np.roll(q, -1, 0) - q))
+    normals = np.column_stack((-edges[:, 1], edges[:, 0]))
+    length = np.linalg.norm(normals, axis=1)
+    normals = normals[length > 1e-12] / length[length > 1e-12, None]
+    pp = p @ normals.T
+    qq = q @ normals.T
+    forward = pp.max(0) - qq.min(0)  # move q along +normal by this
+    backward = qq.max(0) - pp.min(0)  # move q along -normal by this
+    depth = np.minimum(forward, backward)
+    k = int(np.argmin(depth))
+    direction = normals[k] if forward[k] <= backward[k] else -normals[k]
+    return float(depth[k]), direction
+
+
 # ----------------------------------------------------------------------------- colours
 
 
@@ -346,5 +418,5 @@ def rgb_to_lab(rgb_uint8: np.ndarray) -> np.ndarray:
 
 def color_distance(lab_a: np.ndarray, lab_b: np.ndarray, lightness_weight: float = 0.35):
     """Lab distance with less weight on lightness, so that shade changes count less than hue."""
-    d = np.asarray(lab_a, float) - np.asarray(lab_b, float)
+    d = np.asarray(lab_a, np.float32) - np.asarray(lab_b, np.float32)
     return np.sqrt((lightness_weight * d[..., 0]) ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2)

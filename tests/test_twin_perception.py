@@ -197,13 +197,12 @@ def test_real_fixture_002():
     red = by_id["part-002"]  # red 2x4, upright, in the pink plate
     assert red.support == "plate_defective" and red.stable_pose == "upright"
     assert np.linalg.norm(np.array(red.pos[:2]) - [0.337, -0.152]) < 0.015
-    # The cream 2x4 in the green plate is the same sim part: it is a duplicate.
-    dups = state.diagnostics["duplicates"]
-    assert any(
-        d["object_id"] == "part-002"
-        and np.linalg.norm(np.array(d["pos"][:2]) - plates["good"]) < 0.08
-        for d in dups
-    )
+    assert red.color_name == "red"
+    # The off-white 2x4 in the green plate is the same part: it gets the second copy.
+    cream = by_id["part-002-2"]
+    assert cream.support == "plate_good" and cream.color_name == "white"
+    assert np.linalg.norm(np.array(cream.pos[:2]) - plates["good"]) < 0.08
+    assert by_id["part-003"].color_name == "yellow"  # the yellow 1x2x2 in the pink plate
     for b in state.bricks:  # all bricks are in a plate (no brick on the toy, the arm, the can)
         assert b.support.startswith("plate_"), b
 
