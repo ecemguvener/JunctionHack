@@ -45,7 +45,13 @@ Useful options:
   `patchcore-sim`, so `configs/patchcore-sim.yaml` finds the new model.
 - `--overwrite`: the old Volume dataset with the same name moves to
   `data/<name>.previous-<time>` on the Volume. Nothing is deleted.
-- `--no-sharded`: use the unchanged generator in one container (slow; see below).
+- `--palette off|main|all`: brick colours of the detector data (default `all`; see
+  "Brick colours" below). `make modal-retrain-detector PALETTE=off` gives the old data.
+- `--episodes TRAIN,VAL,TEST`: episodes per split. The default is `36,27,27` with a palette
+  and `6,3,3` with `off`. Each episode gives 4 images.
+- `--color-config configs/other.yaml`: a different mark contrast table and minimum.
+- `--no-download-data` (`pipeline`): do not download the dataset to `data/<dataset>`.
+- `--no-sharded`: use the generator in one container (slow; see below).
 - `--no-gpu-train`: fit PatchCore on the CPU of the same container.
 - `--scene-config configs/other.yaml`: render with a different scene config.
 - `train_act --gpu A100-40GB`: use a different GPU for one run.
@@ -64,9 +70,9 @@ SHA-256 of all uploaded source files. This makes a run from a dirty tree traceab
 
 | Function | Resources | What it does |
 | --- | --- | --- |
-| `generate_shard_job` | 4 CPU, 4 GB, one container per episode (12 in total) | Runs `cloud/generate_shard.py render` for one episode (4 images). MuJoCo renders with OSMesa. |
-| `merge_dataset_job` | 2 CPU | Joins the 12 shards into `data/<dataset>` on the Volume, in the same row order as `generate.py`. |
-| `generate_job` | 4 CPU | The unchanged `brickcell.simulation.generate` in one container (`--no-sharded`). |
+| `generate_shard_job` | 4 CPU, 4 GB, one container per episode (90 with a palette, 12 with `off`) | Runs `cloud/generate_shard.py render` for one episode (4 images). MuJoCo renders with OSMesa. |
+| `merge_dataset_job` | 2 CPU | Joins the shards into `data/<dataset>` on the Volume, in the same row order as `generate.py`. |
+| `generate_job` | 4 CPU | `brickcell.simulation.generate` in one container (`--no-sharded`). |
 | `train_patchcore_job` | GPU (L4, else A10G, else L40S), 4 CPU, 16 GB | One Python process: `validate-data`, `train` (GPU), `export` (CPU, OpenVINO), `parity` (CPU), `evaluate` (CPU). |
 | `record_policy_shard` | 4 CPU per shard | `brickcell.simulation.record_policy` for 3 or more episodes. Seeds are `seed + episode index`, as in one local run. |
 | `merge_policy_job` | 2 CPU | Gives global episode names and the normal splits (last two are val and test), then checks the result with `brickcell.policy.data.load_episodes`. |
@@ -112,7 +118,8 @@ gave TN=6, TP=6, FP=0, FN=0 on the synthetic test split.
 
 | Result | Volume path | Local path |
 | --- | --- | --- |
-| Rendered dataset | `data/<dataset>/` | Not downloaded (see below) |
+| Rendered dataset | `data/<dataset>/` | `data/<dataset>/` (`pipeline`; `generate --download-data`) |
+| Test results per brick colour | | `artifacts/models/<model name>/per_color_test.json` (`pipeline`) |
 | PatchCore model and reports | `runs/patchcore/<run id>/model/` | `artifacts/models/<model name>/` |
 | Demonstrations | `data/<demos>/` | Not downloaded |
 | ACT checkpoint and report | `runs/act/<run id>/policy/` | `artifacts/policy/<policy name>/` |
@@ -127,8 +134,9 @@ The model folder has `metadata.json`, `model.xml`, `model.bin`, `model.ckpt`,
 `modal_provenance.json` (app ID, run ID, GPU type, phase times, Git commit, dirty flag,
 source SHA-256).
 
-The data stays on the Volume, so that there is no round trip. To get the dataset (for
-example to run `brickcell parity` on a laptop), use:
+`pipeline` downloads the dataset to `data/<dataset>`, because `brickcell parity` and
+`brickcell evaluate` on the laptop need the manifest that the model was calibrated with.
+To get a dataset by hand, use:
 
 ```bash
 modal volume get brickcell-train data/two-bowl data/
@@ -141,30 +149,58 @@ modal volume get brickcell-train data/two-bowl data/
 3. Read the summary at the end of the output. Make sure that `parity_passed` is `true`.
 4. The new model is in `artifacts/models/patchcore-sim/`. The old model is in
    `artifacts/models/patchcore-sim.previous-<time>/`.
-5. Optional: run `modal volume get brickcell-train data/two-bowl data/`, and then
+5. The new dataset is in `data/two-bowl/` (the old one moves aside). Run
    `uv run python -m brickcell parity --config configs/patchcore-sim.yaml` on the laptop.
+6. Read `artifacts/models/patchcore-sim/per_color_test.json`: the test results for each
+   brick colour.
 
-If `generate.py` changed, the shard runner stops with a message (see below). Then use
-`--no-sharded`, or update `cloud/generate_shard.py`.
+## Brick colours
+
+`brickcell.simulation.generate --palette` (and the same option of `generate` and
+`pipeline`) sets the brick colours of the detector data:
+
+- `off`: the scene colour of each part (`configs/sim-scene.yaml`) with a small jitter, 6/3/3
+  episodes. This is the old data; the images are the same pixel for pixel.
+- `main`: the 12 main colours of `configs/brick-palette.yaml`.
+- `all` (default): all 18 palette colours.
+
+With a palette, each brick of each episode gets one palette colour (albedo + the same
+jitter of 0.015 per channel). The order is a seeded round-robin for each split and each
+label, so each colour appears about the same number of times in each split. The order does
+not use the jitter random generator, so it does not depend on the shard layout.
+
+The synthetic defect is a dark mark. On a dark brick the mark can be invisible, and a
+"defective" label without a visible defect makes the detector worse.
+`configs/sim-data-colors.yaml` has the measured mark contrast of each colour (CIE76 delta E
+between the mark pixels with and without the mark, in the inspection crop) and a minimum
+(`min_mark_delta_e: 20`). A colour below the minimum is used only for good samples. Measured
+on 2026-11-14: black 3.8 (excluded), dark green 32.7, brown 38.6, magenta 60.4, all other
+colours 66 to 123. To measure again (after a change to the lights, the camera or the mark):
+
+```bash
+PYTHONPATH=src MENAGERIE_CACHE_DIR="$PWD/.cache/menagerie" artifacts/mujoco-venv/bin/python \
+  -m brickcell.simulation.generate --measure-contrast /tmp/contrast.json
+```
+
+The generator also measures the contrast of each defective image (render with and without
+the mark in the same state). The manifest keeps schema 1. It has two more top-level fields:
+`palette` (mode, colours, excluded colours, episodes) and `sample_metadata` (for each image:
+`color`, `rgb`, `part`, and `mark_delta_e` for a defective image).
 
 ## Parallel generation
 
-`brickcell.simulation.generate` renders all 12 episodes in one process with one random
-generator. It has no seed or shard option. `cloud/generate_shard.py` repeats its
-per-episode loop with one random generator per episode
+`brickcell.simulation.generate` renders all episodes in one process with one random
+generator. `cloud/generate_shard.py` calls the same episode function
+(`generate.render_episode`) with one random generator per episode
 (`numpy.random.default_rng([2026, split index, episode])`), so each episode can run in a
-different container. The image names, labels, splits, session IDs, defect rule and
-manifest format are the same. The colour and camera jitter values are different from a
-local run (same ranges, different random draws). Each shard starts with a new `World`, so
-the arm starts from the ready pose at each episode, not from the end pose of the previous
-episode.
+different container. The image names, labels, splits, session IDs, defect rule, colours and
+manifest are the same. Only the colour and camera jitter values are different from a local
+run (same ranges, different random draws). Each shard starts with a new `World`, so the arm
+starts from the ready pose at each episode, not from the end pose of the previous episode.
 
-The wrapper compares the SHA-256 of `generate.py` with the value that it was written for,
-and stops if they differ. `tests/test_cloud_modal.py` does the same check.
-
-A change in `generate.py` would remove the copy: add `--episodes split:episode ...`
-and a per-episode seed to `generate.py`, and a `merge` command. Then the shard runner can
-call `generate.py` directly.
+The shard runner has no copy of the episode loop, so a change in `generate.py` goes to the
+shards directly. `cloud/modal_helpers.py` has the episode plans as constants (it does not
+import numpy); `tests/test_cloud_modal.py` checks that they agree with `generate.py`.
 
 ## Timings
 
@@ -185,6 +221,21 @@ threads). The PatchCore dataset has 48 images (12 episodes).
 | PatchCore call, local view | 33.2 s (4 processes) | | 26.7 s (with cold start) |
 | Download model | none | | 18.3 s (20 files) |
 | Total, generate to local model | about 198 s | | 91.7 s |
+
+Palette dataset (`--palette all`, 90 episodes, 360 images), 2026-11-14, run
+`20261114T071648Z-ad2e`:
+
+| Phase | Modal |
+| --- | --- |
+| Generate 360 images | 61.1 s (90 containers; 28 s median shard, 19 s maximum cold start) + 25.5 s merge |
+| PatchCore call (prefetch 0.7 s, validate-data 0.5 s, train 5.6 s on an A10, export 5.9 s, parity 4.3 s, evaluate 2.1 s) | 35.1 s |
+| Download model + dataset (32 parallel reads) | 3.3 s + 7.6 s |
+| Total, generate to local model and data | 132.6 s |
+
+The first palette run read the Volume one file at a time: merge 76.8 s, validate-data
+54.3 s, dataset download 302.5 s (total 554.5 s). The parallel reads removed most of that
+time. Cost of one palette retrain: about 90 x 4 cores x 30 s = 3 core-hours of CPU
+(about USD 0.15) plus less than 1 minute of A10 (about USD 0.02).
 
 ACT (policy-smoke: 6 demonstrations, 2,338 frames, batch 8):
 
@@ -230,8 +281,6 @@ core-hour.
 
 ## Changes that are not made (they need changes in src/ or policy/)
 
-- `generate.py`: per-episode seeds and an episode selection option, so that the shard
-  runner does not need its copy of the loop.
 - `policy/train_act.py`: a `--device` option and a `torch.utils.data.DataLoader` with
   `num_workers` and `pin_memory` for the batch assembly. Now `cloud/act_gpu.py` sets the
   torch default device to CUDA, and the batch is made in the main thread. The script also

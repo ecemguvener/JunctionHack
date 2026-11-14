@@ -26,6 +26,8 @@ policy-evaluate:
 MODAL ?= modal
 DATASET ?= two-bowl
 MODEL_NAME ?= patchcore-sim
+# Brick colours of the detector data: off (scene colours), main (12 colours), all.
+PALETTE ?= all
 STEPS ?= 2000
 .PHONY: modal-warm modal-pipeline modal-retrain-detector modal-patchcore modal-record modal-act modal-act-evaluate modal-stop
 
@@ -33,10 +35,10 @@ modal-warm:
 	$(MODAL) run cloud/modal_train.py::warm
 
 modal-pipeline:
-	$(MODAL) run cloud/modal_train.py::pipeline --dataset $(DATASET) --model-name $(MODEL_NAME)
+	$(MODAL) run cloud/modal_train.py::pipeline --dataset $(DATASET) --model-name $(MODEL_NAME) --palette $(PALETTE)
 
 modal-retrain-detector:
-	$(MODAL) run cloud/modal_train.py::pipeline --dataset $(DATASET) --model-name $(MODEL_NAME) --overwrite
+	$(MODAL) run cloud/modal_train.py::pipeline --dataset $(DATASET) --model-name $(MODEL_NAME) --palette $(PALETTE) --overwrite
 
 modal-patchcore:
 	$(MODAL) run cloud/modal_train.py::train_patchcore --dataset $(DATASET) --model-name $(MODEL_NAME)

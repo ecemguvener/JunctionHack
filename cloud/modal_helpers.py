@@ -22,13 +22,61 @@ SOURCE_DIRS = ("src", "configs", "assets", "policy", "cloud")
 SOURCE_IGNORE = ["**/__pycache__", "**/*.pyc", "**/.venv", "**/.pytest_cache", "**/.ruff_cache"]
 
 
-# The split plan of brickcell.simulation.generate (split, episodes), in its order.
-GENERATE_SPLITS = (("train", 6), ("val", 3), ("test", 3))
+# Episodes per split (train, val, test) of brickcell.simulation.generate. This module does not
+# import generate.py (it needs numpy); tests/test_cloud_modal.py checks that the values agree.
+SPLIT_NAMES = ("train", "val", "test")
+LEGACY_EPISODES = (6, 3, 3)  # --palette off
+PALETTE_EPISODES = (36, 27, 27)  # --palette main / all
+PALETTE_MODES = ("off", "main", "all")
 
 
-def generate_units() -> list[str]:
+def generate_episodes(palette: str = "all", episodes: str = "") -> tuple[int, int, int]:
+    """Episodes per split. ``episodes``: "TRAIN,VAL,TEST"; empty = the default of the palette."""
+    if palette not in PALETTE_MODES:
+        raise ValueError(f"palette must be one of {PALETTE_MODES}, got {palette!r}")
+    if not episodes:
+        return LEGACY_EPISODES if palette == "off" else PALETTE_EPISODES
+    values = tuple(int(v) for v in episodes.split(","))
+    if len(values) != 3 or min(values) < 1:
+        raise ValueError(f"episodes must be TRAIN,VAL,TEST with values >= 1, got {episodes!r}")
+    return values
+
+
+def generate_units(episodes: tuple[int, int, int] = LEGACY_EPISODES) -> list[str]:
     """All "split:episode" units of the PatchCore generator, in its order."""
-    return [f"{split}:{episode}" for split, count in GENERATE_SPLITS for episode in range(count)]
+    return [f"{split}:{e}" for split, count in zip(SPLIT_NAMES, episodes) for e in range(count)]
+
+
+def per_color_report(manifest: dict, test_report: dict, threshold: float | None = None) -> dict:
+    """Test results grouped by brick colour (manifest ``sample_metadata``).
+
+    A sample is positive (defective) if its decision is DEFECTIVE. REINSPECT counts apart.
+    """
+    metadata = manifest.get("sample_metadata") or {}
+    groups: dict[str, dict] = {}
+    for row in test_report.get("samples", []):
+        color = (metadata.get(row["image_id"]) or {}).get("color") or "scene"
+        group = groups.setdefault(
+            color, {"TP": 0, "FN": 0, "TN": 0, "FP": 0, "REINSPECT": 0, "scores": {}}
+        )
+        decision = row.get("decision")
+        if decision is None and threshold is not None:
+            decision = "DEFECTIVE" if row["score"] >= threshold else "GOOD"
+        if decision == "REINSPECT":
+            group["REINSPECT"] += 1
+        elif row["label"] == 1:
+            group["TP" if decision == "DEFECTIVE" else "FN"] += 1
+        else:
+            group["FP" if decision == "DEFECTIVE" else "TN"] += 1
+        kind = "defective" if row["label"] == 1 else "good"
+        group["scores"].setdefault(kind, []).append(round(float(row["score"]), 4))
+    for group in groups.values():
+        scores = group.pop("scores")
+        for kind, values in scores.items():
+            group[f"{kind}_score_range"] = [min(values), max(values)]
+        total = group["TP"] + group["FN"] + group["TN"] + group["FP"]
+        group["accuracy"] = round((group["TP"] + group["TN"]) / total, 4) if total else None
+    return dict(sorted(groups.items()))
 
 
 def new_run_id(now: datetime | None = None) -> str:

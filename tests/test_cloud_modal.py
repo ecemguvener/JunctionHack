@@ -104,17 +104,58 @@ def test_generate_units_follow_generator_order():
     units = helpers.generate_units()
     assert len(units) == 12 and units[0] == "train:0" and units[6] == "val:0"
     assert units[-1] == "test:2"
+    units = helpers.generate_units(helpers.generate_episodes("all"))
+    assert len(units) == 90 and units[36] == "val:0" and units[-1] == "test:26"
+    assert helpers.generate_episodes("off") == (6, 3, 3)
+    assert helpers.generate_episodes("main", "2,1,1") == (2, 1, 1)
+    for bad in [("rainbow", ""), ("all", "1,2"), ("all", "0,1,1")]:
+        with pytest.raises(ValueError):
+            helpers.generate_episodes(*bad)
 
 
-def test_generate_shard_matches_generator_source():
-    import hashlib
+def test_episode_plans_match_generator():
+    generate = pytest.importorskip("brickcell.simulation.generate")
+    assert helpers.LEGACY_EPISODES == generate.LEGACY_EPISODES
+    assert helpers.PALETTE_EPISODES == generate.PALETTE_EPISODES
+    assert helpers.PALETTE_MODES == generate.PALETTE_MODES
+    assert helpers.SPLIT_NAMES == generate.SPLIT_NAMES
+    episodes = (3, 2, 2)
+    assert helpers.generate_units(episodes) == [f"{s}:{e}" for s, e in generate.units(episodes)]
+
+
+def test_generate_shard_uses_the_generator_episode_function():
+    import inspect
 
     import generate_shard
 
-    source = Path(__file__).resolve().parents[1] / "src/brickcell/simulation/generate.py"
-    assert hashlib.sha256(source.read_bytes()).hexdigest() == generate_shard.GENERATE_SHA256, (
-        "generate.py changed: update cloud/generate_shard.py"
-    )
+    source = inspect.getsource(generate_shard)
+    assert "generate.render_episode(" in source and "generate.build_manifest(" in source
+    assert "GENERATE_SHA256" not in source
+
+
+def test_per_color_report_groups_test_samples():
+    manifest = {
+        "sample_metadata": {
+            "a": {"color": "red"},
+            "b": {"color": "red"},
+            "c": {"color": "black"},
+            "d": {"color": None},
+        }
+    }
+    report = {
+        "samples": [
+            {"image_id": "a", "score": 0.5, "label": 0, "decision": "GOOD"},
+            {"image_id": "b", "score": 3.0, "label": 1, "decision": "DEFECTIVE"},
+            {"image_id": "c", "score": 2.0, "label": 0, "decision": "DEFECTIVE"},
+            {"image_id": "d", "score": 1.0, "label": 1, "decision": "REINSPECT"},
+        ]
+    }
+    result = helpers.per_color_report(manifest, report)
+    assert list(result) == ["black", "red", "scene"]
+    assert result["red"]["TP"] == result["red"]["TN"] == 1 and result["red"]["accuracy"] == 1.0
+    assert result["black"]["FP"] == 1 and result["black"]["accuracy"] == 0.0
+    assert result["scene"]["REINSPECT"] == 1 and result["scene"]["accuracy"] is None
+    assert result["red"]["defective_score_range"] == [3.0, 3.0]
 
 
 def test_patchcore_config_is_readable_as_yaml(tmp_path):
