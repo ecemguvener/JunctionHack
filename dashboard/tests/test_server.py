@@ -70,7 +70,11 @@ class Upstream:
                     return
                 body, kind = {
                     "/rgb/top": (jpeg(), "image/jpeg"),
+                    "/rgb/plate": (jpeg((40, 120, 200)), "image/jpeg"),
+                    "/rgb/wrist": (jpeg((180, 150, 40)), "image/jpeg"),
                     "/camera/overhead.png": (png(), "image/png"),
+                    "/camera/side.png": (png(), "image/png"),
+                    "/camera/wrist.png": (png(), "image/png"),
                     "/scene": (json.dumps(scene_payload()).encode(), "application/json"),
                     "/health": (
                         json.dumps(
@@ -475,3 +479,32 @@ def test_fit_table_refuses_without_table():
     steep = np.column_stack([rng.uniform(-0.05, 0.05, (2000, 2)), np.zeros(2000)])
     steep[:, 2] = steep[:, 0] * np.tan(math.radians(30))  # 30 deg: too steep to be the table
     assert dash.fit_table(steep, rng) is None
+
+
+def test_multi_camera_frame_routes(stack):
+    _, _, base = stack
+    for route in (
+        "/frame/real/top.jpg",
+        "/frame/real/plate.jpg",
+        "/frame/real/wrist.jpg",
+        "/frame/sim/top.jpg",
+        "/frame/sim/plate.jpg",
+        "/frame/sim/wrist.jpg",
+    ):
+        status_code, _, body = get(base + route)
+        assert status_code == 200 and body.startswith(b"\xff\xd8")
+
+
+def test_analyze_camera_features_wrist_corridor_and_bricks():
+    # Synthetic wrist camera image: wood background, aquamarine bowl, red brick, and purple jaws
+    img = np.full((360, 640, 3), (60, 120, 175), dtype=np.uint8)
+    cv2.circle(img, (320, 180), 115, (220, 165, 25), -1)  # aquamarine bowl (HSV H~101)
+    cv2.rectangle(img, (280, 120), (335, 165), (35, 35, 225), -1)  # red DUPLO brick inside bowl
+    cv2.rectangle(img, (205, 230), (265, 359), (145, 45, 95), -1)  # left purple jaw (HSV H~130)
+    cv2.rectangle(img, (375, 230), (435, 359), (145, 45, 95), -1)  # right purple jaw (HSV H~130)
+    feat = dash.analyze_camera_features("wrist", img)
+    assert feat["corridor"]["ok"] is True
+    assert 310.0 <= feat["corridor"]["u_pinch"] <= 330.0
+    assert len(feat["bricks"]) == 1
+    assert len(feat["bricks"][0]["box_uv"]) == 4
+    assert len(feat["bricks"][0]["axis_uv"]) == 2

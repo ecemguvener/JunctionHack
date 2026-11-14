@@ -74,23 +74,198 @@ def check_jpeg(data: bytes) -> bytes:
     return data
 
 
-def png_to_jpeg(data: bytes, quality: int = 80) -> bytes:
+def png_to_jpeg(data: bytes, quality: int = 80, resize_wh: tuple[int, int] | None = None) -> bytes:
     """Decode any image (PNG or JPEG) and encode it as a JPEG of the given quality."""
     import cv2
 
     image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Not a decodable image")
+    if resize_wh is not None and (image.shape[1], image.shape[0]) != resize_wh:
+        image = cv2.resize(image, resize_wh, interpolation=cv2.INTER_AREA)
     ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         raise RuntimeError("JPEG encoding failed")
     return jpeg.tobytes()
 
 
-class Feed:
-    """Polls one image URL and keeps the newest frame as JPEG."""
+def analyze_camera_features(cam_slot: str, image_bgr: np.ndarray) -> dict:
+    """Extract 2D jaw corridor (green/cyan/yellow) and DUPLO brick minAreaRect + grasp axes."""
+    import cv2
 
-    def __init__(self, name: str, url: str, fps: float, convert=check_jpeg, timeout: float = 3):
+    h_w, w_w = image_bgr.shape[:2]
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    # 1. Detect purple SO-101 gripper jaw corridor (primarily visible in wrist view)
+    corridor: dict = {"ok": False}
+    jaws_mask = np.zeros((h_w, w_w), dtype=np.uint8)
+    if cam_slot == "wrist":
+        jaw_raw = ((H >= 113) & (H <= 146) & (S >= 70) & (V >= 28)).astype(np.uint8) * 255
+        jaw_clean = cv2.morphologyEx(jaw_raw, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+        jaw_clean = cv2.morphologyEx(jaw_clean, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(jaw_clean)
+        left_cands: list[tuple[int, int]] = []
+        right_cands: list[tuple[int, int]] = []
+        for idx in range(1, num_labels):
+            x0, y0, bw, bh, area = stats[idx]
+            cx = float(centroids[idx][0])
+            if int(area) < 350 or (int(y0) + int(bh)) < (h_w - 28):
+                continue
+            if cx < 0.54 * w_w:
+                left_cands.append((int(area), idx))
+            if cx >= 0.46 * w_w:
+                right_cands.append((int(area), idx))
+        if left_cands and right_cands:
+            left_idx = max(left_cands)[1]
+            right_idx = max(right_cands)[1]
+            if left_idx != right_idx:
+                left_jaw = (labels == left_idx).astype(np.uint8) * 255
+                right_jaw = (labels == right_idx).astype(np.uint8) * 255
+                jaws_mask = left_jaw | right_jaw
+                l_box_y = int(stats[left_idx][1])
+                r_box_y = int(stats[right_idx][1])
+                v_start = max(int(0.42 * h_w), min(l_box_y, r_box_y))
+                v_end = int(0.95 * h_w)
+                edge_pairs: list[tuple[int, int, int]] = []
+                for v in range(v_start, v_end):
+                    xs_l = np.where(left_jaw[v] > 0)[0]
+                    xs_r = np.where(right_jaw[v] > 0)[0]
+                    if len(xs_l) > 0 and len(xs_r) > 0:
+                        ul = int(xs_l.max())
+                        ur = int(xs_r.min())
+                        if ur > ul + 15:
+                            edge_pairs.append((ul, ur, v))
+                if len(edge_pairs) >= 12:
+                    pairs = np.array(edge_pairs, dtype=np.float64)
+                    top_n = min(len(pairs), 55)
+                    u_left_pad = float(np.median(pairs[:top_n, 0]))
+                    u_right_pad = float(np.median(pairs[:top_n, 1]))
+                    u_pinch = 0.5 * (u_left_pad + u_right_pad)
+                    corridor = {
+                        "ok": True,
+                        "u_left_pad": round(u_left_pad, 1),
+                        "u_right_pad": round(u_right_pad, 1),
+                        "u_pinch": round(u_pinch, 1),
+                        "gap_px": round(u_right_pad - u_left_pad, 1),
+                        "v_top": int(pairs[0, 2]),
+                        "v_bottom": int(pairs[-1, 2]),
+                        "left_edge_uv": [[int(p[0]), int(p[2])] for p in edge_pairs[::2]],
+                        "right_edge_uv": [[int(p[1]), int(p[2])] for p in edge_pairs[::2]],
+                    }
+
+    # 2. Segment DUPLO bricks inside the aquamarine source plate (minAreaRect + short grasp axis)
+    jaws_dilated = (
+        cv2.dilate(jaws_mask, np.ones((9, 9), np.uint8), iterations=1)
+        if np.any(jaws_mask)
+        else jaws_mask
+    )
+    is_aqua = (H >= 85) & (H <= 114) & (S >= 68) & (V >= 40) & (jaws_dilated == 0)
+    aqua_u8 = (is_aqua.astype(np.uint8)) * 255
+    aqua_u8 = cv2.morphologyEx(aqua_u8, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    cnts, _ = cv2.findContours(aqua_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    bricks_out: list[dict] = []
+    min_plate_area = 1200 if cam_slot == "wrist" else 450
+    if cnts:
+        plate_cnt = max(cnts, key=cv2.contourArea)
+        if float(cv2.contourArea(plate_cnt)) >= min_plate_area:
+            hull = cv2.convexHull(plate_cnt)
+            hull_mask = np.zeros((h_w, w_w), dtype=np.uint8)
+            cv2.drawContours(hull_mask, [hull], -1, 255, -1)
+            erode_k = 11 if cam_slot == "wrist" else 7
+            plate_interior = cv2.erode(
+                hull_mask, np.ones((erode_k, erode_k), np.uint8), iterations=1
+            )
+            search_roi = cv2.subtract(plate_interior, jaws_dilated)
+            aqua_pixels = lab[is_aqua]
+            if len(aqua_pixels) >= 100:
+                L0, A0, B0 = np.median(aqua_pixels, axis=0)
+            else:
+                L0, A0, B0 = 150.0, 105.0, 95.0
+            delta_ab = np.hypot(lab[:, :, 1] - A0, lab[:, :, 2] - B0)
+            delta_e = np.sqrt((0.45 * (lab[:, :, 0] - L0)) ** 2 + delta_ab**2)
+            is_glare = (S < 32) & (V > 212) & (delta_ab < 10.0)
+            fg = (
+                (search_roi > 0)
+                & (~is_aqua)
+                & (~is_glare)
+                & ((delta_ab >= 11.5) | (delta_e >= 18.0))
+            )
+            fg_u8 = (fg.astype(np.uint8)) * 255
+            fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+            fcnts, _ = cv2.findContours(fg_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            fg_filled = np.zeros_like(fg_u8)
+            min_brick_area = 260.0 if cam_slot == "wrist" else 90.0
+            for c in fcnts:
+                if cv2.contourArea(c) >= min_brick_area:
+                    cv2.drawContours(fg_filled, [c], -1, 255, -1)
+            dist_thresh = 8.0 if cam_slot == "wrist" else 4.5
+            dist_map = cv2.distanceTransform(fg_filled, cv2.DIST_L2, 5)
+            fg_split = fg_filled.copy()
+            if float(dist_map.max()) > dist_thresh * 1.5:
+                sure_fg = (dist_map >= dist_thresh).astype(np.uint8) * 255
+                sure_fg = cv2.morphologyEx(sure_fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                n_seeds, markers = cv2.connectedComponents(sure_fg)
+                if n_seeds > 1:
+                    markers = markers + 1
+                    unknown = cv2.subtract(fg_filled, sure_fg)
+                    markers[unknown == 255] = 0
+                    ws = cv2.watershed(cv2.cvtColor(fg_filled, cv2.COLOR_GRAY2BGR), markers)
+                    fg_split[ws == -1] = 0
+            bcnts, _ = cv2.findContours(fg_split, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for c in bcnts:
+                area = float(cv2.contourArea(c))
+                if area < min_brick_area:
+                    continue
+                rect = cv2.minAreaRect(c)
+                rw, rh = float(rect[1][0]), float(rect[1][1])
+                if min(rw, rh) < (12.0 if cam_slot == "wrist" else 7.0):
+                    continue
+                box_pts = cv2.boxPoints(rect)
+                e01 = box_pts[1] - box_pts[0]
+                e12 = box_pts[2] - box_pts[1]
+                l01 = float(np.linalg.norm(e01))
+                l12 = float(np.linalg.norm(e12))
+                short_vec = e12 if l01 >= l12 else e01
+                short_norm = max(float(np.linalg.norm(short_vec)), 1e-6)
+                ux = float(short_vec[0] / short_norm)
+                uy = float(short_vec[1] / short_norm)
+                bu, bv = float(rect[0][0]), float(rect[0][1])
+                half_span = 0.5 * min(l01, l12) + (12.0 if cam_slot == "wrist" else 7.0)
+                bricks_out.append(
+                    {
+                        "center_uv": [round(bu, 1), round(bv, 1)],
+                        "box_uv": [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in box_pts],
+                        "axis_uv": [
+                            [round(bu - half_span * ux, 1), round(bv - half_span * uy, 1)],
+                            [round(bu + half_span * ux, 1), round(bv + half_span * uy, 1)],
+                        ],
+                        "area_px": round(area, 1),
+                    }
+                )
+    bricks_out.sort(key=lambda b: b["center_uv"][1], reverse=True)
+    return {
+        "width": w_w,
+        "height": h_w,
+        "corridor": corridor,
+        "bricks": bricks_out,
+    }
+
+
+class Feed:
+    """Polls one image URL and keeps the newest frame as JPEG (plus optional 2D feature analysis)."""
+
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        fps: float,
+        convert=check_jpeg,
+        timeout: float = 3,
+        cam_slot: str | None = None,
+    ):
         if fps <= 0:
             raise ValueError("fps must be positive")
         self.name, self.url, self.period, self.convert, self.timeout = (
@@ -100,14 +275,23 @@ class Feed:
             convert,
             timeout,
         )
+        self.cam_slot = cam_slot
         self.cond = threading.Condition()
         self.frame: Frame | None = None
+        self.features: dict | None = None
         self.error: str | None = None
         self.times: collections.deque[float] = collections.deque(maxlen=30)
 
     def poll_once(self) -> None:
         try:
             data = self.convert(fetch(self.url, self.timeout))
+            features = None
+            if self.cam_slot is not None:
+                import cv2
+
+                img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                if img is not None:
+                    features = analyze_camera_features(self.cam_slot, img)
         except Exception as exc:  # noqa: BLE001 - report every source failure in the status
             with self.cond:
                 self.error = f"{type(exc).__name__}: {exc}"
@@ -115,6 +299,8 @@ class Feed:
         now = time.time()
         with self.cond:
             self.frame = Frame((self.frame.seq + 1) if self.frame else 1, data, now)
+            if features is not None:
+                self.features = features
             self.error = None
             self.times.append(now)
             self.cond.notify_all()
@@ -146,6 +332,14 @@ class Feed:
             seq=0 if frame is None else frame.seq,
             error=error,
         )
+
+    def feature_status(self, now: float, stale_s: float) -> dict:
+        with self.cond:
+            frame, features = self.frame, self.features
+        age = None if frame is None else now - frame.time
+        if frame is None or features is None or age is None or age > stale_s:
+            return dict(ok=False, corridor={"ok": False}, bricks=[])
+        return dict(ok=True, age_s=round(age, 3), **features)
 
 
 # --------------------------------------------------------------------------- scene (camera poses)
@@ -211,7 +405,7 @@ class Scene:
             }
             self.health_at = now
 
-    def run(self, stop: threading.Event, period: float = 5) -> None:
+    def run(self, stop: threading.Event, period: float = 1.5) -> None:
         while not stop.is_set():
             self.poll_once()
             stop.wait(period)
@@ -464,6 +658,9 @@ class CloudWorker:
             age_s=round(age, 3),
             bricks=state.get("bricks", []),
             plates=state.get("plates", {}),
+            camera_top=state.get("camera_top"),
+            camera_plate=state.get("camera_plate"),
+            camera_wrist=state.get("camera_wrist"),
         )
 
     def run(self, stop: threading.Event) -> None:
@@ -660,18 +857,68 @@ class Dashboard:
     def __init__(self, args):
         self.args = args
         self.stop = threading.Event()
+        real_base = (
+            args.real_url[: -len("/rgb/top")]
+            if args.real_url.endswith("/rgb/top")
+            else args.real_url.rstrip("/")
+        )
+        real_plate_url = getattr(args, "real_plate_url", None) or f"{real_base}/rgb/plate"
+        real_wrist_url = getattr(args, "real_wrist_url", None) or (
+            "http://127.0.0.1:8091/frame.jpg"
+            if args.real_url == "http://127.0.0.1:8094/rgb/top"
+            else f"{real_base}/rgb/wrist"
+        )
+        sim_base = args.sim_url.rstrip("/")
         self.real = Feed(
             "real",
             args.real_url,
             args.real_fps,
             convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
+            cam_slot="top",
+        )
+        self.real_plate = Feed(
+            "real_plate",
+            real_plate_url,
+            max(2.0, args.real_fps * 0.5),
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
+            cam_slot="plate",
+        )
+        self.real_wrist = Feed(
+            "real_wrist",
+            real_wrist_url,
+            max(4.0, args.real_fps * 0.75),
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality, resize_wh=(640, 360)),
+            cam_slot="wrist",
         )
         self.sim = Feed(
             "sim",
-            f"{args.sim_url.rstrip('/')}/camera/{args.sim_camera}.png",
+            f"{sim_base}/camera/{args.sim_camera}.png",
             args.sim_fps,
             convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
+            cam_slot="top",
         )
+        self.sim_plate = Feed(
+            "sim_plate",
+            f"{sim_base}/camera/side.png",
+            args.sim_fps,
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality),
+            cam_slot="plate",
+        )
+        self.sim_wrist = Feed(
+            "sim_wrist",
+            f"{sim_base}/camera/wrist.png",
+            args.sim_fps,
+            convert=functools.partial(png_to_jpeg, quality=args.jpeg_quality, resize_wh=(640, 360)),
+            cam_slot="wrist",
+        )
+        self.feeds = {
+            ("real", "top"): self.real,
+            ("real", "plate"): self.real_plate,
+            ("real", "wrist"): self.real_wrist,
+            ("sim", "top"): self.sim,
+            ("sim", "plate"): self.sim_plate,
+            ("sim", "wrist"): self.sim_wrist,
+        }
         self.scene = Scene(args.sim_url)
         self.cloud = CloudWorker(args.cloud, self.scene, args.cloud_hz, args.stale_after)
         self.anomalies = Overlay("anomalies", args.overlay_stale)
@@ -682,7 +929,15 @@ class Dashboard:
         threads = [threading.Thread(target=self.scene.run, args=(self.stop,), daemon=True)]
         threads += [
             threading.Thread(target=w.run, args=(self.stop,), daemon=True)
-            for w in (self.real, self.sim, self.cloud)
+            for w in (
+                self.real,
+                self.real_plate,
+                self.real_wrist,
+                self.sim,
+                self.sim_plate,
+                self.sim_wrist,
+                self.cloud,
+            )
         ]
         for thread in threads:
             thread.start()
@@ -695,9 +950,14 @@ class Dashboard:
         plate = self.scene.camera(
             next((s.scene_camera for s in self.args.cloud if s.sensor == "plate"), "side")
         )
+        wrist = self.scene.camera("wrist")
         return dict(
             image=dict(width=top["width"], height=top["height"]),
-            cameras={"top": top, **({"plate": plate} if plate else {})},
+            cameras={
+                "top": top,
+                **({"plate": plate} if plate else {}),
+                **({"wrist": wrist} if wrist else {}),
+            },
             pivot=list(self.args.pivot),
             workspace=WORKSPACE,
             sim_camera=self.args.sim_camera,
@@ -707,17 +967,44 @@ class Dashboard:
     def status(self) -> dict:
         now = time.time()
         stale = self.args.stale_after
+        sim_stale = max(stale, 3 / self.args.sim_fps)
         sources = dict(
             real=self.real.status(now, stale),
-            sim=self.sim.status(now, max(stale, 3 / self.args.sim_fps)),
+            sim=self.sim.status(now, sim_stale),
             scene=self.scene.status(now),
             cloud=self.cloud.status(now),
+        )
+        camera_feeds = dict(
+            real=dict(
+                top=sources["real"],
+                plate=self.real_plate.status(now, stale),
+                wrist=self.real_wrist.status(now, stale),
+            ),
+            sim=dict(
+                top=sources["sim"],
+                plate=self.sim_plate.status(now, sim_stale),
+                wrist=self.sim_wrist.status(now, sim_stale),
+            ),
+        )
+        camera_features = dict(
+            real=dict(
+                top=self.real.feature_status(now, stale),
+                plate=self.real_plate.feature_status(now, stale),
+                wrist=self.real_wrist.feature_status(now, stale),
+            ),
+            sim=dict(
+                top=self.sim.feature_status(now, sim_stale),
+                plate=self.sim_plate.feature_status(now, sim_stale),
+                wrist=self.sim_wrist.feature_status(now, sim_stale),
+            ),
         )
         return dict(
             time=now,
             uptime_s=round(now - self.started, 1),
             ok=all(s["ok"] for s in sources.values()),
             sources=sources,
+            camera_feeds=camera_feeds,
+            camera_features=camera_features,
             focus=self.focus.status(now),
             anomalies=self.anomalies.status(now),
             real2sim=self.cloud.real2sim_status(now),
@@ -729,9 +1016,12 @@ def _get_studio_engine(app: Dashboard):
     if engine is None:
         import sys
 
-        src_dir = Path(__file__).resolve().parent.parent / "src"
-        if str(src_dir) not in sys.path:
-            sys.path.insert(0, str(src_dir))
+        for candidate in (
+            Path(__file__).resolve().parent.parent / "src",
+            Path("/home/intel/brickcell-deploy/src"),
+        ):
+            if candidate.is_dir() and str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
         from brickcell.studio.engine import SO101StudioEngine
 
         engine = SO101StudioEngine()
@@ -763,9 +1053,14 @@ def make_handler(app: Dashboard):
             url = urlparse(self.path)
             route, query = url.path, parse_qs(url.query)
             if route.startswith(("/api/so101/", "/api/studio/", "/frame/studio/")):
-                from brickcell.studio.server import handle_studio_get
+                try:
+                    from brickcell.studio.server import handle_studio_get
 
-                res = handle_studio_get(_get_studio_engine(app), route, url.query)
+                    res = handle_studio_get(_get_studio_engine(app), route, url.query)
+                except Exception:  # noqa: BLE001
+                    if route == "/api/so101/ui-extension.js":
+                        return self.send(200, "text/javascript", b"")
+                    res = None
                 if res is not None:
                     code, ctype, data, extra_headers = res
                     return self.send(code, ctype, data, extra_headers)
@@ -788,10 +1083,20 @@ def make_handler(app: Dashboard):
                 except ValueError:
                     return self.send_json(400, {"error": "after must be an integer"})
                 return self.cloud(after)
-            if route in ("/frame/real.jpg", "/frame/sim.jpg"):
+            frame_routes = {
+                "/frame/real.jpg": app.real,
+                "/frame/sim.jpg": app.sim,
+                "/frame/real/top.jpg": app.real,
+                "/frame/real/plate.jpg": app.real_plate,
+                "/frame/real/wrist.jpg": app.real_wrist,
+                "/frame/sim/top.jpg": app.sim,
+                "/frame/sim/plate.jpg": app.sim_plate,
+                "/frame/sim/wrist.jpg": app.sim_wrist,
+            }
+            if route in frame_routes:
                 # ?after=SEQ waits up to 2 s for a newer frame (204 if none): the client pulls
                 # the next frame only after the last one arrived, so the rate fits the link.
-                feed = app.real if "real" in route else app.sim
+                feed = frame_routes[route]
                 try:
                     after = int(query.get("after", ["0"])[0] or 0)
                 except ValueError:
@@ -805,8 +1110,18 @@ def make_handler(app: Dashboard):
                     )
                 headers = {"X-Frame-Seq": str(frame.seq), "X-Frame-Time": f"{frame.time:.3f}"}
                 return self.send(200, "image/jpeg", frame.data, headers)
-            if route in ("/stream/real.mjpg", "/stream/sim.mjpg"):
-                return self.mjpeg(app.real if "real" in route else app.sim)
+            stream_routes = {
+                "/stream/real.mjpg": app.real,
+                "/stream/sim.mjpg": app.sim,
+                "/stream/real/top.mjpg": app.real,
+                "/stream/real/plate.mjpg": app.real_plate,
+                "/stream/real/wrist.mjpg": app.real_wrist,
+                "/stream/sim/top.mjpg": app.sim,
+                "/stream/sim/plate.mjpg": app.sim_plate,
+                "/stream/sim/wrist.mjpg": app.sim_wrist,
+            }
+            if route in stream_routes:
+                return self.mjpeg(stream_routes[route])
             self.send_json(404, {"error": "Not found"})
 
         def do_POST(self):

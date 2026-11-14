@@ -186,6 +186,15 @@ class RejectedCluster:
     sample_pts_world: np.ndarray
 
 
+def _ortho_rot(R: np.ndarray) -> np.ndarray:
+    U, _, Vt = np.linalg.svd(np.asarray(R, dtype=np.float64))
+    R_out = U @ Vt
+    if np.linalg.det(R_out) < 0:
+        U[:, -1] *= -1.0
+        R_out = U @ Vt
+    return R_out
+
+
 @dataclass
 class Real2SimSceneState:
     """Complete single-frame or tracked output of the Real2Sim perception pipeline."""
@@ -233,7 +242,9 @@ class Real2SimSceneState:
         return counts
 
     def to_summary_dict(self) -> dict[str, Any]:
-        R_w_top, p_w_top, K_top = real_intel_camera_poses_world()["top"]
+        real_cams = real_intel_camera_poses_world()
+        R_w_top, p_w_top, K_top = real_cams["top"]
+        R_w_pl, p_w_pl, K_pl = real_cams["plate"]
         return {
             "provenance": self.provenance,
             "frame_index": self.frame_index,
@@ -245,6 +256,16 @@ class Real2SimSceneState:
                 "fy": round(float(K_top[1, 1]), 4),
                 "cx": round(float(K_top[0, 2]), 4),
                 "cy": round(float(K_top[1, 2]), 4),
+                "width": 640,
+                "height": 480,
+            },
+            "camera_plate": {
+                "pos": [round(float(x), 5) for x in p_w_pl],
+                "rotation_cv": [[round(float(v), 7) for v in row] for row in R_w_pl],
+                "fx": round(float(K_pl[0, 0]), 4),
+                "fy": round(float(K_pl[1, 1]), 4),
+                "cx": round(float(K_pl[0, 2]), 4),
+                "cy": round(float(K_pl[1, 2]), 4),
                 "width": 640,
                 "height": 480,
             },
@@ -3336,9 +3357,84 @@ class Real2SimPipeline:
                     )
                 )
 
+        # Build a live camera rig registered to the calibrated physical Intel cameras (`top`, `plate`, `wrist`)
+        # so MuJoCo simulation renders (`/camera/{overhead,side,wrist}.png`) and `/scene` extrinsics
+        # match the physical cameras pixel-for-pixel in the unified world frame.
+        real_cams_map = real_intel_camera_poses_world()
+        R_top_w, p_top_w, K_top_w = real_cams_map["top"]
+        R_pl_w, p_pl_w, K_pl_w = real_cams_map["plate"]
+        T_top_cv = np.eye(4, dtype=np.float64)
+        T_top_cv[:3, :3], T_top_cv[:3, 3] = _ortho_rot(R_top_w), p_top_w
+        T_pl_cv = np.eye(4, dtype=np.float64)
+        T_pl_cv[:3, :3], T_pl_cv[:3, 3] = _ortho_rot(R_pl_w), p_pl_w
+        T_wrist_cv = np.array(
+            [
+                [0.99504, 0.08539, -0.05109, 0.01396],
+                [0.06380, -0.94148, -0.33097, 0.06730],
+                [-0.07636, 0.32607, -0.94226, -0.00017],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+        T_wrist_cv[:3, :3] = _ortho_rot(T_wrist_cv[:3, :3])
+        K_wrist_w = np.array(
+            [[228.164, 0.0, 320.0], [0.0, 228.164, 180.0], [0.0, 0.0, 1.0]], dtype=np.float64
+        )
+        live_rig = CameraExtrinsicsRig(
+            realsense_1=CameraModel(
+                name="realsense_1",
+                alias="overhead",
+                serial_or_dev="350122060653",
+                width=640,
+                height=480,
+                fovy_deg=math.degrees(2.0 * math.atan(480.0 / (2.0 * float(K_top_w[1, 1])))),
+                K=K_top_w,
+                T_parent_cvcam=T_top_cv,
+                is_wrist=False,
+                has_depth=True,
+                explicit_intrinsics=(
+                    float(K_top_w[0, 0]),
+                    float(K_top_w[1, 1]),
+                    float(K_top_w[0, 2]),
+                    float(K_top_w[1, 2]),
+                ),
+            ),
+            realsense_2=CameraModel(
+                name="realsense_2",
+                alias="side",
+                serial_or_dev="243622060450",
+                width=640,
+                height=480,
+                fovy_deg=math.degrees(2.0 * math.atan(480.0 / (2.0 * float(K_pl_w[1, 1])))),
+                K=K_pl_w,
+                T_parent_cvcam=T_pl_cv,
+                is_wrist=False,
+                has_depth=True,
+                explicit_intrinsics=(
+                    float(K_pl_w[0, 0]),
+                    float(K_pl_w[1, 1]),
+                    float(K_pl_w[0, 2]),
+                    float(K_pl_w[1, 2]),
+                ),
+            ),
+            wrist=CameraModel(
+                name="wrist",
+                alias="wrist",
+                serial_or_dev="sonix-wrist",
+                width=640,
+                height=360,
+                fovy_deg=math.degrees(2.0 * math.atan(360.0 / (2.0 * 228.164))),
+                K=K_wrist_w,
+                T_parent_cvcam=T_wrist_cv,
+                is_wrist=True,
+                has_depth=False,
+                explicit_intrinsics=(228.164, 228.164, 320.0, 180.0),
+            ),
+        )
+
         twin = SO101InspectionTwin(
             block_spec=preallocated_blocks[0].spec,
-            rig=self.rig,
+            rig=live_rig,
             initial_block_xy_yaw=preallocated_blocks[0].initial_xy_yaw,
             show_viewer=show_viewer,
             show_camera_windows=None if show_viewer else False,
@@ -3352,64 +3448,95 @@ class Real2SimPipeline:
         latest_grip: float = grip_init
         latest_scene: Real2SimSceneState = initial_scene
         latest_live_rgb: np.ndarray | None = None
-        latest_sim_png: bytes | None = None
+        latest_sim_pngs: dict[str, bytes] = {}
         scene_dirty: bool = True
         stop_event = threading.Event()
         depth_frames_processed = 1
         arm_updates_processed = 1 if q_init is not None else 0
         rgb_endpoint = "plate" if camera_mode == "plate" else "top"
-        live_cam_model = self.rig.realsense_2 if camera_mode == "plate" else self.rig.realsense_1
+        live_cam_model = live_rig.realsense_2 if camera_mode == "plate" else live_rig.realsense_1
         live_hud_win = "Brickcell Studio - LIVE CAMERA + REAL2SIM 3D HUD"
         live_hud_opened = False
         sim_renderer: mujoco.Renderer | None = None
+        sim_renderer_wrist: mujoco.Renderer | None = None
         try:
             sim_renderer = mujoco.Renderer(twin.model, height=480, width=640)
+            sim_renderer_wrist = mujoco.Renderer(twin.model, height=360, width=640)
         except Exception:
             sim_renderer = None
+            sim_renderer_wrist = None
 
-        def _render_sim_overhead_png() -> bytes | None:
-            if sim_renderer is None:
-                return None
-            try:
-                sim_renderer.update_scene(twin.data, camera="realsense_1")
-                rgb_sim = sim_renderer.render()
-                ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb_sim, cv2.COLOR_RGB2BGR))
-                if ok:
-                    return buf.tobytes()
-            except Exception:
-                pass
-            return None
+        def _render_sim_all_pngs() -> dict[str, bytes]:
+            out_pngs: dict[str, bytes] = {}
+            if sim_renderer is not None:
+                for mj_cam, key_a, key_b in (
+                    ("realsense_1", "overhead", "top"),
+                    ("realsense_2", "side", "plate"),
+                ):
+                    try:
+                        sim_renderer.update_scene(twin.data, camera=mj_cam)
+                        rgb_sim = sim_renderer.render()
+                        ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb_sim, cv2.COLOR_RGB2BGR))
+                        if ok:
+                            raw_b = buf.tobytes()
+                            out_pngs[key_a] = raw_b
+                            out_pngs[key_b] = raw_b
+                    except Exception:
+                        pass
+            if sim_renderer_wrist is not None:
+                try:
+                    sim_renderer_wrist.update_scene(twin.data, camera="wrist")
+                    rgb_w = sim_renderer_wrist.render()
+                    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb_w, cv2.COLOR_RGB2BGR))
+                    if ok:
+                        out_pngs["wrist"] = buf.tobytes()
+                except Exception:
+                    pass
+            return out_pngs
 
         def _build_sim_scene_payload(sc: Real2SimSceneState) -> dict[str, Any]:
             T_b3 = twin.body3_world_pose()
             cams_out: list[dict[str, Any]] = []
+            wrist_cam_summary: dict[str, Any] | None = None
             for cam_m, cname in (
-                (self.rig.realsense_1, "overhead"),
-                (self.rig.realsense_2, "side"),
-                (self.rig.wrist, "wrist"),
+                (live_rig.realsense_1, "overhead"),
+                (live_rig.realsense_2, "side"),
+                (live_rig.wrist, "wrist"),
             ):
                 T_wc = cam_m.world_transform(T_b3 if cam_m.is_wrist else None)
-                cams_out.append(
-                    {
-                        "name": cname,
-                        "enabled": True,
-                        "world_pos": [round(float(x), 5) for x in T_wc[:3, 3]],
-                        "world_rotation_cv": [
-                            [round(float(v), 7) for v in row] for row in T_wc[:3, :3]
-                        ],
-                        "fx": round(float(cam_m.K[0, 0]), 4),
-                        "fy": round(float(cam_m.K[1, 1]), 4),
-                        "cx": round(float(cam_m.K[0, 2]), 4),
-                        "cy": round(float(cam_m.K[1, 2]), 4),
-                        "width": int(cam_m.width),
-                        "height": int(cam_m.height),
+                R_orth = _ortho_rot(T_wc[:3, :3])
+                cam_entry = {
+                    "name": cname,
+                    "enabled": True,
+                    "world_pos": [round(float(x), 5) for x in T_wc[:3, 3]],
+                    "world_rotation_cv": [[round(float(v), 7) for v in row] for row in R_orth],
+                    "fx": round(float(cam_m.K[0, 0]), 4),
+                    "fy": round(float(cam_m.K[1, 1]), 4),
+                    "cx": round(float(cam_m.K[0, 2]), 4),
+                    "cy": round(float(cam_m.K[1, 2]), 4),
+                    "width": int(cam_m.width),
+                    "height": int(cam_m.height),
+                }
+                cams_out.append(cam_entry)
+                if cname == "wrist":
+                    wrist_cam_summary = {
+                        "pos": cam_entry["world_pos"],
+                        "rotation_cv": cam_entry["world_rotation_cv"],
+                        "fx": cam_entry["fx"],
+                        "fy": cam_entry["fy"],
+                        "cx": cam_entry["cx"],
+                        "cy": cam_entry["cy"],
+                        "width": cam_entry["width"],
+                        "height": cam_entry["height"],
                     }
-                )
+            r2s_dict = sc.to_summary_dict()
+            if wrist_cam_summary is not None:
+                r2s_dict["camera_wrist"] = wrist_cam_summary
             return {
                 "config": "real2sim_so101_inspection_twin",
                 "inference_camera": "overhead",
                 "cameras": cams_out,
-                "real2sim": sc.to_summary_dict(),
+                "real2sim": r2s_dict,
             }
 
         sim_http_server: ThreadingHTTPServer | None = None
@@ -3431,8 +3558,10 @@ class Real2SimPipeline:
                 path = self.path.split("?", 1)[0]
                 with latest_lock:
                     sc_snap = latest_scene
-                    png_snap = latest_sim_png
+                    pngs_snap = dict(latest_sim_pngs)
                 if path.startswith("/camera/") and path.endswith(".png"):
+                    cam_slot = path[len("/camera/") : -4]
+                    png_snap = pngs_snap.get(cam_slot) or pngs_snap.get("overhead")
                     if png_snap is None:
                         self._send(503, "application/json", b'{"error":"sim frame not ready"}')
                         return
@@ -3544,10 +3673,10 @@ class Real2SimPipeline:
             if q_init is not None:
                 twin.set_arm_state_direct(q_init, grip_init, sync_viewer=False)
             twin.sync_real2sim_scene(initial_scene, settle_steps=12)
-            init_png = _render_sim_overhead_png()
-            if init_png is not None:
+            init_pngs = _render_sim_all_pngs()
+            if init_pngs:
                 with latest_lock:
-                    latest_sim_png = init_png
+                    latest_sim_pngs.update(init_pngs)
             last_sim_render_t = time.monotonic()
 
             while True:
@@ -3592,10 +3721,10 @@ class Real2SimPipeline:
 
                 if sc_to_apply is not None:
                     twin.sync_real2sim_scene(sc_to_apply, settle_steps=6)
-                    png_now = _render_sim_overhead_png()
-                    if png_now is not None:
+                    pngs_now = _render_sim_all_pngs()
+                    if pngs_now:
                         with latest_lock:
-                            latest_sim_png = png_now
+                            latest_sim_pngs.update(pngs_now)
                     last_sim_render_t = time.monotonic()
                     if rgb_to_apply is not None:
                         try:
@@ -3625,10 +3754,10 @@ class Real2SimPipeline:
                 else:
                     twin._sync_viewer()
                     if time.monotonic() - last_sim_render_t >= 0.20:
-                        png_now = _render_sim_overhead_png()
-                        if png_now is not None:
+                        pngs_now = _render_sim_all_pngs()
+                        if pngs_now:
                             with latest_lock:
-                                latest_sim_png = png_now
+                                latest_sim_pngs.update(pngs_now)
                         last_sim_render_t = time.monotonic()
 
                 q0_deg = math.degrees(float(q_disp[0])) if q_disp is not None else 0.0

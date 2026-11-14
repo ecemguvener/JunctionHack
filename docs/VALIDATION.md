@@ -1,5 +1,28 @@
 # Executed validation — 13 November 2026
 
+## Multi-Camera Dashboard View Switching, Calibrated Sim Camera Rig, Top-Only Point Cloud & Wrist Feature Analysis HUD — 14 November 2026
+
+Updated `src/brickcell/block_inspector/real2sim.py` and `dashboard/{server.py,static/index.html,static/app.js,tests/test_server.py}` so the Tarot Card Dashboard (`:8096`) supports switching across `Top`, `Plate`, and `Wrist` camera feeds in both `Sim` and `Real` modes with calibrated 3D Real2Sim HUDs, 2D feature analysis overlays, and a strictly Top-camera 3D point cloud:
+
+- **Calibrated multi-camera MuJoCo 4.0.1 rendering on `:18081` (`src/brickcell/block_inspector/real2sim.py`)**:
+  - Replaced the static `configs/sim-scene.yaml` camera rig in `run_live_real2sim_mirror` with `live_rig` registered to `real_intel_camera_poses_world()` (`top` and `plate` D415 extrinsics/intrinsics at `640×480`) and `SONIX_T_BODY3_CAM` (`wrist` eye-in-hand camera at `640×360`, $f_x = f_y = 228.164\text{ px}$).
+  - Rendered all three MuJoCo cameras (`overhead`/`top`, `side`/`plate`, and `wrist`) on every simulation tick via `_render_sim_all_pngs()`, serving `/camera/{overhead,top,side,plate,wrist}.png` and exposing `camera_top`, `camera_plate`, and `camera_wrist` in `/scene`.
+- **Top-camera-only point cloud & multi-camera view switching (`dashboard/server.py`, `dashboard/static/index.html`, `dashboard/static/app.js`)**:
+  - Kept default point-cloud ingestion strictly on the overhead camera (`CloudSource("top", "overhead", "http://127.0.0.1:8094/points/top")`) and removed the `Plate` cloud sensor toggle from the Depth panel.
+  - Added `Top` / `Plate` / `Wrist` view selector buttons (`data-cam="top|plate|wrist"`, keys `1`/`2`/`3`) and `/frame/{real,sim}/{top,plate,wrist}.jpg` + `/stream/{real,sim}/{top,plate,wrist}.mjpg` endpoints polling `D415 Top` (`/rgb/top`), `D415 Plate` (`/rgb/plate`), and `Sonix Wrist` (`http://127.0.0.1:8091/frame.jpg` resized to `640×360`) alongside their MuJoCo counterparts.
+- **Wrist & plate 2D feature analysis HUD (`analyze_camera_features`, `drawFeatureAnalysisHud`)**:
+  - Implemented real-time 2D feature extraction (`Feature analysis` toggle, key `W`):
+    - Detects the SO-101 purple gripper jaws (`H in [113, 146]`, `S >= 70`, `V >= 28`), extracting the left inner-jaw contour + vertical pad line (green), right inner-jaw contour + vertical pad line (cyan), and center pinch axis `u_pinch` (yellow).
+    - Segments DUPLO bricks inside the aquamarine source plate via glare-immune LAB/HSV chromatic distance + distance-transform watershed + `cv2.minAreaRect`, rendering 4-corner oriented bounding polygons (red), short-axis grasp vectors (orange), and brick centroids (white).
+- **Executed software & live hardware checks**:
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest dashboard/tests/test_server.py -q`: **30 passed** (including `test_multi_camera_frame_routes` and `test_analyze_camera_features_wrist_corridor_and_bricks`).
+  - `.\artifacts\arch-venv\Scripts\python.exe -m pytest tests/test_station_audit.py tests/test_block_inspector.py -q`: **41 passed**.
+  - `node --test dashboard/tests/test_evidence.cjs`: **6 passed**.
+  - `.\artifacts\arch-venv\Scripts\ruff.exe check src tests scripts dashboard` and `.\artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts dashboard`: **passed**.
+  - Deployed updated `real2sim.py` and `dashboard/` to `intel` (`192.168.50.2`), restarted `/home/intel/brickcell-sim/run-sim.sh` (`:18081`) and `/home/intel/brickcell-dashboard/run-dashboard.sh` (`:8096`), and verified live status and multi-camera endpoints.
+- **Limitations**:
+  - The dashboard and Real2Sim mirror remain strictly read-only with respect to hardware (`GET` only); no physical robot commands are sent by the dashboard and no real defect-classification accuracy is claimed.
+
 ## Real2Sim 6D Pose & Mesh Inertia Alignment, Top-Depth + Plate-RGB Verification, and Tarot Card Dashboard Integration — 14 November 2026
 
 Updated `src/brickcell/block_inspector/{real2sim.py,twin.py,studio_vision.py}` and `dashboard/{server.py,static/app.js,static/index.html}` to align the live Real2Sim MuJoCo 4.0.1 scene with the physical overhead D415 depth + close-up Plate RGB cameras and expose live 3D HUD overlays on the Tarot Card Dashboard (`:8096`):
@@ -45,8 +68,11 @@ Updated `src/brickcell/block_inspector/{armd_bridge.py,cogman.py,cli.py,hardware
   - `.\artifacts\arch-venv\Scripts\pytest.exe tests/test_block_inspector.py -k "hardware_cell or anomalib_multicam" -q`: **2 passed** (`test_physical_hardware_cell_dry_run_and_safety_boundaries`, `test_anomalib_multicam_rgb_localization_and_movable_plates`).
   - `.\artifacts\arch-venv\Scripts\pytest.exe tests/test_rgbd.py tests/test_rgbd_viewer.py -q`: **18 passed**.
   - `.\artifacts\arch-venv\Scripts\ruff.exe check src tests scripts` and `.\artifacts\arch-venv\Scripts\ruff.exe format --check src tests scripts`: **passed** across all 107 files.
-- **Planned hardware work & limitations**:
-  - Live multi-block autonomous execution on the physical Intel SO-101 cell (`scripts/deploy_to_intel.ps1` -> `intel:/home/intel/brickcell-deploy`) and physical evaluation with the teammate's trained real Anomalib OpenVINO model(s) (`model.xml`) have not yet been executed in this step; unit tests above use synthetic RGB test frames and injected mock detectors, so no physical grasp rate or real defect-detection accuracy is claimed.
+- **Executed live physical cell run on `intel` (`14 November 2026`, `inspection_block_0_20261114-125654.json`)**:
+  - Executed `scripts/deploy_to_intel.ps1 -MaxCycles 24` against the live physical SO-101 cell (`armd :8765`, `live_depth :8094`, `focus_assist :8091`, `dashboard :8096`).
+  - Completed autonomously with `succeeded: true`, `termination_reason: "parked_at_rest"`, clearing **100% of blocks from the movable aquamarine source plate** (`9` cycles completed across `duplo_2x2_3437`, `duplo_2x4_3011`, and `duplo_2x3_curved_top_2302`), placing every block cleanly inside the movable green (`good: 1`) and pink (`defective: 8`) KALAS bowls with zero blocks left on the source plate or dropped on the table (verified via post-run overhead D415 snapshot).
+- **Remaining hardware item & limitations**:
+  - Searching `/home/intel` confirmed no exported real Anomalib OpenVINO `model.xml` artifact has been copied to `intel` yet (`anomalib_cameras: []`), so this run exercised `inspector_mode: "lab_dark_mark_fallback"` (`dark_mark_threshold = 16.0`, where underside tube shadows during spin can exceed `16.0`); copying the teammate's calibrated `model.xml` + `.bin` + `.json` into `/home/intel/brickcell-deploy/artifacts/models/` (or referencing them in `configs/rgbd-viewer.json` / `-OpenVinoModel`) activates `anomalib_openvino_cpu` automatically without code changes.
 
 ## Live Real2Sim mirror connected to the physical Intel cell — 14 November 2026
 

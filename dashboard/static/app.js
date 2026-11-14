@@ -19,7 +19,9 @@
   const hash = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
   const state = {
     src: hash.src === "real" ? "real" : "sim",
+    cam: ["top", "plate", "wrist"].includes(hash.cam) ? hash.cam : "top",
     hud: hash.hud !== "0",
+    features: hash.features !== "0",
     defects: hash.defects === "1",
     focus: hash.focus !== "0",
     scope: hash.scope === "focus" ? "focus" : "all",
@@ -59,6 +61,7 @@
     b.toggle("fs-cam", state.fs === "cam");
     b.toggle("fs-depth", state.fs === "depth");
     $$("[data-src]").forEach((e) => setOn(e, e.dataset.src === state.src));
+    $$("[data-cam]").forEach((e) => setOn(e, e.dataset.cam === state.cam));
     $$("[data-opt]").forEach((e) => setOn(e, state[e.dataset.opt]));
     $$("[data-scope]").forEach((e) => setOn(e, e.dataset.scope === state.scope));
     $$("[data-color]").forEach((e) => setOn(e, e.dataset.color === state.color));
@@ -67,7 +70,8 @@
     $$("[data-panel]").forEach((p) => p.classList.toggle("fs", p.dataset.panel === state.fs));
     $$("[data-fs]").forEach((e) => setOn(e, e.closest("[data-panel]")?.dataset.panel === state.fs));
     bind("zoom", state.zoom ? "2×" : "1×");
-    bind("src", state.src === "sim" ? "SIM" : "REAL");
+    bind("cam-title", { top: "Top camera", plate: "Plate camera", wrist: "Wrist camera" }[state.cam] || "Top camera");
+    bind("src", `${state.src.toUpperCase()} · ${state.cam.toUpperCase()}`);
     bind("src-long", state.src === "sim" ? "MuJoCo sim" : "Real camera");
     renderStatus();
     drawOverlay();
@@ -80,8 +84,10 @@
   function renderStatus() {
     if (!status) return;
     const fresh = statusFresh(), S = status.sources, b = document.body.classList;
-    b.toggle("real-down", !fresh || !S.real.ok);
-    b.toggle("sim-down", !fresh || !S.sim.ok);
+    const realFeed = status.camera_feeds?.real?.[state.cam] || S.real;
+    const simFeed = status.camera_feeds?.sim?.[state.cam] || S.sim;
+    b.toggle("real-down", !fresh || !realFeed.ok);
+    b.toggle("sim-down", !fresh || !simFeed.ok);
     b.toggle("cloud-down", !fresh || !S.cloud.ok);
     const live = $('[data-bind="health"]');
     live.textContent = !fresh ? "Server unreachable" : status.ok ? "Live" : "Degraded";
@@ -99,16 +105,22 @@
       return;
     }
     bind("real-fps", S.real.fps ? `camera ${S.real.fps.toFixed(0)} fps` : "– fps");
-    const cam = state.src === "sim" ? S.sim : S.real;
+    const cam = state.src === "sim" ? simFeed : realFeed;
     const fps = shownFps(state.src);
     const shown = fps == null ? "–" : fps.toFixed(fps < 10 ? 1 : 0);
     const r2s = status.real2sim;
     bind("hud-count", String(r2s?.bricks?.length || 0));
+    const feat = status.camera_features?.[state.src]?.[state.cam];
+    bind("feat-count", String(feat?.bricks?.length || 0));
+    bind("feat-corridor", feat?.corridor?.ok
+      ? `pinch u=${feat.corridor.u_pinch}px (gap ${feat.corridor.gap_px}px)`
+      : (state.cam === "wrist" ? "jaw corridor + minAreaRect" : "minAreaRect + grasp axis"));
+    const realCamName = { top: "D415 Top", plate: "D415 Plate", wrist: "Sonix Wrist" }[state.cam] || "D415 Top";
     bind("cam-detail", state.src === "sim"
       ? (r2s?.ok
-        ? `Real2Sim MuJoCo 4.0 twin · ${r2s.bricks?.length || 0} bricks · ${shown} fps shown`
-        : `${config?.sim_camera ?? "overhead"} render · ${shown} fps shown`)
-      : `D415 Top · ${shown} fps shown`);
+        ? `Real2Sim MuJoCo 4.0 (${state.cam}) · ${r2s.bricks?.length || 0} bricks · ${shown} fps shown`
+        : `${state.cam} render · ${shown} fps shown`)
+      : `${realCamName} · ${shown} fps shown`);
     bind("cam-age", `age ${fmtAge(cam.age_s)}`);
     bind("cam-error", cam.error || (cam.ok ? "" : "The source sends no fresh frames."));
     const cams = Object.entries(S.cloud.cameras || {}).map(([n, c]) => `${n} ${c.ok ? c.points : "×"}${state.show[n] === false ? " (hidden)" : ""}`).join(" · ");
@@ -135,9 +147,10 @@
 
   // ------------------------------------------------------------------ controls
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-src],[data-opt],[data-scope],[data-fs],[data-color],[data-zoom],[data-sensor]");
+    const t = e.target.closest("[data-src],[data-cam],[data-opt],[data-scope],[data-fs],[data-color],[data-zoom],[data-sensor]");
     if (!t) return;
     if (t.dataset.src) state.src = t.dataset.src;
+    if (t.dataset.cam) state.cam = t.dataset.cam;
     if (t.dataset.opt) state[t.dataset.opt] = !state[t.dataset.opt];
     if (t.dataset.scope) state.scope = t.dataset.scope;
     if (t.hasAttribute("data-zoom")) state.zoom = !state.zoom;
@@ -155,29 +168,39 @@
     if (k === "t") state.src = state.src === "sim" ? "real" : "sim";
     else if (k === "escape") state.fs = "";
     else if (k === "h") state.hud = !state.hud;
+    else if (k === "w") state.features = !state.features;
     else if (k === "d") state.defects = !state.defects;
     else if (k === "f") state.focus = !state.focus;
     else if (k === "z") state.zoom = !state.zoom;
-    else if (k === "8" || k === "9") { const c = k === "8" ? "top" : "plate"; state.show[c] = !state.show[c]; cloud?.dirty(); }
+    else if (state.fs !== "depth" && (k === "1" || k === "2" || k === "3")) {
+      state.cam = { "1": "top", "2": "plate", "3": "wrist" }[k];
+    } else if (k === "8" || k === "9") { const c = k === "8" ? "top" : "plate"; state.show[c] = !state.show[c]; cloud?.dirty(); }
     else if (cloud && cloud.key(e)) return;
     else return;
     sync();
   });
 
   // ------------------------------------------------------------------ live camera frames
-  const frames = { sim: { seq: 0, shown: [] }, real: { seq: 0, shown: [] } };
+  const frames = { sim: { seq: 0, cam: "top", shown: [] }, real: { seq: 0, cam: "top", shown: [] } };
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   async function frameLoop(name) {
     const img = $(`img.cam-${name}`), f = frames[name];
     let url = null;
     for (;;) {
       const visible = state.src === name;
+      const camSlot = state.cam;
+      if (f.cam !== camSlot) {
+        f.cam = camSlot;
+        f.seq = 0;
+        f.shown = [];
+      }
+      const endpoint = camSlot === "top" ? `/frame/${name}.jpg` : `/frame/${name}/${camSlot}.jpg`;
       try {
         // visible: long-poll the next frame; hidden: take the newest frame once a second
-        const r = await fetchT(`/frame/${name}.jpg?after=${visible ? f.seq : 0}`, 6000);
+        const r = await fetchT(`${endpoint}?after=${visible ? f.seq : 0}`, 6000);
         if (r.status === 200) {
           const seq = Number(r.headers.get("X-Frame-Seq"));
-          if (seq !== f.seq) {
+          if (seq !== f.seq || f.cam !== state.cam) {
             const next = URL.createObjectURL(await r.blob());
             img.src = next;
             f.seq = seq;
@@ -190,12 +213,15 @@
           } else await r.arrayBuffer();
         } else if (r.status !== 204) await sleep(1000);
       } catch { await sleep(1000); }
-      if (state.src !== name) await waitVisibleOr(1000, name);
+      if (state.src !== name && f.cam === state.cam) await waitVisibleOr(1000, name, f);
     }
   }
   const wakers = [];
-  function waitVisibleOr(ms, name) {
-    return new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { if (state.src === name) { clearTimeout(t); ok(); } }); });
+  function waitVisibleOr(ms, name, f) {
+    return new Promise((ok) => {
+      const t = setTimeout(ok, ms);
+      wakers.push(() => { if (state.src === name || (f && f.cam !== state.cam)) { clearTimeout(t); ok(); } });
+    });
   }
   function wake() { wakers.splice(0).forEach((w) => w()); }
   function shownFps(name) {
@@ -206,8 +232,24 @@
   // ------------------------------------------------------------------ camera overlay
   const camPanel = $('[data-panel="cam"]');
   const overlay = $("canvas.cam-overlay", camPanel);
+  function activeCameraModel() {
+    const r2s = status?.real2sim;
+    if (state.cam === "plate") return r2s?.camera_plate || config?.cameras?.plate || config?.cameras?.top;
+    if (state.cam === "wrist") return r2s?.camera_wrist || config?.cameras?.wrist || config?.cameras?.top;
+    return r2s?.camera_top || config?.cameras?.top;
+  }
+  function activeImageSize() {
+    const feat = status?.camera_features?.[state.src]?.[state.cam];
+    const c = activeCameraModel();
+    if (state.cam === "wrist") {
+      return { width: feat?.width || c?.width || 640, height: feat?.height || c?.height || 360 };
+    }
+    return { width: c?.width || config.image.width, height: c?.height || config.image.height };
+  }
   function projectTop(p, camOverride) {
-    const c = camOverride || config.cameras.top, R = c.rotation_cv, d = [p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]];
+    const c = camOverride || activeCameraModel();
+    if (!c) return null;
+    const R = c.rotation_cv, d = [p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]];
     const q = [0, 1, 2].map((j) => R[0][j] * d[0] + R[1][j] * d[1] + R[2][j] * d[2]);
     return q[2] > 0 ? [c.fx * q[0] / q[2] + c.cx, c.fy * q[1] / q[2] + c.cy] : null;
   }
@@ -222,15 +264,15 @@
       p[2],
     ];
   }
-  function contentRect(stage) {
-    const W = stage.clientWidth, H = stage.clientHeight, iw = config.image.width, ih = config.image.height;
+  function contentRect(stage, imSize) {
+    const W = stage.clientWidth, H = stage.clientHeight, iw = imSize.width, ih = imSize.height;
     if (!state.zoom) {
       const s = Math.min(W / iw, H / ih);
       return { x: (W - iw * s) / 2, y: (H - ih * s) / 2, s };
     }
     // 2x: fill the stage, centred on the focus block, else on the plates (pivot)
     const s = Math.max(W / iw, H / ih) * 2.2;
-    const f = focusOverlay();
+    const f = state.cam === "top" ? focusOverlay() : null;
     const [cx, cy] = f ? [(f.box[0] + f.box[2]) / 2, (f.box[1] + f.box[3]) / 2] : projectTop(config.pivot) || [iw / 2, ih / 2];
     return { x: Math.min(0, Math.max(W - iw * s, W / 2 - cx * s)), y: Math.min(0, Math.max(H - ih * s, H / 2 - cy * s)), s };
   }
@@ -242,9 +284,10 @@
     const g = overlay.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, overlay.width, overlay.height);
-    const r = contentRect(stage);
+    const imSize = activeImageSize();
+    const r = contentRect(stage, imSize);
     $$("img", stage).forEach((im) => Object.assign(im.style, {
-      left: `${r.x}px`, top: `${r.y}px`, width: `${config.image.width * r.s}px`, height: `${config.image.height * r.s}px`,
+      left: `${r.x}px`, top: `${r.y}px`, width: `${imSize.width * r.s}px`, height: `${imSize.height * r.s}px`,
     }));
     const P = (x, y) => [r.x + x * r.s, r.y + y * r.s];
     const st = {
@@ -254,12 +297,15 @@
       fg: css(camPanel, "--label-fg", "#000"),
       pad: parseFloat(css(camPanel, "--box-pad", "4")),
     };
-    const f = focusOverlay();
     if (state.hud && statusFresh() && status?.real2sim?.ok) drawReal2SimHud(g, P, st);
-    if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `PROJECTED FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
-    for (const a of visibleAnomalies()) {
-      const label = ["OBJECT ESTIMATE ·", a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
-      box(g, P, a.box, css(camPanel, "--defect", "#ff3b3b"), st, 2, label, "bottom");
+    if (state.features && statusFresh()) drawFeatureAnalysisHud(g, P, st);
+    if (state.cam === "top") {
+      const f = focusOverlay();
+      if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `PROJECTED FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
+      for (const a of visibleAnomalies()) {
+        const label = ["OBJECT ESTIMATE ·", a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
+        box(g, P, a.box, css(camPanel, "--defect", "#ff3b3b"), st, 2, label, "bottom");
+      }
     }
   }
   const OBB_EDGES = [
@@ -271,9 +317,77 @@
     if (!Array.isArray(rgba) || rgba.length < 3) return `rgba(255,178,127,${a})`;
     return `rgba(${Math.round(rgba[0] * 255)},${Math.round(rgba[1] * 255)},${Math.round(rgba[2] * 255)},${a})`;
   }
+  function drawFeatureAnalysisHud(g, P, st) {
+    const feat = status?.camera_features?.[state.src]?.[state.cam];
+    if (!feat?.ok) return;
+    g.save();
+    // 1. Gripper jaw corridor (green left inner contour + line, cyan right inner contour + line, yellow center pinch line)
+    const cor = feat.corridor;
+    if (cor?.ok) {
+      g.fillStyle = "#00ff00";
+      for (const [u, v] of cor.left_edge_uv || []) {
+        const [sx, sy] = P(u, v);
+        g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+      }
+      g.fillStyle = "#00ffff";
+      for (const [u, v] of cor.right_edge_uv || []) {
+        const [sx, sy] = P(u, v);
+        g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+      }
+      const vTop = cor.v_top ?? 180, vBot = cor.v_bottom ?? 340;
+      const [lx0, ly0] = P(cor.u_left_pad, Math.max(0, vTop - 40));
+      const [lx1, ly1] = P(cor.u_left_pad, vBot);
+      g.strokeStyle = "#00dc00";
+      g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(lx0, ly0); g.lineTo(lx1, ly1); g.stroke();
+
+      const [rx0, ry0] = P(cor.u_right_pad, Math.max(0, vTop - 40));
+      const [rx1, ry1] = P(cor.u_right_pad, vBot);
+      g.strokeStyle = "#00dcff";
+      g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(rx0, ry0); g.lineTo(rx1, ry1); g.stroke();
+
+      const [px0, py0] = P(cor.u_pinch, Math.max(0, vTop - 60));
+      const [px1, py1] = P(cor.u_pinch, vBot);
+      g.strokeStyle = "#ffff00";
+      g.lineWidth = 2.6;
+      g.beginPath(); g.moveTo(px0, py0); g.lineTo(px1, py1); g.stroke();
+    }
+    // 2. DUPLO brick minAreaRect polygons (red), short grasp axes (orange), and centroids (white)
+    for (const b of feat.bricks || []) {
+      if (Array.isArray(b.box_uv) && b.box_uv.length === 4) {
+        const pts = b.box_uv.map(([u, v]) => P(u, v));
+        g.strokeStyle = "rgb(220, 40, 40)";
+        g.lineWidth = 2.4;
+        g.beginPath();
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (let k = 1; k < 4; k++) g.lineTo(pts[k][0], pts[k][1]);
+        g.closePath();
+        g.stroke();
+      }
+      if (Array.isArray(b.axis_uv) && b.axis_uv.length === 2) {
+        const [a0, a1] = b.axis_uv.map(([u, v]) => P(u, v));
+        g.strokeStyle = "rgb(255, 165, 0)";
+        g.lineWidth = 2.4;
+        g.beginPath();
+        g.moveTo(a0[0], a0[1]);
+        g.lineTo(a1[0], a1[1]);
+        g.stroke();
+      }
+      if (Array.isArray(b.center_uv) && b.center_uv.length === 2) {
+        const [cx, cy] = P(b.center_uv[0], b.center_uv[1]);
+        g.fillStyle = "#ffffff";
+        g.beginPath();
+        g.arc(cx, cy, 3.8, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    g.restore();
+  }
   function drawReal2SimHud(g, P, st) {
     const r2s = status.real2sim;
-    const r2sCam = r2s.camera_top || config.cameras.top;
+    const r2sCam = activeCameraModel();
+    if (!r2sCam) return;
     const projR2S = (pt) => projectTop(pt, r2sCam);
     const plates = r2s.plates || {};
     g.save();

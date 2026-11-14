@@ -12,15 +12,16 @@
 <main>
   <section data-panel="cam">
     <div class="bar">
-      <span class="title">Top camera</span>
+      <span class="title" data-bind="cam-title">Top camera</span>
+      <div class="seg" title="Camera view (keys 1, 2, 3)"><button data-cam="top">Top</button><button data-cam="plate">Plate</button><button data-cam="wrist">Wrist</button></div>
       <div class="seg"><button data-src="sim">Sim</button><button data-src="real">Real</button></div>
       <kbd>T</kbd>
       <button class="icon" data-zoom title="Zoom (Z)"><span data-bind="zoom"></span></button>
       <button class="icon" data-fs data-icon="fullscreen" data-icon-size="20" data-icon-stroke="2" title="Full screen"></button>
     </div>
     <div class="stage">
-      <img class="cam-sim" alt="MuJoCo sim render of the Top camera">
-      <img class="cam-real" alt="Real Top camera">
+      <img class="cam-sim" alt="MuJoCo sim render of the selected camera">
+      <img class="cam-real" alt="Real camera feed">
       <canvas class="cam-overlay"></canvas>
       <div class="nosignal"><div>No signal<small data-bind="cam-error"></small></div></div>
     </div>
@@ -30,8 +31,8 @@
     <div class="bar">
       <span class="title">Depth · point cloud</span>
       <div class="seg"><button data-color="rgb">RGB</button><button data-color="sensor">Sensor</button></div>
-      <div class="seg sensors" title="Show or hide each camera's points (keys 8 and 9)">
-        <button data-sensor="top"><i class="swatch top"></i>Top<span class="k">8</span></button><button data-sensor="plate"><i class="swatch plate"></i>Plate<span class="k">9</span></button>
+      <div class="seg sensors" title="Show or hide Top camera points (key 8)">
+        <button data-sensor="top"><i class="swatch top"></i>Top<span class="k">8</span></button>
       </div>
       <button class="icon" data-fs data-icon="fullscreen" data-icon-size="20" data-icon-stroke="2" title="Full screen"></button>
     </div>
@@ -54,6 +55,10 @@
       <small><b data-bind="hud-count">0</b> DUPLO bricks · 3 KALAS bowls · 6D OBBs &amp; triads</small>
     </div>
     <div class="opt">
+      <button class="toggle" data-opt="features">Feature analysis <span class="sw"></span></button>
+      <small><b data-bind="feat-count">0</b> brick grasp axes · <span data-bind="feat-corridor">jaw corridor</span></small>
+    </div>
+    <div class="opt">
       <button class="toggle" data-opt="defects">Defects <span class="sw"></span></button>
       <div class="only-defects"><div class="seg"><button data-scope="all">All visible</button><button data-scope="focus">Focus only</button></div></div>
       <div class="stub" data-stub="anomalies"><b data-bind="anomalies-state">No evidence</b><br><span data-bind="anomalies-reason"></span></div>
@@ -71,7 +76,7 @@
       <dt>Cloud</dt><dd data-bind="cloud-points">–</dd>
       <dt>View</dt><dd data-bind="src"></dd>
     </dl>
-    <div class="keys"><kbd>T</kbd>Sim / real<kbd>H</kbd>Real2Sim HUD<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>8</kbd>Top cloud<kbd>9</kbd>Plate cloud<kbd>Esc</kbd>Exit full screen</div>
+    <div class="keys"><kbd>1/2/3</kbd>Top / Plate / Wrist<kbd>T</kbd>Sim / real<kbd>H</kbd>Real2Sim HUD<kbd>W</kbd>Feature analysis<kbd>D</kbd>Defects<kbd>F</kbd>Focus block<kbd>Z</kbd>Zoom camera<kbd>8</kbd>Top cloud<kbd>Esc</kbd>Exit full screen</div>
   </aside>
 </main>
 <script src="/static/evidence.js"></script>
