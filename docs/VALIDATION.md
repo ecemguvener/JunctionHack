@@ -1,5 +1,18 @@
 # Executed validation — 13 November 2026
 
+## Dashboard capture provenance follow-up — 14 November 2026
+
+Branch `codex/dashboard-evidence` builds on PR #10 (`ui/twin-dashboard`, b04e222).
+Added separate acquisition expiry, legacy/unverified display, scene-mode overlay
+filtering, explicit projected-object labels and publisher evidence documentation.
+Python tests cover repeated heartbeats, immutable known-frame acquisition times,
+legacy compatibility, source-image box suppression, validation and HTTP round-trip.
+Python dashboard suite: **28 passed** (fake services). Node tests exercise
+the same overlay rules used by the page: **6 passed**.
+JS syntax and Ruff checks passed. No real services were altered or deployed;
+tests use fake local upstreams. No browser visual review or hardware validation
+was performed. Existing legacy publishers will have hidden boxes until upgraded.
+
 ## PatchCore RGB/depth viewer integration — 14 November 2026
 
 Implemented `RGBDInspector` with separate modality models and explicit serial,

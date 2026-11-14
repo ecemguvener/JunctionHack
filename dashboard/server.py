@@ -495,6 +495,7 @@ class Overlay:
         self.lock = threading.Lock()
         self.payload: dict | None = None
         self.at: float | None = None
+        self.capture_times: collections.OrderedDict[tuple, float] = collections.OrderedDict()
 
     def update(self, body: dict, now: float | None = None) -> dict:
         if not isinstance(body, dict):
@@ -530,24 +531,99 @@ class Overlay:
                 label=_text(body.get("label")),
                 box=_box(body.get("box"), self.width, self.height) if object_id else None,
             )
+        received = time.time() if now is None else now
+        evidence = body.get("evidence")
+        if evidence is not None:
+            if not isinstance(evidence, dict):
+                raise ValueError("evidence must be an object")
+            captured = evidence.get("captured_at")
+            if type(captured) not in (int, float) or not math.isfinite(captured):
+                raise ValueError("captured_at must be finite acquisition time")
+            if captured > received + 0.5:
+                raise ValueError("captured_at is in the future; check source clock")
+            evidence = {
+                "captured_at": captured,
+                **{
+                    k: _text(evidence.get(k), 160)
+                    for k in (
+                        "frame_id",
+                        "camera_id",
+                        "mode",
+                        "box_space",
+                        "method",
+                        "model_version",
+                        "threshold_version",
+                    )
+                },
+            }
+            if not evidence["frame_id"] or not evidence["camera_id"]:
+                raise ValueError("evidence requires source frame_id and camera_id")
+            if evidence["mode"] not in ("real", "sim"):
+                raise ValueError("evidence mode must be real or sim")
+            if evidence["box_space"] not in ("top_projected_object", "source_image_pixels"):
+                raise ValueError("Unsupported evidence box_space")
+        payload["evidence"] = evidence
         with self.lock:
-            self.payload, self.at = payload, time.time() if now is None else now
+            if evidence:
+                key = (source, evidence["mode"], evidence["camera_id"], evidence["frame_id"])
+                if key in self.capture_times and self.capture_times[key] != evidence["captured_at"]:
+                    raise ValueError("Cannot change acquisition time for a previously seen frame")
+                self.capture_times[key] = evidence["captured_at"]
+                self.capture_times.move_to_end(key)
+                while len(self.capture_times) > 1024:
+                    self.capture_times.popitem(last=False)
+            self.payload, self.at = payload, received
         return payload
 
     def status(self, now: float) -> dict:
         with self.lock:
             payload, at = self.payload, self.at
         if payload is None:
-            return dict(connected=False, stub=True, reason="No service posts to this endpoint yet")
+            return dict(
+                connected=False,
+                drawable=False,
+                stub=True,
+                evidence_state="missing",
+                reason="No publisher result received",
+            )
         age = now - at
         if age > self.stale_s:
             return dict(
                 connected=False,
+                drawable=False,
                 stub=True,
+                evidence_state="publisher_stale",
                 reason=f"Last update {age:.0f} s ago",
                 source=payload["source"],
             )
-        return dict(connected=True, stub=False, age_s=round(age, 3), **payload)
+        evidence = payload.get("evidence")
+        result = dict(connected=True, stub=False, age_s=round(age, 3), drawable=False, **payload)
+        if evidence is None:
+            return dict(
+                **result,
+                evidence_state="unverified",
+                reason="Publisher online; capture identity/time missing. Boxes hidden.",
+            )
+        capture_age = now - evidence["captured_at"]
+        result["capture_age_s"] = round(capture_age, 3)
+        if not -0.5 <= capture_age <= self.stale_s:
+            return dict(
+                **result,
+                evidence_state="capture_stale",
+                reason="Inspection capture expired; heartbeat cannot refresh it.",
+            )
+        if evidence["box_space"] != "top_projected_object":
+            return dict(
+                **result,
+                evidence_state="source_frame_required",
+                reason="Source-image regions need the exact scored frame; live overlay hidden.",
+            )
+        result["drawable"] = True
+        return dict(
+            **result,
+            evidence_state="projected_object",
+            reason="Recent projected object estimate, not defect-pixel localization.",
+        )
 
 
 # --------------------------------------------------------------------------- HTTP

@@ -40,10 +40,10 @@
   const STATUS_STALE_MS = 4000;
   let statusAt = 0;
   const statusFresh = () => !!status && performance.now() - statusAt < STATUS_STALE_MS;
-  const focusOverlay = () => (statusFresh() && status.focus?.connected && status.focus.object_id ? status.focus : null);
+  const focusOverlay = () => (OverlayEvidence.drawable(status?.focus, state.src, statusFresh()) && status.focus.object_id ? status.focus : null);
   function visibleAnomalies() {
     const a = status?.anomalies;
-    if (!state.defects || !statusFresh() || !a?.connected) return [];
+    if (!state.defects || !OverlayEvidence.drawable(a, state.src, statusFresh())) return [];
     const f = focusOverlay();
     return state.scope === "all" ? a.items : a.items.filter((i) => f && i.object_id === f.object_id);
   }
@@ -92,6 +92,7 @@
       for (const kind of ["anomalies", "focus"]) {
         $(`[data-stub="${kind}"]`).classList.toggle("show", state[kind === "anomalies" ? "defects" : "focus"]);
         bind(`${kind}-reason`, "Server unreachable");
+        bind(`${kind}-state`, "Publisher offline");
       }
       return;
     }
@@ -114,9 +115,15 @@
     bind("focus-label", f ? (f.label || f.object_id) : "–");
     for (const kind of ["anomalies", "focus"]) {
       const o = status[kind];
-      $(`[data-stub="${kind}"]`).classList.toggle("show", !o.connected && state[kind === "anomalies" ? "defects" : "focus"]);
-      bind(`${kind}-reason`, o.reason || "");
+      $(`[data-stub="${kind}"]`).classList.toggle("show", state[kind === "anomalies" ? "defects" : "focus"]);
+      bind(`${kind}-state`, OverlayEvidence.label(o, state.src));
+      bind(`${kind}-reason`, o.evidence && o.evidence.mode !== state.src
+        ? `Result belongs to ${o.evidence.mode}; hidden in ${state.src} view.` : o.reason || "");
     }
+    const e = S && status.anomalies?.evidence;
+    bind("anomalies-provenance", e
+      ? `${e.method || "Unknown method"} · model ${e.model_version || "unknown"} · ${e.threshold_version ? "threshold " + e.threshold_version : "uncalibrated / unknown threshold"} · capture ${fmtAge(status.anomalies.capture_age_s)}`
+      : "Detector method and calibration unknown");
     bind("defect-count", String(visibleAnomalies().length));
   }
 
@@ -230,9 +237,9 @@
       pad: parseFloat(css(camPanel, "--box-pad", "4")),
     };
     const f = focusOverlay();
-    if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
+    if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `PROJECTED FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
     for (const a of visibleAnomalies()) {
-      const label = [a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
+      const label = ["OBJECT ESTIMATE ·", a.label, a.score != null ? a.score.toFixed(2) : null].filter(Boolean).join(" ");
       box(g, P, a.box, css(camPanel, "--defect", "#ff3b3b"), st, 2, label, "bottom");
     }
   }

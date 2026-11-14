@@ -239,6 +239,107 @@ def test_overlay_validation_and_expiry():
         f.update(dict(source="planner", object_id="part-001"))  # a focus object needs a box
 
 
+def evidence_payload(captured_at=100, **changes):
+    evidence = dict(
+        captured_at=captured_at,
+        frame_id="plate-frame-1",
+        camera_id="plate",
+        mode="real",
+        box_space="top_projected_object",
+        method="dark_line_heuristic",
+        model_version="heuristic-v1",
+        threshold_version=None,
+    )
+    evidence.update(changes)
+    return dict(
+        source="detector",
+        evidence=evidence,
+        items=[dict(box=[10, 10, 20, 20], score=16.85, object_id="brick-1")],
+    )
+
+
+def test_legacy_publisher_stays_connected_but_boxes_are_unverified():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    legacy = dict(source="detector", items=[dict(box=[10, 10, 20, 20], score=16.85)])
+    overlay.update(legacy, now=100)
+    overlay.update(legacy, now=200)
+    status = overlay.status(201)
+    assert status["connected"] and not status["drawable"]
+    assert status["evidence_state"] == "unverified"
+
+
+def test_heartbeat_does_not_refresh_acquisition_expiry():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    payload = evidence_payload()
+    overlay.update(payload, now=100)
+    assert overlay.status(101)["drawable"]
+    overlay.update(payload, now=106)
+    status = overlay.status(106.5)
+    assert status["connected"] and status["age_s"] == 0.5
+    assert status["capture_age_s"] == 6.5 and not status["drawable"]
+    assert status["evidence_state"] == "capture_stale"
+
+
+def test_same_frame_cannot_receive_new_capture_time():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    overlay.update(evidence_payload(), now=100)
+    with pytest.raises(ValueError, match="Cannot change acquisition"):
+        overlay.update(evidence_payload(104), now=104)
+    assert overlay.status(106)["connected"] is False
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"captured_at": float("nan")},
+        {"captured_at": True},
+        {"captured_at": 102},
+        {"camera_id": ""},
+        {"frame_id": ""},
+        {"mode": "unknown"},
+        {"box_space": "plate"},
+    ],
+)
+def test_invalid_provenance_rejected_without_replacing_current(changes):
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    overlay.update(evidence_payload(), now=100)
+    with pytest.raises(ValueError):
+        overlay.update(evidence_payload(**changes), now=100)
+    assert overlay.status(101)["evidence"]["captured_at"] == 100
+
+
+def test_plate_pixel_box_is_not_drawn_on_top_camera():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    overlay.update(evidence_payload(box_space="source_image_pixels"), now=100)
+    status = overlay.status(101)
+    assert not status["drawable"]
+    assert status["evidence_state"] == "source_frame_required"
+
+
+def test_projected_box_and_method_are_explicit_and_not_called_calibrated():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    overlay.update(evidence_payload(), now=100)
+    status = overlay.status(101)
+    assert status["drawable"] and status["evidence_state"] == "projected_object"
+    assert status["evidence"]["method"] == "dark_line_heuristic"
+    assert status["evidence"]["threshold_version"] is None
+
+
+def test_new_frame_with_same_score_can_establish_new_capture():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    overlay.update(evidence_payload(), now=100)
+    overlay.update(evidence_payload(106, frame_id="plate-frame-2"), now=106)
+    assert overlay.status(107)["drawable"]
+
+
+def test_empty_detections_do_not_establish_good():
+    overlay = dash.Overlay("anomalies", stale_s=5)
+    payload = evidence_payload()
+    payload["items"] = []
+    overlay.update(payload, now=100)
+    assert "decision" not in overlay.status(101)
+
+
 # ----------------------------------------------------------------------------- HTTP end to end
 
 
@@ -328,6 +429,22 @@ def test_overlay_push_endpoints(stack):
     s = json.loads(get(base + "/api/status")[2])
     assert s["anomalies"]["connected"] and s["anomalies"]["items"][0]["box"] == [1, 2, 30, 40]
     assert s["focus"]["object_id"] == "part-001"
+    assert not s["anomalies"]["drawable"] and not s["focus"]["drawable"]
+
+
+def test_evidence_round_trip_over_http(stack):
+    _, _, base = stack
+    payload = evidence_payload(time.time())
+    code, reply = post(base + "/api/anomalies", payload)
+    assert code == 200 and reply["ok"]
+    state = json.loads(get(base + "/api/status")[2])["anomalies"]
+    assert state["drawable"] and state["evidence"] == payload["evidence"]
+    payload["evidence"]["captured_at"] = time.time() - 10
+    payload["evidence"]["frame_id"] = "old-frame"
+    assert post(base + "/api/anomalies", payload)[0] == 200
+    state = json.loads(get(base + "/api/status")[2])["anomalies"]
+    assert state["connected"] and not state["drawable"]
+    assert get(base + "/static/evidence.js")[0] == 200
     code, reply = post(
         base + "/api/anomalies", dict(source="test", items=[dict(box=[0, 0, 999, 1])])
     )
