@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Station twin · 4 Instrument</title>
+<link rel="stylesheet" href="assets/base.css">
+<style>
+  :root { --bg: #0b0e12; --line: #1f2731; --tick: #3a4654; --text: #c8d3de; --dim: #5f6d7c; --cyan: #4cc9f0; --pink: #ff4d6d;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  body { background: var(--bg); color: var(--text); font: 11px/1.4 var(--mono); display: flex; flex-direction: column; text-transform: uppercase; letter-spacing: .06em; }
+  header { height: 34px; display: flex; align-items: center; gap: 22px; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--dim); }
+  header b { color: var(--cyan); font-weight: 500; }
+  header .sp { flex: 1; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  [data-panel] { padding: 0 0 0 0; border-right: 1px solid var(--line); }
+  [data-panel].fs { background: var(--bg); }
+  .bar { height: 34px; display: flex; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+  .bar .t { flex: 1; color: var(--text); }
+  .bar .t::before { content: "▸ "; color: var(--cyan); }
+  .seg { display: flex; gap: 12px; }
+  .seg button { background: none; border: 0; padding: 0; color: var(--dim); font: inherit; letter-spacing: inherit; }
+  .seg button::before { content: "[ "; color: transparent; } .seg button::after { content: " ]"; color: transparent; }
+  .seg button.on { color: var(--cyan); } .seg button.on::before, .seg button.on::after { color: var(--cyan); }
+  kbd { color: var(--bg); background: var(--dim); padding: 0 4px; font: inherit; }
+  .icon { background: none; border: 0; color: var(--dim); padding: 0; display: grid; place-items: center; }
+  .icon:hover, .icon.on { color: var(--cyan); }
+  /* rulers on two edges of each stage */
+  .frame { position: relative; flex: 1; min-height: 0; display: flex; padding: 0 0 18px 18px; }
+  .frame::before { content: ""; position: absolute; left: 18px; right: 0; bottom: 0; height: 18px; border-top: 1px solid var(--line);
+    background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 10px) bottom/100% 5px no-repeat,
+                repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 50px) bottom/100% 10px no-repeat; }
+  .frame::after { content: ""; position: absolute; left: 0; top: 0; bottom: 18px; width: 18px; border-right: 1px solid var(--line);
+    background: repeating-linear-gradient(180deg, var(--tick) 0 1px, transparent 1px 10px) left/5px 100% no-repeat,
+                repeating-linear-gradient(180deg, var(--tick) 0 1px, transparent 1px 50px) left/10px 100% no-repeat; }
+  .stage { background: #06080b; }
+  .cross { position: absolute; inset: 0; pointer-events: none; }
+  .cross::before, .cross::after { content: ""; position: absolute; background: rgba(76,201,240,.18); }
+  .cross::before { left: 50%; top: 0; bottom: 0; width: 1px; } .cross::after { top: 50%; left: 0; right: 0; height: 1px; }
+  .foot { height: 26px; display: flex; gap: 18px; align-items: center; padding: 0 12px; border-top: 1px solid var(--line); color: var(--dim); }
+  .foot b { color: var(--text); font-weight: 400; }
+  [data-panel="cam"] { --focus: #4cc9f0; --defect: #ff4d6d; --box-style: corners; --box-line: 1.5; --box-pad: 6; --label-font: 10px JetBrains Mono, ui-monospace, monospace; --label-fg: #06080b; }
+  [data-panel="depth"] { --cloud-bg: #06080b; --cloud-grid: #141b23; --cloud-ring: #4cc9f0; --cloud-cam: #ff4d6d; --cloud-text: #5f6d7c; --sensor-a: #4cc9f0; --sensor-b: #ff4d6d; --point-size: 0.0022; }
+  .nav { position: absolute; left: 30px; bottom: 56px; gap: 14px; align-items: flex-end; }
+  .nav .tools { display: flex; flex-direction: column; gap: 6px; }
+  .nav .tools button { width: 30px; height: 30px; background: rgba(6,8,11,.8); border: 1px solid var(--tick); color: var(--text); display: grid; place-items: center; }
+  .nav .tools button:hover { border-color: var(--cyan); color: var(--cyan); }
+  .nav .views { display: flex; gap: 12px; padding: 6px 10px; border: 1px solid var(--tick); background: rgba(6,8,11,.8); }
+  .nav .views button { background: none; border: 0; color: var(--dim); font: inherit; letter-spacing: inherit; padding: 0; }
+  .nav .views button:hover { color: var(--cyan); }
+  /* options float inside the camera stage */
+  .options { position: absolute; top: 10px; right: 10px; width: 214px; background: rgba(6,8,11,.86); border: 1px solid var(--tick); padding: 10px 12px; display: grid; gap: 8px; z-index: 5; }
+  body.fs-cam .options { top: 46px; right: 14px; }
+  .options .h { color: var(--dim); display: flex; justify-content: space-between; }
+  .opt { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 0; font: inherit; letter-spacing: inherit; color: var(--text); }
+  .opt i { font-style: normal; color: var(--dim); }
+  .opt i::before { content: "OFF"; } .opt.on i::before { content: "ON"; }
+  .opt.on i { color: var(--cyan); }
+  .opt[data-opt="defects"].on i { color: var(--pink); }
+  .options .seg { padding-left: 10px; }
+  .options .seg button.on, .options .seg button.on::before, .options .seg button.on::after { color: var(--pink); }
+  .sep { border-top: 1px dashed var(--line); }
+  .kv { display: flex; justify-content: space-between; color: var(--dim); } .kv b { color: var(--text); font-weight: 400; }
+</style>
+<body>
+<header><b>BRICKCELL/TWIN</b><span>REV 0.1</span><span>MOCK DATA</span><span class="sp"></span><span>LINK OK</span><span>15.0 HZ</span><span data-bind="date"></span><span data-bind="clock"></span></header>
+<main>
+  <section data-panel="cam">
+    <div class="bar"><span class="t">CH1 TOP CAMERA</span>
+      <div class="seg"><button data-src="sim">SIM</button><button data-src="real">REAL</button></div><kbd>T</kbd>
+      <button class="icon" data-zoom title="Zoom (Z)"><span data-bind="zoom"></span></button>
+      <button class="icon" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="frame"><div class="stage"><img class="cam-sim" src="assets/sim-top.jpg" alt=""><img class="cam-real" src="assets/real-top.jpg" alt=""><canvas class="cam-overlay"></canvas><div class="cross"></div>
+      <aside class="options">
+        <div class="h"><span>OVERLAY</span><span data-bind="src"></span></div>
+        <button class="opt" data-opt="defects">DEFECTS <i></i></button>
+        <div class="seg only-defects"><button data-scope="all">ALL</button><button data-scope="focus">FOCUS</button></div>
+        <button class="opt" data-opt="focus">FOCUS BLOCK <i></i></button>
+        <div class="sep"></div>
+        <div class="kv">FOCUS <b data-bind="focus-label"></b></div>
+        <div class="kv">BODY <b data-bind="focus-id"></b></div>
+        <div class="kv">SHOWN <b data-bind="defect-count"></b></div>
+        <div class="kv">THR <b data-bind="threshold"></b></div>
+        <div class="kv">ARM <b>PICKING</b></div>
+      </aside></div></div>
+    <div class="foot"><span>SRC <b data-bind="src"></b></span><span>SN <b>350122060653</b></span><span>RES <b>640×480</b></span><span>FX <b>603.9</b></span></div>
+  </section>
+  <section data-panel="depth">
+    <div class="bar"><span class="t">CH2 DEPTH CLOUD</span>
+      <div class="seg"><button data-color="rgb">RGB</button><button data-color="sensor">SENSOR</button></div>
+      <button class="icon" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="frame"><div class="stage"><canvas class="cloud"></canvas><canvas class="cloud-labels"></canvas></div></div>
+    <div class="nav">
+      <canvas class="gizmo"></canvas>
+      <div class="tools"><button data-drag="orbit" data-icon="orbit"></button><button data-drag="pan" data-icon="pan"></button><button data-drag="zoom" data-icon="zoom"></button></div>
+      <div class="views"><button data-view="cam">0 CAM</button><button data-view="top">7 TOP</button><button data-view="front">1 FRONT</button><button data-view="right">3 RIGHT</button><button data-proj>5 <span data-bind="proj"></span></button></div>
+    </div>
+    <div class="foot"><span>VIEW <b data-bind="view"></b></span><span>PROJ <b data-bind="proj"></b></span><span>DIST <b data-bind="dist"></b></span><span>SRC <b>2×D415</b></span></div>
+  </section>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/engine.js"></script>
+</body>
+</html>

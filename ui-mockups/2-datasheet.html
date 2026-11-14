@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Station twin · 2 Datasheet</title>
+<link rel="stylesheet" href="assets/base.css">
+<style>
+  :root { --paper: #f3f2ee; --ink: #121212; --mid: #6b6a66; --rule: #121212; --soft: #d6d4cd; --red: #e10600;
+    --sans: "Helvetica Neue", "Inter", Arial, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+  body { background: var(--paper); color: var(--ink); font: 13px/1.35 var(--sans); display: flex; flex-direction: column; padding: 20px 24px 16px; gap: 14px; }
+  header { display: grid; grid-template-columns: 1fr repeat(4, 130px); align-items: end; border-bottom: 2px solid var(--rule); padding-bottom: 10px; }
+  header h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+  header div { font-size: 11px; color: var(--mid); border-left: 1px solid var(--soft); padding-left: 10px; }
+  header div b { display: block; color: var(--ink); font: 500 13px var(--mono); margin-top: 2px; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 230px; gap: 20px; }
+  [data-panel] { background: var(--paper); }
+  .label { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); margin-bottom: 8px; }
+  .label .n { font: 700 11px var(--mono); }
+  .label .t { font-weight: 700; font-size: 14px; flex: 1; }
+  .tabs { display: flex; gap: 14px; font-size: 13px; }
+  .tabs button { background: none; border: 0; padding: 0 0 2px; color: var(--mid); border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--ink); border-color: var(--ink); font-weight: 700; }
+  kbd { font: 10px var(--mono); border: 1px solid var(--ink); padding: 0 4px; }
+  .icon { background: none; border: 0; padding: 0; color: var(--ink); display: grid; place-items: center; }
+  .stage { outline: 1px solid var(--rule); background: #e4e2dc; }
+  .meta { display: flex; gap: 18px; font: 10px var(--mono); color: var(--mid); padding-top: 6px; }
+  [data-panel].fs { padding: 20px 24px; }
+  [data-panel="cam"] { --focus: #121212; --defect: #e10600; --box-style: rect; --box-line: 1.5; --label-font: 600 10px Helvetica Neue, Arial, sans-serif; --label-fg: #fff; }
+  [data-panel="depth"] { --cloud-bg: #e4e2dc; --cloud-grid: #cfccc4; --cloud-ring: #121212; --cloud-cam: #e10600; --cloud-text: #121212; --sensor-a: #121212; --sensor-b: #e10600; --point-size: 0.0026; }
+  .nav { position: absolute; left: 36px; bottom: 50px; align-items: flex-end; gap: 12px; }
+  .nav canvas.gizmo { background: rgba(243,242,238,.85); outline: 1px solid var(--ink); }
+  .nav .tools { display: flex; flex-direction: column; outline: 1px solid var(--ink); background: var(--paper); }
+  .nav .tools button { width: 34px; height: 34px; border: 0; background: none; border-bottom: 1px solid var(--soft); display: grid; place-items: center; }
+  .nav .tools button:last-child { border: 0; }
+  .nav .views { display: flex; outline: 1px solid var(--ink); background: var(--paper); }
+  .nav .views button { border: 0; border-right: 1px solid var(--soft); background: none; padding: 8px 11px; font: 11px var(--mono); }
+  .nav .views button:last-child { border: 0; }
+  .options { display: flex; flex-direction: column; }
+  body.fs-cam .options { top: 58px; right: 40px; width: 240px; background: var(--paper); outline: 1px solid var(--ink); padding: 12px; }
+  .row { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--soft); }
+  .check { width: 16px; height: 16px; border: 1.5px solid var(--ink); background: none; padding: 0; position: relative; margin-top: 1px; }
+  .check.on { background: var(--ink); }
+  .check.on::after { content: ""; position: absolute; left: 4px; top: 0; width: 4px; height: 9px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .row b { display: block; font-size: 14px; }
+  .row small { color: var(--mid); font-size: 11px; }
+  .row .tabs { margin-top: 8px; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font: 11px var(--mono); margin-top: 14px; }
+  td { padding: 5px 0; border-bottom: 1px solid var(--soft); } td:last-child { text-align: right; }
+  .legend { margin-top: auto; font: 10px var(--mono); color: var(--mid); line-height: 2; }
+  .red { color: var(--red); }
+</style>
+<body>
+<header>
+  <h1>Station twin</h1>
+  <div>System<b>Brickcell</b></div>
+  <div>Source<b data-bind="src-long"></b></div>
+  <div>Clock<b data-bind="clock"></b></div>
+  <div>Data<b class="red">Mock</b></div>
+</header>
+<main>
+  <section data-panel="cam">
+    <div class="label"><span class="n">01</span><span class="t">Top camera</span>
+      <div class="tabs"><button data-src="sim">Sim</button><button data-src="real">Real</button></div><kbd>T</kbd>
+      <button class="icon" data-zoom title="Zoom (Z)" style="font:11px var(--mono)"><span data-bind="zoom"></span></button>
+      <button class="icon" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><img class="cam-sim" src="assets/sim-top.jpg" alt=""><img class="cam-real" src="assets/real-top.jpg" alt=""><canvas class="cam-overlay"></canvas></div>
+    <div class="meta"><span>D415 · 350122060653</span><span>640 × 480 · 15 Hz</span><span>Pose: robot base</span></div>
+  </section>
+  <section data-panel="depth">
+    <div class="label"><span class="n">02</span><span class="t">Depth, point cloud</span>
+      <div class="tabs"><button data-color="rgb">Colour</button><button data-color="sensor">Sensor</button></div>
+      <button class="icon" data-fs data-icon="fullscreen" title="Full screen"></button></div>
+    <div class="stage"><canvas class="cloud"></canvas><canvas class="cloud-labels"></canvas></div>
+    <div class="nav">
+      <canvas class="gizmo"></canvas>
+      <div class="tools"><button data-drag="orbit" data-icon="orbit" title="Orbit"></button><button data-drag="pan" data-icon="pan" title="Pan"></button><button data-drag="zoom" data-icon="zoom" title="Zoom"></button></div>
+      <div class="views"><button data-view="cam">Cam 0</button><button data-view="top">Top 7</button><button data-view="front">Front 1</button><button data-view="right">Right 3</button><button data-proj><span data-bind="proj"></span> 5</button></div>
+    </div>
+    <div class="meta"><span data-bind="view"></span><span data-bind="proj"></span><span>Top + Plate D415</span><span data-bind="dist"></span></div>
+  </section>
+  <aside class="options">
+    <div class="label"><span class="n">03</span><span class="t">Overlay</span></div>
+    <div class="row"><button class="check" data-opt="defects"></button>
+      <div><b>Defects</b><small>Anomaly boxes on sim and real view. Score = raw distance; threshold <span data-bind="threshold"></span>.</small>
+        <div class="tabs only-defects"><button data-scope="all">All visible</button><button data-scope="focus">Focus block only</button></div></div></div>
+    <div class="row"><button class="check" data-opt="focus"></button>
+      <div><b>Focus block</b><small>The block the arm selected to pick and inspect.</small></div></div>
+    <table><tr><td>Focus</td><td data-bind="focus-label"></td></tr><tr><td>Body</td><td data-bind="focus-id"></td></tr>
+      <tr><td>Defects shown</td><td data-bind="defect-count"></td></tr><tr><td>Arm</td><td>PICKING</td></tr></table>
+    <div class="legend">T sim/real · D defects · F focus<br>Z zoom · Esc exit full screen</div>
+  </aside>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/engine.js"></script>
+</body>
+</html>
