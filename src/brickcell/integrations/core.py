@@ -71,9 +71,9 @@ def evidence(asset, root):
     content = path.read_bytes()
     if hashlib.sha256(content).hexdigest() != asset["sha256"]:
         raise ValueError("Evidence hash changed")
-    from PIL import Image
-
     import io
+
+    from PIL import Image
 
     with Image.open(io.BytesIO(content)) as image:
         if image.format not in ("JPEG", "PNG"):

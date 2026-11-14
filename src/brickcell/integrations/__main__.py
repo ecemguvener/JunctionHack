@@ -5,7 +5,7 @@ import importlib
 import json
 from pathlib import Path
 
-from brickcell.integrations.core import Context, HTTP, Outbox, case_id, validate
+from brickcell.integrations.core import HTTP, Context, Outbox, case_id, validate
 
 PROVIDERS = {
     "cloudinary",
