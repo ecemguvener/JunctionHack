@@ -19,7 +19,7 @@ import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import cv2
 import numpy as np
@@ -47,10 +47,9 @@ from brickcell.block_inspector.perception import (
     _split_touching_cluster_if_needed,
     refine_cuboid_icp,
 )
-from brickcell.block_inspector.twin import (
-    SO101InspectionTwin,
-    SpawnedBlockInfo,
-)
+
+if TYPE_CHECKING:
+    from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
 
 DistractorCategory = Literal["human_arm", "wire", "trash", "robot_arm", "support_surface"]
 
@@ -141,6 +140,8 @@ class Real2SimSceneState:
 
     def to_spawned_blocks(self, source_only: bool = False) -> list[SpawnedBlockInfo]:
         """Convert perceived DUPLO bricks into `SpawnedBlockInfo` records for `SO101InspectionTwin`."""
+        from brickcell.block_inspector.twin import SpawnedBlockInfo
+
         selected = [
             b for b in self.bricks if (not source_only or b.support_region in {"source", "table"})
         ]
@@ -1393,6 +1394,8 @@ def synthesize_cluttered_scene_point_cloud(
       - Trash objects: a grey/white cup, a brown cardboard scrap, and an orange calibration fragment (`trash`)
       - Points on the SO-101 robot arm links (`robot_arm`)
     """
+    from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
+
     rng = np.random.default_rng(seed)
     ref_twin = SO101InspectionTwin(
         num_blocks=num_blocks,
@@ -1895,6 +1898,8 @@ class Real2SimPipeline:
         Only the localized LEGO DUPLO brick assets and 3 IKEA KALAS plates are instantiated in the
         MuJoCo physics world; all human arms, wires, and trash clusters are ignored.
         """
+        from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
+
         spawned = scene_state.to_spawned_blocks(source_only=False)
         if not spawned:
             spawned = [

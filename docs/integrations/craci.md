@@ -16,12 +16,12 @@ and does not publish releases, deploy hardware, build Docker or request GPU/NPU.
 Cloud credentials are not passed into it. Dependency checks may access public
 package/advisory services; configure runner egress as needed.
 
-Scope: the existing `tests/test_block_inspector.py` imports optional MuJoCo at
-collection time. This workflow explicitly excludes that architecture-only module
-and tests the core suite. Run the architecture environment/tests separately using
-`configs/arch-local-requirements.txt`; do not install MuJoCo/Frax into the Mac core
-just to hide an import issue. Model and live-simulator tests still need their
-explicit assets/services and remain skipped when absent.
+Compatibility fix: optional MuJoCo types are now imported when simulation is
+actually requested, rather than while importing the inspection package. The
+workflow runs `uv run pytest` without excluding the architecture module; its
+existing optional tests self-skip when MuJoCo/Frax are absent. MuJoCo/Frax stay in
+their separate environment and no dependencies were added to the Mac core.
+Model and live-simulator tests still require explicit assets/services.
 
 The YAML was parsed locally and the equivalent local core checks are recorded in
 `docs/VALIDATION.md`. A CRACI run, native SBOM, live advisory scan and hosted Linux

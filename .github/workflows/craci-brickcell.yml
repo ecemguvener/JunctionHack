@@ -18,8 +18,8 @@ jobs:
           version: "0.13.8"
           python-version: "3.12"
       - run: uv sync --locked
-      - name: Core software tests (optional architecture stack excluded)
-        run: uv run pytest --ignore=tests/test_block_inspector.py
+      - name: Software tests (optional model and simulation tests self-skip)
+        run: uv run pytest
       - run: uv run ruff check src tests scripts
       - run: uv run ruff format --check src tests scripts
       - name: Build source and wheel without models or datasets

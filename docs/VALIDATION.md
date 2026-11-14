@@ -1318,3 +1318,18 @@ Found and limits:
 - The sim is not twin-synced; its bricks and arm do not follow the real station.
 - Focus block and anomaly detection are not integrated; the page shows *Not connected*.
 - Not measured: frame rate on the Intel display itself (no tunnel), or a long-run soak test.
+
+## Optional integration compatibility — 14 November 2026
+
+During ecem integration verification, the existing block-inspector package eagerly
+imported its MuJoCo twin through real2sim, preventing core test collection without
+the separate simulator environment. Deferred twin imports to the three operations
+that actually create simulator/spawn records; public APIs and annotations remain
+available. No robot, detector, geometry, threshold or runtime behavior was changed.
+A fresh-process regression check confirms package/API import does not load MuJoCo.
+The CRACI workflow now runs the entire standard test suite without excluding a
+module. `uv run pytest`: **190 passed, 13 optional tests skipped** before adding
+the fresh-process regression test. Optional skips cover missing FastAPI/Frax/
+MuJoCo, trained-model assets and the live simulation service. Dashboard tests
+outside the socket sandbox: **28 Python passed**; **6 Node tests passed**.
+No cloud or hardware performance is implied by these checks.
