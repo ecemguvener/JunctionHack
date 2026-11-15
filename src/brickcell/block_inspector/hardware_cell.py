@@ -1034,9 +1034,10 @@ def localize_plates_and_bricks_top_rgb(
             long_vec, long_m, short_m = e12, len12, len01
 
         spec = _infer_duplo_spec_from_2d_extents(short_m, long_m)
-        # In DUPLO_CATALOG, dims_m[0] <= dims_m[1] (X_block = short axis, Y_block = long axis)
+        # Match DUPLO_CATALOG axis order: if dims_m[0] >= dims_m[1] (e.g. 2x4, 1x2x2), X_block is
+        # the long axis; otherwise (e.g. 2x3), Y_block is the long axis.
         yaw_long = math.atan2(float(long_vec[1]), float(long_vec[0]))
-        yaw_block = yaw_long - 0.5 * math.pi
+        yaw_block = yaw_long if spec.dims_m[0] >= spec.dims_m[1] else (yaw_long - 0.5 * math.pi)
 
         hz = float(spec.dims_m[2])
         z_center = 0.006 + 0.5 * hz
@@ -2194,15 +2195,25 @@ class PhysicalSO101CellExecutor:
                 if float(np.linalg.norm(p_b[:2] - m_xy)) < 0.026
             )
 
-            yaw_spans: list[tuple[float, float, int]] = []
+            horiz_axes: list[tuple[float, float, int]] = []
             for idx, span in enumerate(b.spec.dims_m):
                 ax = R_wb[:, idx]
                 if abs(float(ax[2])) < 0.30 and span <= 0.038:
-                    y0 = math.atan2(float(ax[1]), float(ax[0]))
-                    yaw_spans.extend([(y0, float(span), idx), (y0 + math.pi, float(span), idx)])
+                    horiz_axes.append((math.atan2(float(ax[1]), float(ax[0])), float(span), idx))
+            if horiz_axes:
+                min_span = min(sp for _, sp, _ in horiz_axes)
+                max_span = max(sp for _, sp, _ in horiz_axes)
+                # For elongated bricks (e.g. 1x2x2 with 32x16 mm), restrict to the short axis.
+                if max_span / max(min_span, 1e-4) >= 1.18:
+                    horiz_axes = [item for item in horiz_axes if item[1] <= min_span + 0.004]
+            yaw_spans: list[tuple[float, float, int]] = []
+            for y0, span, idx in horiz_axes:
+                yaw_spans.extend([(y0, span, idx), (y0 + math.pi, span, idx)])
             if not yaw_spans:
-                y0 = math.atan2(float(R_wb[1, 1]), float(R_wb[0, 1]))
-                yaw_spans = [(y0, 0.032, 0), (y0 + math.pi, 0.032, 0)]
+                short_idx = 0 if b.spec.dims_m[0] <= b.spec.dims_m[1] else 1
+                y0 = math.atan2(float(R_wb[1, short_idx]), float(R_wb[0, short_idx]))
+                span_fb = float(b.spec.dims_m[short_idx])
+                yaw_spans = [(y0, span_fb, short_idx), (y0 + math.pi, span_fb, short_idx)]
 
             along_offsets = (0.0, -0.014, +0.014) if max(b.spec.dims_m[:2]) >= 0.056 else (0.0,)
             radial_vec = p_b[:2] - source_xy
