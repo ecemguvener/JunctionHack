@@ -18,9 +18,9 @@ from PIL import Image
 from brickcell.detector.runtime import OpenVINODetector
 from brickcell.inspection.rgbd import RGBDInspector, RGBInspector, encode_depth
 
-PAGE = """<!doctype html><meta charset=utf-8><title>PatchCore + depth review</title>
+PAGE = """<!doctype html><meta charset=utf-8><title>PatchCore image inspection</title>
 <style>body{background:#0b1422;color:#e6f0ff;font:17px system-ui;margin:30px}article{display:inline-block;vertical-align:top;background:#17263b;border:1px solid #3d5677;border-radius:12px;padding:20px;width:44%;margin:1%}img{width:48%}pre{white-space:pre-wrap;font:14px monospace}iframe{width:100%;height:700px;border:0}input,button{padding:8px;font:inherit}@media(max-width:800px){article{width:90%}}</style>
-<h1>PatchCore RGB + depth viewer</h1><p>D415 RGB and aligned depth come from the same frameset. The arm camera supplies RGB only. Each modality needs its own real trained model and calibrated threshold. Scores are distances, not probabilities.</p>
+<h1>PatchCore camera inspection</h1><p>The default mark inspection uses plate and wrist RGB only. Each camera keeps its own normal reference model and threshold. Each modality needs its own real trained model and calibrated threshold. Scores are distances, not probabilities.</p>
 <p><strong>Review only:</strong> camera views do not verify hidden surfaces or object identity. No robot commands are issued.</p><div id=views></div>
 <h2>Live 3D views</h2><iframe title="Live D415 depth clouds" src="SOURCE_URL"></iframe>
 <script>for(const name of CAMERA_NAMES){let card=document.createElement('article');card.innerHTML=`<h2>${name === 'wrist' ? 'Arm / wrist (RGB only)' : name}</h2><p class=status>Connecting…</p><label>Brick crop (x0,y0,x1,y1) <input placeholder="e.g. 220,190,280,260"></label><button>Apply</button><p>${RGB_CAMERAS.includes(name) ? 'RGB input' : 'RGB input · depth input'}</p><img class=rgb><img class=depth><p>${RGB_CAMERAS.includes(name) ? 'RGB anomaly overlay' : 'RGB anomaly overlay · depth anomaly overlay'} (when model returns a map)</p><img class=rgbmap><img class=depthmap><pre></pre>`;views.append(card);card.querySelector('button').onclick=async()=>{try{let crop=card.querySelector('input').value.split(',').map(Number);let r=await fetch('/crop/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({crop})});let d=await r.json();if(!r.ok)throw Error(d.error);card.querySelector('.status').textContent='Crop updated'}catch(e){card.querySelector('.status').textContent=e.message}};
@@ -71,7 +71,7 @@ def read_rgb_frame(source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", default="http://127.0.0.1:18094")
-    parser.add_argument("--config", type=Path, default=Path("configs/rgbd-viewer.json"))
+    parser.add_argument("--config", type=Path, default=Path("configs/mark-viewer.json"))
     parser.add_argument("--port", type=int, default=18097)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -136,7 +136,20 @@ def main():
                 try:
                     settings = config["cameras"][camera]
                     if isinstance(inspectors[camera], RGBInspector):
-                        rgb, packet = read_rgb_frame(settings["source"])
+                        if settings.get("source_format") == "snapshot_rgb":
+                            with urlopen(settings["source"], timeout=4) as response:
+                                packet = json.load(response)
+                            if packet.get("synthetic") is not False:
+                                raise ValueError("Require explicitly real camera snapshot")
+                            rgb = np.asarray(
+                                Image.open(
+                                    io.BytesIO(
+                                        base64.b64decode(packet["rgb_jpeg_b64"], validate=True)
+                                    )
+                                ).convert("RGB")
+                            )
+                        else:
+                            rgb, packet = read_rgb_frame(settings["source"])
                         result, previews = inspectors[camera].inspect(
                             rgb, packet["time"], packet["serial"], packet["frame_id"]
                         )

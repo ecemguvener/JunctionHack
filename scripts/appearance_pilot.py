@@ -13,7 +13,18 @@ from pathlib import Path
 from brickcell.util import save_json, sha256, versions
 
 
-def fit(references: Path, output: Path, object_id: str, session_id: str, crop: list[int]) -> dict:
+def fit(
+    references: Path,
+    output: Path,
+    object_id: str,
+    session_id: str,
+    crop: list[int],
+    camera: str = "side",
+    image_size: int = 128,
+    surface_profile: dict | None = None,
+    layers: list[str] | None = None,
+    foreground_memory: bool = False,
+) -> dict:
     import torch
     from anomalib.engine import Engine
     from lightning import seed_everything
@@ -33,7 +44,14 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
     hashes = [sha256(path) for path in paths]
     if len(set(hashes)) != len(hashes):
         raise ValueError("Duplicate reference image bytes")
-    config = ModelConfig(manifest=references, output_dir=output)
+    config = ModelConfig(
+        manifest=references,
+        output_dir=output,
+        image_size=(image_size, image_size),
+        surface_profile=surface_profile,
+        layers=layers or ["layer2", "layer3"],
+        foreground_memory=foreground_memory,
+    )
     manifest = Manifest(
         references / "reference-only.json",
         [
@@ -44,7 +62,7 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
                 "train",
                 object_id=object_id,
                 session_id=session_id,
-                view_id="side",
+                view_id=camera,
             )
             for i, path in enumerate(paths)
         ],
@@ -58,7 +76,7 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
             "scope": "reference-only pilot; no val/test partitions or accuracy evaluation",
             "object_id": object_id,
             "session_id": session_id,
-            "camera": "side",
+            "camera": camera,
             "crop": crop,
             "references": [{"path": str(p), "sha256": h} for p, h in zip(paths, hashes)],
         },
@@ -74,7 +92,10 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
         limit_val_batches=0,
         num_sanity_val_steps=0,
     )
-    engine.fit(model=model, train_dataloaders=loader(manifest, "train", (128, 128), 4, 0))
+    engine.fit(
+        model=model,
+        train_dataloaders=loader(manifest, "train", config.image_size, 4, 0, surface_profile),
+    )
     checkpoint = output / "reference.ckpt"
     engine.trainer.save_checkpoint(checkpoint)
     metadata = {
@@ -82,11 +103,18 @@ def fit(references: Path, output: Path, object_id: str, session_id: str, crop: l
         "synthetic": False,
         "object_id": object_id,
         "session_id": session_id,
-        "camera": "side",
+        "camera": camera,
         "crop": crop,
         "reference_count": len(paths),
         "checkpoint_sha256": sha256(checkpoint),
-        "image_size": [128, 128],
+        "image_size": list(config.image_size),
+        "surface_profile": surface_profile,
+        "layers": config.layers,
+        "foreground_memory": foreground_memory,
+        "foreground_training_counts": getattr(model, "foreground_training_counts", None),
+        "score_aggregation": "max_patchcore_map_on_block_mask_v1"
+        if surface_profile
+        else "patchcore_pred_score",
         "threshold": None,
         "automatic_sorting_allowed": False,
         "references": [{"path": str(p), "sha256": h} for p, h in zip(paths, hashes)],
@@ -101,7 +129,8 @@ def score(pilot: Path, images: list[Path]) -> dict:
     from anomalib.models import Patchcore
 
     from brickcell.detector.runtime import Prediction, save_map
-    from brickcell.inspection.images import input_tensor, read_rgb
+    from brickcell.inspection.block_surface import surface_input, surface_score
+    from brickcell.inspection.images import read_rgb
 
     metadata = json.loads((pilot / "pilot.json").read_text())
     checkpoint = pilot / "reference.ckpt"
@@ -113,12 +142,16 @@ def score(pilot: Path, images: list[Path]) -> dict:
     rows = []
     for path in images:
         rgb = read_rgb(path)
-        tensor = torch.from_numpy(input_tensor(rgb, (128, 128)))
+        prepared, mask = surface_input(
+            rgb, tuple(metadata["image_size"]), metadata.get("surface_profile")
+        )
+        tensor = torch.from_numpy(prepared)
         with torch.inference_mode():
             result = model(tensor)
-        prediction = Prediction(
-            float(result.pred_score.item()), 0, result.anomaly_map.squeeze().cpu().numpy()
+        distance, amap = surface_score(
+            float(result.pred_score.item()), result.anomaly_map.squeeze().cpu().numpy(), mask
         )
+        prediction = Prediction(distance, 0, amap)
         digest = sha256(path)
         map_path = save_map(prediction, rgb, pilot / "maps" / digest[:20])
         rows.append(
@@ -150,12 +183,30 @@ def main():
     fitting.add_argument("--object-id", required=True)
     fitting.add_argument("--session-id", required=True)
     fitting.add_argument("--crop", nargs=4, type=int, required=True)
+    fitting.add_argument("--camera", choices=["plate", "wrist", "side", "top"], default="side")
+    fitting.add_argument("--image-size", type=int, default=128)
+    fitting.add_argument("--surface-profile", type=Path)
+    fitting.add_argument("--foreground-memory", action="store_true")
+    fitting.add_argument(
+        "--layers", nargs="+", choices=["layer1", "layer2", "layer3"], default=["layer2", "layer3"]
+    )
     scoring = commands.add_parser("score")
     scoring.add_argument("--pilot", type=Path, required=True)
     scoring.add_argument("--images", type=Path, nargs="+", required=True)
     args = parser.parse_args()
     result = (
-        fit(args.references, args.output, args.object_id, args.session_id, args.crop)
+        fit(
+            args.references,
+            args.output,
+            args.object_id,
+            args.session_id,
+            args.crop,
+            args.camera,
+            args.image_size,
+            json.loads(args.surface_profile.read_text()) if args.surface_profile else None,
+            args.layers,
+            args.foreground_memory,
+        )
         if args.command == "fit"
         else score(args.pilot, args.images)
     )

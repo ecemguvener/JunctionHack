@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 
+from brickcell.inspection.block_surface import SurfaceViewError
 from brickcell.inspection.images import QualityConfig, check_view
 from brickcell.inspection.types import Decision
 
@@ -101,7 +102,10 @@ class RGBDInspector:
                 fraction = float(valid.mean())
                 result["depth_fraction"] = fraction
             quality = check_view(rgb, self.quality)
-            if not quality.valid or (fraction is not None and fraction < self.min_depth_fraction):
+            surface_profile = getattr(self.detectors.get("rgb"), "surface_profile", None)
+            if (not surface_profile and not quality.valid) or (
+                fraction is not None and fraction < self.min_depth_fraction
+            ):
                 result["reason"] = "Invalid RGB view or insufficient depth: " + ",".join(
                     quality.reasons
                 )
@@ -142,6 +146,10 @@ class RGBDInspector:
             result["reason"] = (
                 "Per-modality decisions; no cross-camera coverage or object identity verified"
             )
+        except SurfaceViewError as exc:
+            result.update(decision="REINSPECT", reason=str(exc))
+            result["channels"] = {}
+            result["depth_used_for_anomaly_score"] = False
         except Exception as exc:
             result.update(decision="ERROR", reason=str(exc))
             result["channels"] = {}

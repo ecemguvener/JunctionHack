@@ -464,7 +464,7 @@ def load_anomalib_camera_detectors(
     rgbd_viewer_config_path: str | Path | None = None,
     allow_synthetic: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[int] | None]]:
-    """Load real Anomalib `OpenVINODetector` models across `top`, `plate`, and `wrist` cameras.
+    """Load plate/wrist RGB models only; top and depth models are excluded.
 
     Supports:
       1. `configs/rgbd-viewer.json` (`cameras.{top,plate,wrist}.models.{rgb,depth}` + `crop`),
@@ -487,7 +487,7 @@ def load_anomalib_camera_detectors(
         if not xml_resolved.exists() or not meta_path.exists():
             return
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if not allow_synthetic and bool(meta.get("synthetic", False)):
+        if not allow_synthetic and bool(meta.get("synthetic", True)):
             return
         contract = meta.get("sensor_contract") or {}
         cam_key = cam_hint or serial_to_cam.get(str(contract.get("serial", "")))
@@ -499,6 +499,13 @@ def load_anomalib_camera_detectors(
                     break
         cam_key = cam_key or "default"
         modality = str(contract.get("modality") or mod_hint or "rgb")
+        if cam_key not in ("plate", "wrist") or modality != "rgb":
+            return
+        if (
+            meta.get("synthetic") is not False
+            or serial_to_cam.get(str(contract.get("serial", ""))) != cam_key
+        ):
+            raise ValueError("Mark model requires matching real plate/wrist RGB sensor contract")
         det = OpenVINODetector(xml_resolved)
         if det.threshold is None:
             raise ValueError(
@@ -563,7 +570,7 @@ class FrameInspectionResult:
 
 
 class RealCameraAnomalyInspector:
-    """`Inspector` boundary wrapping Anomalib `OpenVINODetector` across `top`, `plate`, & `wrist`.
+    """`Inspector` boundary wrapping the same Anomalib architecture for plate/wrist RGB.
 
     Strictly isolated from robot control (zero robot handles per `AGENTS.md`).
     When Anomalib `OpenVINODetector` model(s) are loaded (`has_anomalib_models == True`),
@@ -587,14 +594,19 @@ class RealCameraAnomalyInspector:
         self.camera_detectors: dict[str, dict[str, Any]] = {}
         if camera_detectors:
             for cam_k, mod_map in camera_detectors.items():
+                cam_k = "plate" if cam_k == "side" else str(cam_k)
+                if cam_k not in ("plate", "wrist"):
+                    continue
                 for mod_k, det in mod_map.items():
+                    if mod_k != "rgb":
+                        raise ValueError("Plate/wrist mark inspection accepts RGB models only")
                     if getattr(det, "threshold", None) is None:
                         raise ValueError(
                             f"Anomalib detector for {cam_k}/{mod_k} lacks a calibrated threshold"
                         )
                     self.camera_detectors.setdefault(str(cam_k), {})[str(mod_k)] = det
-        if openvino_detector is not None and "default" not in self.camera_detectors:
-            self.camera_detectors["default"] = {"rgb": openvino_detector}
+        if openvino_detector is not None and "plate" not in self.camera_detectors:
+            self.camera_detectors["plate"] = {"rgb": openvino_detector}
         self.camera_crops: dict[str, list[int] | None] = dict(camera_crops or {})
         self.worker_timeout_s = float(worker_timeout_s)
         self._executor: concurrent.futures.ThreadPoolExecutor | None = (
@@ -615,7 +627,7 @@ class RealCameraAnomalyInspector:
 
     def has_detector_for_camera(self, camera_name: str) -> bool:
         norm = "plate" if camera_name == "side" else camera_name
-        return norm in self.camera_detectors or "default" in self.camera_detectors
+        return norm in ("plate", "wrist") and norm in self.camera_detectors
 
     def resolve_crop_for_camera(
         self, camera_name: str, fallback_box: list[int] | None
@@ -630,7 +642,7 @@ class RealCameraAnomalyInspector:
         norm = "plate" if camera_name == "side" else camera_name
         if norm in self.camera_detectors:
             return self.camera_detectors[norm]
-        return self.camera_detectors.get("default", {})
+        return {}
 
     def close(self) -> None:
         if self._executor is not None:
@@ -646,6 +658,7 @@ class RealCameraAnomalyInspector:
         z_band_m: float,
         camera_name: str,
     ) -> FrameInspectionResult:
+        from brickcell.inspection.block_surface import SurfaceViewError
         from brickcell.inspection.rgbd import encode_depth
         from brickcell.inspection.types import Decision
 
@@ -703,7 +716,19 @@ class RealCameraAnomalyInspector:
 
             rgb_det = cam_dets.get("rgb")
             if rgb_det is not None:
-                pred_rgb = rgb_det.predict(roi_rgb)
+                try:
+                    pred_rgb = rgb_det.predict(roi_rgb)
+                except SurfaceViewError as exc:
+                    return FrameInspectionResult(
+                        valid_view=False,
+                        raw_anomaly_distance=0.0,
+                        threshold_value=float(rgb_det.threshold.value),
+                        flagged=False,
+                        detections=[],
+                        foreground_pixels=fg_count,
+                        reason=f"surface_reinspect:{exc}",
+                        inspector_backend=self.inspector_mode,
+                    )
                 sc_rgb = float(pred_rgb.score)
                 thr_rgb = float(rgb_det.threshold.value)
                 if not math.isfinite(sc_rgb):
@@ -815,13 +840,13 @@ class RealCameraAnomalyInspector:
             )
 
         return FrameInspectionResult(
-            valid_view=True,
+            valid_view=False,
             raw_anomaly_distance=dark_score,
             threshold_value=self.dark_mark_threshold,
-            flagged=dark_score >= self.dark_mark_threshold,
+            flagged=False,
             detections=full_dets,
             foreground_pixels=fg_count,
-            reason="ok",
+            reason="uncalibrated_dark_mark_reference_not_trusted",
             inspector_backend="lab_dark_mark_fallback",
         )
 
@@ -837,6 +862,20 @@ class RealCameraAnomalyInspector:
         """Run bounded-timeout inspection; retire worker permanently on timeout (`AGENTS.md`)."""
         if self.timed_out or self._executor is None:
             raise TimeoutError("Inspector worker previously timed out and cannot be reused")
+        camera_name = "plate" if camera_name == "side" else camera_name
+        if camera_name not in ("plate", "wrist"):
+            return FrameInspectionResult(
+                False,
+                0.0,
+                self.dark_mark_threshold,
+                False,
+                [],
+                0,
+                reason="camera_excluded_from_mark_inspection",
+                inspector_backend=self.inspector_mode,
+            )
+        # RGB mark detection must not use depth gating or depth features.
+        depth_m, expected_z_m = None, None
         fut = self._executor.submit(
             self._score_sync, rgb, depth_m, crop_box, expected_z_m, z_band_m, camera_name
         )
@@ -2509,7 +2548,7 @@ class PhysicalSO101CellExecutor:
             is_target = cand_b.block_id == brick.block_id
 
             # 1) Overhead `top` camera evaluation
-            if cand_tbox is not None:
+            if cand_tbox is not None and self.inspector.has_detector_for_camera("top"):
                 try:
                     top_res = self.inspector.evaluate_frame(
                         top_snap.rgb,
@@ -2891,9 +2930,21 @@ class PhysicalSO101CellExecutor:
         )
 
     def _skill_present_and_spin_at_plate_camera(self) -> SkillOutcome:
-        """Present held brick at demonstrated side-camera pose & sweep Joint 5 CCW across 3 cameras."""
+        """Present held brick and require scheduled plate/wrist RGB inspection evidence."""
+        from brickcell.inspection.mark_scan import MarkScanEvidence
+        from brickcell.inspection.types import Decision
+
+        self.plate_scan_completed = False
         if self.hand_empty or self._active_brick is None:
             return SkillOutcome(False, reason="block_not_held")
+        missing_models = [
+            camera
+            for camera in ("plate", "wrist")
+            if not self.inspector.has_detector_for_camera(camera)
+        ]
+        if missing_models:
+            return SkillOutcome(False, reason=f"missing_mark_models({','.join(missing_models)})")
+        scan_evidence = MarkScanEvidence()
 
         brick = self._active_brick
         dash_obj_id = PART_ID_TO_DASHBOARD_ID.get(brick.spec.part_id, "part-001")
@@ -2964,7 +3015,7 @@ class PhysicalSO101CellExecutor:
             swept_deg = math.degrees(q_step[4] - q_scan_start[4])
             self.status_banner = (
                 f"Side Camera CCW Spin +{swept_deg:.0f} deg | "
-                f"{'ANOMALY FLAGGED' if self.anomaly_flagged else 'Scanning 3 cameras...'}"
+                f"{'ANOMALY FLAGGED' if self.anomaly_flagged else 'Inspecting plate and wrist...'}"
             )
             # `include_gripper=False` ensures gripper goal NEVER relaxes during the spin!
             self.arm.move_to_pose(
@@ -3020,14 +3071,13 @@ class PhysicalSO101CellExecutor:
                     stage_tag=f"spin_{step_idx}",
                     expected_z_m=None,
                 )
-                # Multi-camera pass on `top` and `wrist` alongside `plate`!
-                if step_idx in (0, 3, 6) and top_box is not None:
-                    self._evaluate_camera_crop_and_record(
-                        top_snap,
-                        top_box,
-                        stage_tag=f"spin_{step_idx}",
-                        require_configured_detector=self.inspector.has_anomalib_models,
-                    )
+                scan_evidence.record(
+                    "plate",
+                    step_idx,
+                    plate_snap.frame_id,
+                    valid=res_plate is not None and res_plate.valid_view,
+                    flagged=res_plate is not None and res_plate.flagged,
+                )
                 if step_idx in (0, 3, 6):
                     hw_w = wrist_snap.rgb.shape[:2]
                     w_box = [
@@ -3036,11 +3086,18 @@ class PhysicalSO101CellExecutor:
                         int(0.76 * hw_w[1]),
                         int(0.92 * hw_w[0]),
                     ]
-                    self._evaluate_camera_crop_and_record(
+                    res_wrist = self._evaluate_camera_crop_and_record(
                         wrist_snap,
                         w_box,
                         stage_tag=f"spin_{step_idx}",
                         require_configured_detector=True,
+                    )
+                    scan_evidence.record(
+                        "wrist",
+                        step_idx,
+                        wrist_snap.frame_id,
+                        valid=res_wrist is not None and res_wrist.valid_view,
+                        flagged=res_wrist is not None and res_wrist.flagged,
                     )
             except Exception as exc:
                 self.anomaly_untrusted_error = f"inspector_failure:{exc}"
@@ -3088,6 +3145,11 @@ class PhysicalSO101CellExecutor:
                 False, reason=f"insufficient_valid_plate_views({self.plate_scan_valid_frames})"
             )
 
+        if scan_evidence.decision() == Decision.REINSPECT:
+            return SkillOutcome(
+                False, reason=f"incomplete_plate_wrist_scan({scan_evidence.missing})"
+            )
+
         self.plate_scan_completed = True
         return SkillOutcome(
             True,
@@ -3097,6 +3159,8 @@ class PhysicalSO101CellExecutor:
                 "anomaly_flagged": self.anomaly_flagged,
                 "max_raw_anomaly_distance": self.max_plate_anomaly_distance,
                 "inspector_mode": self.inspector.inspector_mode,
+                "mark_scan_decision": str(scan_evidence.decision()),
+                "missing_mark_views": scan_evidence.missing,
             },
         )
 
