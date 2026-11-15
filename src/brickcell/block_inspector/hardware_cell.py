@@ -2185,6 +2185,7 @@ class PhysicalSO101CellExecutor:
         self.plate_scan_completed: bool = False
         self.plate_scan_valid_frames: int = 0
         self.anomaly_flagged: bool = False
+        self.target_anomaly_block_flagged: bool = False
         self.anomaly_messages: list[str] = []
         self.anomaly_untrusted_error: str | None = None
         self.max_plate_anomaly_distance: float | None = None
@@ -2266,7 +2267,12 @@ class PhysicalSO101CellExecutor:
             malformed: bool | None = None
             detail = f"UNTRUSTED ({self.anomaly_untrusted_error}) | {model_label}"[:200]
         else:
-            malformed = bool(self.anomaly_flagged and self.plate_scan_active)
+            flagged_for_camui = (
+                self.target_anomaly_block_flagged
+                if self.inspector.allow_heuristic_sorting
+                else self.anomaly_flagged
+            )
+            malformed = bool(flagged_for_camui and self.plate_scan_active)
             if self.max_plate_anomaly_distance is not None:
                 verdict = "DEFECT FLAGGED" if malformed else "GOOD"
                 detail = (
@@ -2605,7 +2611,7 @@ class PhysicalSO101CellExecutor:
                 if self.max_plate_anomaly_distance is None
                 else max(self.max_plate_anomaly_distance, res.raw_anomaly_distance)
             )
-            if res.flagged:
+            if res.flagged and not self.inspector.allow_heuristic_sorting:
                 self.anomaly_flagged = True
                 self.anomaly_messages.append(
                     f"{stage_tag}_{snap.camera_name}_{res.inspector_backend}="
@@ -2736,6 +2742,7 @@ class PhysicalSO101CellExecutor:
         self.plate_scan_completed = False
         self.plate_scan_valid_frames = 0
         self.anomaly_flagged = False
+        self.target_anomaly_block_flagged = False
         self.anomaly_messages.clear()
         self.anomaly_untrusted_error = None
         self.max_plate_anomaly_distance = None
@@ -2884,7 +2891,7 @@ class PhysicalSO101CellExecutor:
                             if self.max_plate_anomaly_distance is None
                             else max(self.max_plate_anomaly_distance, top_res.raw_anomaly_distance)
                         )
-                        if top_res.flagged:
+                        if top_res.flagged and not self.inspector.allow_heuristic_sorting:
                             self.anomaly_flagged = True
                             self.anomaly_messages.append(
                                 f"pre_pick_top_{top_res.inspector_backend}="
@@ -2932,7 +2939,7 @@ class PhysicalSO101CellExecutor:
                         if self.max_plate_anomaly_distance is None
                         else max(self.max_plate_anomaly_distance, cand_res.raw_anomaly_distance)
                     )
-                    if cand_res.flagged:
+                    if cand_res.flagged and not self.inspector.allow_heuristic_sorting:
                         self.anomaly_flagged = True
                         self.anomaly_messages.append(
                             f"pre_pick_plate_{cand_res.inspector_backend}="
@@ -3579,6 +3586,7 @@ class PhysicalSO101CellExecutor:
                         mean_rgb=brick.mean_rgb,
                     )
                     if blk_found:
+                        self.target_anomaly_block_flagged = True
                         self.anomaly_flagged = True
                         self.anomaly_messages.append(
                             f"spin_{step_idx}_plate_anomaly_block={blk_label}"
