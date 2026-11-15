@@ -288,9 +288,10 @@ def test_held_anomaly_block_classifier_flags_target_three_and_bridges_to_camui(m
         assert found is True
         assert label == expected
 
-    # Normal red brick must NOT be flagged
-    red_crop = np.full((80, 80, 3), (205, 32, 32), dtype=np.uint8)
-    found_red, _, _ = classify_held_anomaly_block(red_crop, mean_rgb=(205.0, 32.0, 32.0))
+    # Normal red brick must NOT be flagged even with white wall / wooden desk in crop background
+    red_with_white_bg = np.full((80, 80, 3), (245, 245, 245), dtype=np.uint8)
+    red_with_white_bg[30:50, 30:50] = (205, 32, 32)
+    found_red, _, _ = classify_held_anomaly_block(red_with_white_bg, mean_rgb=(205.0, 32.0, 32.0))
     assert found_red is False
 
     # CamUiReporter only sets malformed=True during rotation (plate_scan_active=True)

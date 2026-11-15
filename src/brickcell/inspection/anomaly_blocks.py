@@ -32,7 +32,7 @@ def _classify_single_rgb(mean_rgb: tuple[float, float, float]) -> str | None:
         return "white_block"
     if 26 <= h <= 48 and s >= 55 and v >= 110:
         return "lime_block"
-    if 6 <= h <= 21 and s >= 110 and v >= 70:
+    if 8 <= h <= 20 and s >= 105 and v >= 70:
         return "orange_brown_block"
     if 122 <= h <= 152 and 30 <= s <= 125 and v >= 110:
         return "lavender_block"
@@ -74,6 +74,7 @@ def classify_held_anomaly_block(
         rgb_label = _classify_single_rgb(mean_rgb)
         if rgb_label is not None:
             return True, rgb_label, {rgb_label: 1.0}
+        return False, None, {}
 
     if rgb_crop.size == 0 or rgb_crop.ndim != 3 or rgb_crop.shape[2] != 3:
         return False, None, {}
