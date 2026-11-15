@@ -1,7 +1,7 @@
 param(
     [int]$MaxCycles = 24,
-    [ValidateSet("lab-dark-mark", "patchcore")]
-    [string]$InspectionMode = "lab-dark-mark",
+    [ValidateSet("lab-dark-mark", "patchcore", "patchcore-plate")]
+    [string]$InspectionMode = "patchcore-plate",
     [string]$OpenVinoModel = "",
     [switch]$DryRun,
     [switch]$SyncOnly

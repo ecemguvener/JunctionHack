@@ -54,7 +54,7 @@ def locate_red_brick(rgb):
     ]
 
 
-def inspect_frame(rgb, packet, crop, serial, contrast=16.0):
+def inspect_frame(rgb, packet, crop, serial, contrast=16.0, detector=None):
     if (
         packet.get("synthetic") is not False
         or packet.get("serial") != serial
@@ -63,6 +63,73 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0):
         or not 0 <= time.time() - packet["time"] <= 3
     ):
         raise ValueError("Require a fresh real frame with matching camera identity")
+    if detector is not None:
+        if detector.threshold is None:
+            raise ValueError("Calibrated OpenVINODetector requires a frozen threshold")
+        if crop is None:
+            crop = [0, 0, rgb.shape[1], rgb.shape[0]]
+        x0, y0, x1, y1 = crop
+        h, w = rgb.shape[:2]
+        if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h) or min(x1 - x0, y1 - y0) < 20:
+            raise ValueError("Select an in-frame brick crop of at least 20x20")
+        roi = rgb[y0:y1, x0:x1]
+        prediction = detector.predict(roi)
+        score = float(prediction.score)
+        thr_val = float(detector.threshold.value)
+        decision = str(detector.threshold.decide(score))
+        found = decision == "DEFECTIVE"
+        overlay = rgb.copy()
+        if prediction.anomaly_map is not None:
+            amap = np.asarray(prediction.anomaly_map, dtype=np.float32)
+            heat = cv2.applyColorMap(
+                np.uint8(np.clip(amap / max(score, thr_val, 1e-6), 0, 1) * 255),
+                cv2.COLORMAP_TURBO,
+            )
+            heat = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
+            heat = cv2.resize(heat, (x1 - x0, y1 - y0))
+            overlay[y0:y1, x0:x1] = np.uint8(roi * 0.65 + heat * 0.35)
+        color = (255, 70, 155) if found else (40, 220, 170)
+        cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), color, 2)
+        cv2.rectangle(overlay, (0, 0), (w, 46), (15, 22, 33), -1)
+        label = (
+            f"DEFECTIVE ({score:.3f} >= {thr_val:.3f}) - PINK PLATE"
+            if found
+            else f"{decision} ({score:.3f} < {thr_val:.3f}) - GREEN PLATE"
+        )
+        cv2.putText(
+            overlay, label, (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.46, color, 1, cv2.LINE_AA
+        )
+        cv2.putText(
+            overlay,
+            f"PatchCore OpenVINO CPU | model {detector.model_version}",
+            (10, 37),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA,
+        )
+        reason = (
+            f"Calibrated PatchCore DEFECTIVE ({score:.3f} >= {thr_val:.3f}); pink plate."
+            if found
+            else f"Calibrated PatchCore {decision} ({score:.3f} vs {thr_val:.3f}); green plate."
+        )
+        return dict(
+            camera="plate",
+            serial=serial,
+            frame_id=packet["frame_id"],
+            captured_at=packet["time"],
+            synthetic=False,
+            model_version=detector.model_version,
+            threshold_version=detector.threshold.version,
+            threshold=thr_val,
+            decision=decision if decision in ("GOOD", "DEFECTIVE") else "UNCALIBRATED",
+            reason=reason,
+            raw_distance=score,
+            image_jpeg=jpeg(rgb),
+            overlay_jpeg=jpeg(overlay),
+            automatic_sorting_allowed=True,
+        )
     if not math.isfinite(contrast) or contrast <= 0:
         raise ValueError("Contrast must be finite and positive")
     scorer = Path(__file__).resolve().parents[1] / "src/brickcell/inspection/dark_marks.py"
@@ -130,12 +197,22 @@ def main():
     parser.add_argument("--contrast", type=float, default=16.0)
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--events", type=Path, required=True)
+    parser.add_argument(
+        "--openvino-model",
+        type=Path,
+        help="Optional calibrated OpenVINO model.xml for PatchCore plate inspection",
+    )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if not math.isfinite(args.interval) or args.interval < 0.1:
         parser.error("interval must be finite and at least 0.1 seconds")
     if not math.isfinite(args.contrast) or args.contrast <= 0:
         parser.error("contrast must be finite and positive")
+    detector = None
+    if args.openvino_model is not None:
+        from brickcell.detector.runtime import OpenVINODetector
+
+        detector = OpenVINODetector(args.openvino_model)
     args.events.parent.mkdir(parents=True, exist_ok=True)
     last_frame = None
     while True:
@@ -149,8 +226,14 @@ def main():
                     io.BytesIO(base64.b64decode(packet["rgb_jpeg_b64"], validate=True))
                 ).convert("RGB")
             )
-            crop = args.crop if args.crop else locate_red_brick(rgb)
-            body = inspect_frame(rgb, packet, crop, args.serial, args.contrast)
+            if args.crop:
+                crop = args.crop
+            elif detector is not None:
+                contract_crop = (detector.metadata.get("sensor_contract") or {}).get("crop")
+                crop = contract_crop if contract_crop else [0, 0, rgb.shape[1], rgb.shape[0]]
+            else:
+                crop = locate_red_brick(rgb)
+            body = inspect_frame(rgb, packet, crop, args.serial, args.contrast, detector=detector)
             if time.time() - body["captured_at"] > 3:
                 raise ValueError("Inspection exceeded frame freshness deadline")
             request = Request(

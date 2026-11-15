@@ -13,6 +13,8 @@ from this documentation directory. Existing outputs are not overwritten.
 | prepare_earlier650.py | artifacts/patchcore-combined-earlier650-v1/prepare.py |
 | train_combined.py | artifacts/patchcore-combined-earlier650-v1/train.py |
 | audit_calibration.py | artifacts/patchcore-calibration-audit-v1/audit.py |
+| train_plate_rawgood.py | artifacts/patchcore-plate-rawgood-690-v1/train.py |
+| train_plate_calibrated.py | artifacts/patchcore-plate-calibrated-707-v1/train.py |
 
 Run preparation from the project containing the original capture records and
 images. Transfer the prepared artifact collection to Intel, preserving its paths.

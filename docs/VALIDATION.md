@@ -2728,3 +2728,62 @@ and `uv run --locked ruff format --check src tests scripts` passed, as did
 additional lint/format checks of the experiment snapshots. `git diff --check`
 passed. No new calibration, deployment or hardware execution occurred in this
 source-preservation step.
+
+
+### Plate-only 690-image PatchCore fit (top refs ignored) on Intel — 2026-11-15
+
+Staged and executed `docs/experiments/patchcore-labelling/train_plate_rawgood.py` on
+Intel CPU (`intel-XPS-16-DA16260`) under
+`/home/intel/brickcell-training/jack-clean-20261115-v1/artifacts/patchcore-plate-rawgood-690-v1`
+using `uv run --locked --offline python` (Python 3.12.16, Anomalib 2.7.0, Torch 2.10.0+cpu,
+pretrained ResNet18 layer2/layer3, 128x128 input, coreset 0.05, 3 neighbors, seed 42, 4 threads).
+
+- Ignored all `top` camera references (`12` earlier `top` refs excluded).
+- Combined `102` earlier `plate` clean references + `570` Jack `plate` clean references +
+  `18` real `human_label: "good"` `raw/good/*/side/*.png` crops from `~/brickcell-captures/raw/good`
+  (`690` total unique hashes; `1,238` unique hashes verified across earlier, Jack, and raw/good).
+- `plate` fit/save/reload/inference completed in `333.81 s`; memory bank shape `[8832, 384]`;
+  checkpoint SHA256 `1574df57a3e27c33308f692184651e6e8eff424d72bb619d56767a1aec1edefa`;
+  manifest SHA256 `414ff1ecd4360ea4b0c89c207021533a3bdbf49efb1d3549406b8057c78e54dd`;
+  restore smoke raw distance `1.1750285625457764`.
+- Limits: combines 672 full-frame (`640x480`) plate views (102 plate-resting, 570 arm-held)
+  with 18 cropped `raw/good/side` views; `threshold` remains `null`, `automatic_sorting_allowed`
+  is `false`, `accuracy_evaluated` is `false`, `validation_count` is `0`, `test_count` is `0`.
+  No OpenVINO export, threshold calibration, or runtime service deployment occurred.
+
+
+### Partitioned plate-only PatchCore calibration, OpenVINO export, parity & test evaluation on Intel — 2026-11-15
+
+Staged and executed `docs/experiments/patchcore-labelling/train_plate_calibrated.py` on
+Intel CPU (`intel-XPS-16-DA16260`) under
+`/home/intel/brickcell-training/jack-clean-20261115-v1/artifacts/patchcore-plate-calibrated-707-v1`
+using `uv run --locked --offline python` (Python 3.12.16, Anomalib 2.7.0, Torch 2.10.0+cpu,
+OpenVINO 2026.4.1 CPU, ResNet18 layer2/layer3, 128x128 input, coreset 0.05, 3 neighbors, seed 42, 4 threads).
+
+- **Leakage-free partition (`707` real `plate`/`side` images, `top` refs ignored)**:
+  - Passed `require_valid(manifest)` (`require_partitions=True`) with `0` errors, `0` warnings,
+    `0` duplicates, and `0` `object_id` or `session_id` overlap across splits (`manifest_sha256`:
+    `5e1828e6e1a52e47db5f17caa0a0f9cbe5581882cb24b6fcf8638b7a6f7a2407`).
+  - `train/good`: `661` (`90` earlier `live-marks-20261114T235451Z` + `570` Jack `session-20261115` + `1` `raw/good/side` `blue-brick-001`).
+  - `val`: `14` `good` + `12` `defective` (`26` images of `brick-002` across `brick-002-controlled-depth-20261114-a` and `clean-brick-002`).
+  - `test`: `16` `good` + `4` `defective` (`20` images of `red-brick-001` and `brick-001`, including `brick-001-matched-clean-GhBs4I` and `brick-001-raised-DGMCha`).
+- **Training, Calibration, OpenVINO Export, Parity & Test Evaluation**:
+  - Training + validation calibration completed in `349.56 s`; checkpoint SHA256
+    `6d8add3e0688a925092fe83413311393cc969e885c55de80f345cb7f96626a44`.
+  - Calibrated non-null `threshold`: `value = 2.453849196434021`,
+    `uncertainty_margin = 0.00293714165687561`, `version = "4128199aec09eedb"`,
+    `sample_count = 26`, `method = "validation_max_f1_ties_favor_recall"`,
+    `score_type = "raw_patchcore_distance_not_probability"`.
+  - Validation metrics (`26` samples): `recall = 1.0` (`tp = 12`, `fn = 0`, `tn = 9`, `fp = 5`),
+    `precision = 0.7059`, `f1 = 0.8276`, `auroc = 0.6429`, `defects_accepted_as_good = 0`.
+  - Exported OpenVINO CPU IR (`model.xml` SHA256 `5aca3fa5933393bff3025ab512dbfffc6329cb695abc0271b38eda06ff8cf877`,
+    `model.bin` SHA256 `46adb111bbd118e69c3677975272cc9822f66a0d186f93314428d6325a6b01f5`, `model.json`).
+  - Validation PyTorch vs OpenVINO CPU parity: `passed = true`, `max_absolute_difference = 1.6689e-06` (`<= 0.001`).
+  - Held-out `test` evaluation (`20` samples, evaluated once at frozen threshold):
+    `tn = 12`, `fp = 4`, `fn = 3`, `tp = 1`, `auroc = 0.65625`, `f1 = 0.2222`.
+  - Summary flags: `threshold` is non-null, `automatic_sorting_allowed = true`, `accuracy_evaluated = true`.
+- **Limitations**:
+  - Combines `640x480` full-frame plate views and `raw/side` crops resized to `128x128`.
+  - While the single-camera `plate` `OpenVINODetector` export is calibrated and evaluated,
+    two-camera `scripts/bundle_mark_models.py` deployment still requires a separate calibrated `wrist` model.
+  - No robot/camera commands or live service restarts were issued during this training/evaluation run.

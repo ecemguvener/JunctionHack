@@ -29,6 +29,36 @@ def detection_payload(event, now=None):
         or not 0 <= now - stamp <= 3
     ):
         return neutral
+    if (
+        event.get("decision") in ("GOOD", "DEFECTIVE")
+        and isinstance(event.get("threshold_version"), str)
+        and event["threshold_version"]
+        and isinstance(event.get("model_version"), str)
+        and event["model_version"]
+        and not event["model_version"].startswith("dark-mark-heuristic-")
+    ):
+        score, threshold = event.get("raw_distance"), event.get("threshold")
+        if (
+            type(score) not in (int, float)
+            or not math.isfinite(score)
+            or score < 0
+            or type(threshold) not in (int, float)
+            or not math.isfinite(threshold)
+            or threshold <= 0
+        ):
+            return neutral
+        found = event["decision"] == "DEFECTIVE"
+        return dict(
+            malformed=found,
+            detail=(
+                f"{'DEFECT FLAGGED' if found else 'GOOD'} | "
+                f"PatchCore {score:.3f} vs thr {threshold:.3f} ({event['model_version']})"
+            )[:200],
+            camera="side",
+            captured_at=stamp,
+            frame_id=event["frame_id"],
+            source=f"patchcore_openvino_{event['model_version']}",
+        )
     score, threshold = event.get("raw_distance"), event.get("contrast")
     if (
         event.get("decision") != "UNCALIBRATED"

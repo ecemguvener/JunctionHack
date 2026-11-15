@@ -2725,6 +2725,7 @@ class PhysicalSO101CellExecutor:
                             wrist_pre_snap,
                             wrist_crop,
                             stage_tag="pre_grasp",
+                            require_configured_detector=True,
                         )
                     except Exception as exc:
                         self.anomaly_untrusted_error = f"wrist_pre_grasp_inspector_error:{exc}"
@@ -2994,7 +2995,10 @@ class PhysicalSO101CellExecutor:
                 int(0.92 * h_wl),
             ]
             self._evaluate_camera_crop_and_record(
-                wrist_lift_snap, held_w_box, stage_tag="post_lift"
+                wrist_lift_snap,
+                held_w_box,
+                stage_tag="post_lift",
+                require_configured_detector=True,
             )
             self._sync_mirror_and_telemetry(q_lifted, g_lifted, wrist_rgb=wrist_lift_snap.rgb)
         except StaleCameraFrameError:
@@ -3024,16 +3028,18 @@ class PhysicalSO101CellExecutor:
         if self.hand_empty or self._active_brick is None:
             return SkillOutcome(False, reason="block_not_held")
         heuristic = getattr(self.inspector, "allow_heuristic_sorting", False)
+        plate_only_model = getattr(self.inspector, "plate_only_anomalib", False)
+        required_cameras = ("plate",) if plate_only_model else ("plate", "wrist")
         missing_models = [
             camera
-            for camera in ("plate", "wrist")
+            for camera in required_cameras
             if not self.inspector.has_detector_for_camera(camera)
         ]
         if missing_models and not heuristic:
             return SkillOutcome(False, reason=f"missing_mark_models({','.join(missing_models)})")
         scan_evidence = (
             MarkScanEvidence(required=frozenset(("plate", i) for i in range(7)))
-            if heuristic
+            if (heuristic or plate_only_model)
             else MarkScanEvidence()
         )
 
@@ -3169,7 +3175,7 @@ class PhysicalSO101CellExecutor:
                     valid=res_plate is not None and res_plate.valid_view,
                     flagged=res_plate is not None and res_plate.flagged,
                 )
-                if not heuristic and step_idx in (0, 3, 6):
+                if not (heuristic or plate_only_model) and step_idx in (0, 3, 6):
                     hw_w = wrist_snap.rgb.shape[:2]
                     w_box = [
                         int(0.24 * hw_w[1]),
@@ -3483,9 +3489,10 @@ def run_physical_cell_deployment(
     )
     out_root.mkdir(parents=True, exist_ok=True)
 
-    if inspection_mode not in ("patchcore", "lab-dark-mark"):
+    if inspection_mode not in ("patchcore", "patchcore-plate", "lab-dark-mark"):
         raise ValueError("Unknown inspection mode")
     heuristic = inspection_mode == "lab-dark-mark"
+    plate_only_model = inspection_mode == "patchcore-plate"
     if heuristic and (require_anomalib or openvino_config_path is not None):
         raise ValueError("lab-dark-mark cannot be combined with Anomalib model selection")
     if heuristic:
@@ -3495,13 +3502,14 @@ def run_physical_cell_deployment(
             openvino_model_path=openvino_config_path,
             rgbd_viewer_config_path=rgbd_viewer_config_path,
         )
+    required_cameras = ("plate",) if plate_only_model else ("plate", "wrist")
     missing_models = [
-        camera for camera in ("plate", "wrist") if "rgb" not in cam_detectors.get(camera, {})
+        camera for camera in required_cameras if "rgb" not in cam_detectors.get(camera, {})
     ]
     if missing_models and not heuristic:
         raise ValueError(
             f"missing_mark_models({','.join(missing_models)}): deployment refused before "
-            "camera/arm initialization or pickup. Both plate and wrist require real, "
+            "camera/arm initialization or pickup. Required cameras need real, "
             "calibrated RGB OpenVINO models. Configure cameras.<camera>.models.rgb in "
             "configs/mark-viewer.json (paths relative to the config), or pass "
             "--openvino-model. Each export needs model.xml, model.bin and model.json "
@@ -3515,6 +3523,7 @@ def run_physical_cell_deployment(
         camera_crops=cam_crops,
         allow_heuristic_sorting=heuristic,
     )
+    inspector.plate_only_anomalib = plate_only_model
     frame_source = LiveBenchHttpFrameSource(
         live_depth_url=live_depth_url,
         wrist_http_url=wrist_http_url,
