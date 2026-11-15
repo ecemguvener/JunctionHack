@@ -38,13 +38,7 @@ class Threshold:
 
 
 def calibrate(
-    scores: list[float],
-    labels: list[int],
-    manifest_hash: str,
-    uncertainty_fraction: float = 0.0,
-    *,
-    minimum_defect_recall: float | None = None,
-    maximum_good_nonaccept_rate: float = 0.1,
+    scores: list[float], labels: list[int], manifest_hash: str, uncertainty_fraction: float = 0.0
 ) -> Threshold:
     if len(scores) != len(labels) or set(labels) != {0, 1} or not all(map(math.isfinite, scores)):
         raise ValueError(
@@ -58,48 +52,12 @@ def calibrate(
     candidates = [float(unique[0]), *map(float, (unique[:-1] + unique[1:]) / 2)]
     threshold = max(candidates, key=lambda t: f1_score(labels, np.asarray(scores) >= t))
     margin = float(uncertainty_fraction * (np.quantile(scores, 0.95) - np.quantile(scores, 0.05)))
-    method = "validation_max_f1_ties_favor_recall"
-    if minimum_defect_recall is not None:
-        if not 0 < minimum_defect_recall <= 1 or not 0 <= maximum_good_nonaccept_rate <= 1:
-            raise ValueError("Recall must be in (0,1] and good nonaccept rate in [0,1]")
-        # Decisions change at score +/- margin. Include boundaries and their
-        # neighbors to respect inclusive REINSPECT edges, including tied scores.
-        boundaries = np.unique(np.concatenate((unique - margin, unique + margin)))
-        candidates = sorted(
-            {
-                float(t)
-                for boundary in boundaries
-                for t in (boundary, np.nextafter(boundary, -np.inf), np.nextafter(boundary, np.inf))
-                if math.isfinite(t)
-            }
-        )
-        feasible = []
-        for candidate in candidates:
-            trial = Threshold(candidate, margin, "candidate", manifest_hash, len(scores))
-            decisions = [trial.decide(s) for s in scores]
-            recall = sum(
-                d == Decision.DEFECTIVE for d, label in zip(decisions, labels) if label == 1
-            ) / labels.count(1)
-            nonaccept = sum(
-                d != Decision.GOOD for d, label in zip(decisions, labels) if label == 0
-            ) / labels.count(0)
-            if recall >= minimum_defect_recall and nonaccept <= maximum_good_nonaccept_rate:
-                feasible.append((nonaccept, -recall, candidate))
-        if not feasible:
-            raise ValueError(
-                "Validation cannot meet defect recall and clean nonaccept limits; "
-                "collect better views/data or improve the model. No threshold approved."
-            )
-        threshold = min(feasible)[2]
-        method = "validation_recall_constrained"
     payload = dict(
         value=threshold,
         uncertainty_margin=margin,
         calibration_manifest_sha256=manifest_hash,
         sample_count=len(scores),
     )
-    if minimum_defect_recall is not None:
-        payload["method"] = method
     version = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
     return Threshold(version=version, **payload)
 

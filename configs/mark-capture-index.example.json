@@ -1,7 +1,0 @@
-{
-  "cameras": {
-    "plate": {"serial": "243622060450", "crop": [300, 20, 450, 160]},
-    "wrist": {"serial": "sonix-wrist", "crop": [500, 250, 1300, 950]}
-  },
-  "samples": []
-}

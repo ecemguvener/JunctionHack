@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from brickcell.inspection.block_surface import surface_input, surface_score
+from brickcell.inspection.images import input_tensor
 from brickcell.inspection.threshold import Threshold
 from brickcell.util import sha256
 
@@ -38,14 +38,6 @@ class OpenVINODetector:
         threshold = self.metadata.get("threshold")
         self.threshold = Threshold(**threshold) if threshold else None
         self.size = tuple(self.metadata["input_size"])
-        self.surface_profile = self.metadata.get("surface_profile")
-        if self.surface_profile != self.metadata.get("config", {}).get("surface_profile"):
-            raise ValueError("Surface profile differs from trained configuration")
-        if (
-            self.surface_profile
-            and self.metadata.get("score_aggregation") != "max_patchcore_map_on_block_mask_v1"
-        ):
-            raise ValueError("Surface model requires matching score aggregation and recalibration")
         self.core = ov.Core()
         self.compiled = self.core.compile_model(
             str(self.path),
@@ -59,11 +51,9 @@ class OpenVINODetector:
         self.outputs = {port.get_any_name(): port for port in self.compiled.outputs}
         if "pred_score" not in self.outputs:
             raise ValueError(f"Model lacks pred_score output: {list(self.outputs)}")
-        if self.surface_profile and "anomaly_map" not in self.outputs:
-            raise ValueError("Surface model lacks anomaly_map output")
 
     def predict(self, rgb: np.ndarray) -> Prediction:
-        tensor, mask = surface_input(rgb, self.size, self.surface_profile)
+        tensor = input_tensor(rgb, self.size)
         start = time.perf_counter()
         values = self.request.infer({self.compiled.input(0): tensor})
         elapsed = (time.perf_counter() - start) * 1000
@@ -75,7 +65,6 @@ class OpenVINODetector:
             if "anomaly_map" in self.outputs
             else None
         )
-        score, anomaly_map = surface_score(score, anomaly_map, mask)
         return Prediction(score, elapsed, anomaly_map)
 
 

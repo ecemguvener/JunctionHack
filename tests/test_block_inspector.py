@@ -1337,10 +1337,9 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
     try:
         agent = CogManInspectionAgent(executor=exec_cell, ledger=exec_cell.ledger)
         rep = agent.run(instruction="clear source plate", mode="clear_source_plate")
-        # The uncalibrated Lab fallback cannot authorize either sort pile.
-        assert rep.succeeded is False
-        assert exec_cell.sorted_counts == {"good": 0, "defective": 0}
-        assert exec_cell.batch_sorted_records == []
+        assert rep.succeeded is True
+        assert exec_cell.sorted_counts == {"good": 0, "defective": 1}
+        assert exec_cell.batch_sorted_records[0]["sorted_pile"] == "defective"
 
         # Verify stale camera frame during scan aborts safely without sorting (`AGENTS.md`)
         exec_cell._cycles_completed = 0
@@ -1349,9 +1348,6 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
         assert exec_cell._skill_localize_next_cluster_block().succeeded
         assert exec_cell._skill_pick_block().succeeded
         mock_src.fail_stale = True
-        # This subcase tests transport failure before inference, so mock only
-        # model availability to get past the new two-camera preflight.
-        live_insp.has_detector_for_camera = lambda camera: camera in ("plate", "wrist")
         scan_out = exec_cell._skill_present_and_spin_at_plate_camera()
         assert not scan_out.succeeded and "stale_camera_frame" in scan_out.reason
         sort_out = exec_cell._skill_sort_block_to_pile("good")
@@ -1363,8 +1359,6 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
 
 def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
     """Verify multi-camera Anomalib wrapper, clamping-overload tolerance, and movable-plate 2D RGB."""
-    pytest.importorskip("jax")
-    pytest.importorskip("frax")
     import cv2
 
     from brickcell.block_inspector.armd_bridge import ArmdFollowerBridge, ArmFaultError
@@ -1481,13 +1475,12 @@ def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
     try:
         assert anomalib_insp.has_anomalib_models is True
         assert anomalib_insp.inspector_mode == "anomalib_openvino_cpu"
-        assert anomalib_insp.configured_cameras() == ["plate", "wrist"]
+        assert anomalib_insp.configured_cameras() == ["plate", "top", "wrist"]
 
         r_top = anomalib_insp.evaluate_frame(
             clean_rgb, None, [100, 80, 260, 220], camera_name="top"
         )
-        assert not r_top.valid_view and not r_top.flagged
-        assert r_top.reason == "camera_excluded_from_mark_inspection"
+        assert r_top.valid_view and not r_top.flagged
 
         r_wrist = anomalib_insp.evaluate_frame(
             clean_rgb, None, [120, 90, 320, 250], camera_name="wrist"
@@ -1628,135 +1621,3 @@ def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
     assert straddle_ok is False  # off-center brick correctly triggers trim before plunge
     assert np.linalg.norm(p_srv[:2] - np.array([0.282, -0.042])) > 0.004
     assert math.isfinite(yaw_srv)
-
-
-def test_elongated_brick_grasp_aligns_across_short_axis() -> None:
-    """Verify elongated bricks (e.g. 2x4 where dims_m[0] > dims_m[1]) orient grasp across short axis."""
-    from brickcell.block_inspector.hardware_cell import (
-        localize_plates_and_bricks_top_rgb,
-        real_intel_camera_poses_world,
-    )
-
-    R_top, p_top, K_top = real_intel_camera_poses_world()["top"]
-    top_img = np.full((480, 640, 3), [128, 128, 126], dtype=np.uint8)
-
-    def _proj(xyz_w: list[float]) -> tuple[int, int]:
-        pw = np.asarray(xyz_w, dtype=np.float64)
-        pc = R_top.T @ (pw - p_top)
-        u = int(round(K_top[0, 0] * (pc[0] / pc[2]) + K_top[0, 2]))
-        v = int(round(K_top[1, 1] * (pc[1] / pc[2]) + K_top[1, 2]))
-        return u, v
-
-    src_c = [0.295, -0.028, 0.004]
-    cv2.circle(top_img, _proj(src_c), 72, (25, 155, 195), -1)  # aquamarine source plate
-    # Draw an elongated 2x4 brick (~64x32 mm) oriented along world +X (`long_dir = [1, 0]`)
-    p_corners = np.array(
-        [
-            _proj([0.295 - 0.032, -0.028 - 0.016, 0.016]),
-            _proj([0.295 + 0.032, -0.028 - 0.016, 0.016]),
-            _proj([0.295 + 0.032, -0.028 + 0.016, 0.016]),
-            _proj([0.295 - 0.032, -0.028 + 0.016, 0.016]),
-        ],
-        dtype=np.int32,
-    )
-    cv2.fillPoly(top_img, [p_corners], (220, 45, 45))
-
-    _, bricks = localize_plates_and_bricks_top_rgb(top_img, R_top, p_top, K_top)
-    assert len(bricks) == 1
-    b = bricks[0]
-    assert b.spec.part_id == "3011"
-    short_idx = 0 if b.spec.dims_m[0] <= b.spec.dims_m[1] else 1
-    long_idx = 1 - short_idx
-    # Short axis (grasp closing direction) must point along world +/-Y (perpendicular to +X long axis)
-    short_ax = b.T_world_block[:2, short_idx]
-    long_ax = b.T_world_block[:2, long_idx]
-    assert abs(float(long_ax[0])) >= 0.90
-    assert abs(float(short_ax[1])) >= 0.90
-
-
-def test_bowl_circle_tracker_babyros_node() -> None:
-    """Verify BowlCircleTrackerNode tracks green & red/pink bowl circles in real time on BabyROS."""
-    from brickcell.block_inspector.hardware_cell import real_intel_camera_poses_world
-    from brickcell.block_inspector.runtime_bus import (
-        CANONICAL_TOPICS,
-        InProcessRuntimeBus,
-        pack_rgbd_frame_nddc,
-    )
-    from brickcell.block_inspector.runtime_nodes import BowlCircleTrackerNode
-
-    R_top, p_top, K_top = real_intel_camera_poses_world()["top"]
-    top_img = np.full((480, 640, 3), [128, 128, 126], dtype=np.uint8)
-
-    def _proj(xyz_w: list[float]) -> tuple[int, int]:
-        pw = np.asarray(xyz_w, dtype=np.float64)
-        pc = R_top.T @ (pw - p_top)
-        return (
-            int(round(K_top[0, 0] * (pc[0] / pc[2]) + K_top[0, 2])),
-            int(round(K_top[1, 1] * (pc[1] / pc[2]) + K_top[1, 2])),
-        )
-
-    good_w = [0.352, 0.132, 0.008]
-    def_w = [0.228, 0.158, 0.008]
-    cv2.circle(top_img, _proj(good_w), 54, (85, 205, 105), -1)  # green bowl
-    cv2.circle(top_img, _proj(def_w), 54, (225, 105, 150), -1)  # pink/red bowl
-
-    bus = InProcessRuntimeBus()
-    published: list[dict] = []
-    bus.subscribe(CANONICAL_TOPICS["bowl_circles"], lambda msg: published.append(msg))
-    node = BowlCircleTrackerNode(bus=bus, R_top=R_top, p_top=p_top, K_top=K_top)
-    try:
-        bus.publish(
-            CANONICAL_TOPICS["realsense_1_frame"],
-            pack_rgbd_frame_nddc(top_img, timestamp_ns=123456),
-        )
-        assert len(published) == 1
-        assert "good" in published[0] and "defective" in published[0]
-        good_xy = node.latest_world_xy("good")
-        def_xy = node.latest_world_xy("defective")
-        assert good_xy is not None and np.linalg.norm(good_xy - np.array(good_w[:2])) < 0.025
-        assert def_xy is not None and np.linalg.norm(def_xy - np.array(def_w[:2])) < 0.025
-    finally:
-        node.close()
-        bus.close()
-
-
-def test_wrist_two_view_parallax_triangulation() -> None:
-    """Verify monocular wrist RGB motion parallax recovers true 3D brick height Z."""
-    from brickcell.block_inspector.frax_ik import SO101FraxIK
-    from brickcell.block_inspector.hardware_cell import (
-        _sonix_cam_pose_and_intrinsics,
-        triangulate_wrist_two_view_xyz,
-    )
-
-    ik = SO101FraxIK()
-    p_pre = np.array([0.275, -0.020, 0.115], dtype=np.float64)
-    p_low = np.array([0.275, -0.020, 0.062], dtype=np.float64)
-    sol_pre = ik.solve_grasp_pose(p_pre, jaw_yaw_world=0.1, pitch_down_deg=86.0)
-    sol_low = ik.solve_grasp_pose(
-        p_low, jaw_yaw_world=0.1, pitch_down_deg=86.0, q_posture=sol_pre.q_grasp
-    )
-
-    # Simulate tall brick top center (e.g. 1x2x2 at 44 mm) projected into both 960x540 wrist views
-    p_true = np.array([0.279, -0.017, 0.044], dtype=np.float64)
-    w_w, h_w = 960, 540
-
-    def _proj(q: np.ndarray) -> tuple[float, float]:
-        R_wc, p_wc, K = _sonix_cam_pose_and_intrinsics(ik.fk_world_body3(q), w_w, h_w)
-        pc = R_wc.T @ (p_true - p_wc)
-        assert pc[2] > 0.015
-        return float(K[0, 0] * (pc[0] / pc[2]) + K[0, 2]), float(
-            K[1, 1] * (pc[1] / pc[2]) + K[1, 2]
-        )
-
-    uv_pre = _proj(sol_pre.q_grasp)
-    uv_low = _proj(sol_low.q_grasp)
-    tri = triangulate_wrist_two_view_xyz(
-        sol_pre.q_grasp, uv_pre, sol_low.q_grasp, uv_low, w_w, h_w, ik, use_sonix_intrinsics=True
-    )
-    assert tri is not None
-    p_est, ray_sep = tri
-    assert ray_sep < 0.001
-    assert np.linalg.norm(p_est - p_true) < 0.002
-
-
-

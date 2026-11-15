@@ -16,18 +16,12 @@ import numpy as np
 from PIL import Image
 
 from brickcell.detector.runtime import OpenVINODetector
-from brickcell.inspection.rgbd import (
-    ReferenceRGBInspector,
-    RGBDInspector,
-    RGBInspector,
-    encode_depth,
-)
+from brickcell.inspection.rgbd import RGBDInspector, RGBInspector, encode_depth
 
-PAGE = """<!doctype html><meta charset=utf-8><title>PatchCore image inspection</title>
+PAGE = """<!doctype html><meta charset=utf-8><title>PatchCore + depth review</title>
 <style>body{background:#0b1422;color:#e6f0ff;font:17px system-ui;margin:30px}article{display:inline-block;vertical-align:top;background:#17263b;border:1px solid #3d5677;border-radius:12px;padding:20px;width:44%;margin:1%}img{width:48%}pre{white-space:pre-wrap;font:14px monospace}iframe{width:100%;height:700px;border:0}input,button{padding:8px;font:inherit}@media(max-width:800px){article{width:90%}}</style>
-<h1>PatchCore camera inspection</h1><p>The default mark inspection uses plate and wrist RGB only. Each camera keeps its own normal reference model and threshold. Each modality needs its own real trained model and calibrated threshold. Scores are distances, not probabilities.</p>
+<h1>PatchCore RGB + depth viewer</h1><p>D415 RGB and aligned depth come from the same frameset. The arm camera supplies RGB only. Each modality needs its own real trained model and calibrated threshold. Scores are distances, not probabilities.</p>
 <p><strong>Review only:</strong> camera views do not verify hidden surfaces or object identity. No robot commands are issued.</p><div id=views></div>
-<p>Reference models show uncalibrated scores and heatmaps. Set a brick crop in the matching color model's card to begin.</p>
 <h2>Live 3D views</h2><iframe title="Live D415 depth clouds" src="SOURCE_URL"></iframe>
 <script>for(const name of CAMERA_NAMES){let card=document.createElement('article');card.innerHTML=`<h2>${name === 'wrist' ? 'Arm / wrist (RGB only)' : name}</h2><p class=status>Connecting…</p><label>Brick crop (x0,y0,x1,y1) <input placeholder="e.g. 220,190,280,260"></label><button>Apply</button><p>${RGB_CAMERAS.includes(name) ? 'RGB input' : 'RGB input · depth input'}</p><img class=rgb><img class=depth><p>${RGB_CAMERAS.includes(name) ? 'RGB anomaly overlay' : 'RGB anomaly overlay · depth anomaly overlay'} (when model returns a map)</p><img class=rgbmap><img class=depthmap><pre></pre>`;views.append(card);card.querySelector('button').onclick=async()=>{try{let crop=card.querySelector('input').value.split(',').map(Number);let r=await fetch('/crop/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({crop})});let d=await r.json();if(!r.ok)throw Error(d.error);card.querySelector('.status').textContent='Crop updated'}catch(e){card.querySelector('.status').textContent=e.message}};
 async function tick(){try{let r=await fetch('/api/'+name);let d=await r.json();if(!r.ok)throw Error(d.error);card.querySelector('.status').textContent=d.result.decision+' · '+d.result.reason;card.querySelector('pre').textContent=JSON.stringify(d.result,null,2);for(let [key,selector] of [['rgb','.rgb'],['depth','.depth'],['rgb_map','.rgbmap'],['depth_map','.depthmap']]){let img=card.querySelector(selector);if(d.images[key]){img.src='data:image/png;base64,'+d.images[key];img.hidden=false}else{img.removeAttribute('src');img.hidden=true}}}catch(e){card.querySelector('.status').textContent=e.message;card.querySelector('pre').textContent='No current result';for(let img of card.querySelectorAll('img')){img.removeAttribute('src');img.hidden=true}}setTimeout(tick,1500)}tick()}
@@ -77,12 +71,9 @@ def read_rgb_frame(source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", default="http://127.0.0.1:18094")
-    parser.add_argument("--config", type=Path, default=Path("configs/mark-viewer.json"))
+    parser.add_argument("--config", type=Path, default=Path("configs/rgbd-viewer.json"))
     parser.add_argument("--port", type=int, default=18097)
-    parser.add_argument("--events", type=Path, help="Append inspection results as JSONL evidence")
     args = parser.parse_args()
-    if args.events:
-        args.events.parent.mkdir(parents=True, exist_ok=True)
     config = json.loads(args.config.read_text())
     inspectors = {}
     lock = threading.Lock()
@@ -91,16 +82,11 @@ def main():
         for modality, model in settings.get("models", {}).items():
             model_path = (args.config.parent / model).resolve()
             metadata = json.loads(model_path.with_suffix(".json").read_text())
-            allowed = (
-                ("rgb",) if settings.get("type") in ("rgb", "reference_rgb") else ("rgb", "depth")
-            )
+            allowed = ("rgb",) if settings.get("type") == "rgb" else ("rgb", "depth")
             if modality not in allowed or metadata.get("synthetic", True):
                 raise ValueError("Refusing synthetic/unknown model before native compilation")
             detectors[modality] = OpenVINODetector(model_path)
-        inspector_type = {
-            "rgb": RGBInspector,
-            "reference_rgb": ReferenceRGBInspector,
-        }.get(settings.get("type"), RGBDInspector)
+        inspector_type = RGBInspector if settings.get("type") == "rgb" else RGBDInspector
         inspectors[camera] = inspector_type(
             settings["serial"],
             settings.get("crop"),
@@ -150,20 +136,7 @@ def main():
                 try:
                     settings = config["cameras"][camera]
                     if isinstance(inspectors[camera], RGBInspector):
-                        if settings.get("source_format") == "snapshot_rgb":
-                            with urlopen(settings["source"], timeout=4) as response:
-                                packet = json.load(response)
-                            if packet.get("synthetic") is not False:
-                                raise ValueError("Require explicitly real camera snapshot")
-                            rgb = np.asarray(
-                                Image.open(
-                                    io.BytesIO(
-                                        base64.b64decode(packet["rgb_jpeg_b64"], validate=True)
-                                    )
-                                ).convert("RGB")
-                            )
-                        else:
-                            rgb, packet = read_rgb_frame(settings["source"])
+                        rgb, packet = read_rgb_frame(settings["source"])
                         result, previews = inspectors[camera].inspect(
                             rgb, packet["time"], packet["serial"], packet["frame_id"]
                         )
@@ -216,15 +189,6 @@ def main():
                         "Per-frame normalized heatmaps; colors are not calibrated thresholds"
                     )
                     body = json.dumps(dict(result=result, images=images), allow_nan=False).encode()
-                    if args.events:
-                        event = dict(
-                            received_at=time.time(),
-                            camera=camera,
-                            crop=inspectors[camera].crop,
-                            result=result,
-                        )
-                        with args.events.open("a") as stream:
-                            stream.write(json.dumps(event, allow_nan=False) + "\n")
                 finally:
                     lock.release()
                 self.send(200, body)
