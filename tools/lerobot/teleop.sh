@@ -29,7 +29,9 @@ PORTS="/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B3D040991-if00 /dev/serial/
 # A separate tmux server: an old default tmux server can lack the dialout group.
 T="tmux -L teleop"
 
-running() { pgrep -f 'teleop_aligned.py|lerobot-teleoperate' >/dev/null; }
+# Match only the Python process. The tmux and bash command lines also contain the script name.
+PROC='^[^ ]*python[^ ]* (tools/lerobot/teleop_aligned\.py|[^ ]*lerobot-teleoperate)'
+running() { pgrep -f "$PROC" >/dev/null; }
 screen() { $T capture-pane -p -t teleop 2>/dev/null | grep -v '^$' | tail -"${1:-8}"; }
 armd_up() { curl -s -m3 "$ARMD/health" >/dev/null; }
 
@@ -72,7 +74,7 @@ stop)
     echo "Stopping teleoperation. HOLD THE FOLLOWER: LeRobot turns off its torque."
     $T send-keys -t teleop C-c 2>/dev/null || true
     for _ in $(seq 10); do running || break; sleep 0.5; done
-    running && pkill -INT -f 'teleop_aligned.py|lerobot-teleoperate'; sleep 1
+    running && pkill -INT -f "$PROC"; sleep 1
   fi
   $T kill-server 2>/dev/null || true
   if armd_up; then
