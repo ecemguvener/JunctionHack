@@ -2115,3 +2115,32 @@ constructor. No running service restarted, deployment cycle launched, torque
 changed, or arm moved. The patch takes effect on the next invocation; it does not
 recover a currently held brick. Automatic anomaly sorting remains blocked until
 both real models and their validation evidence exist.
+
+### Teammate model handoff tooling — 2026-11-15
+
+Added `docs/MARK_MODEL_HANDOFF.md` with the exact runtime file requirements,
+paired capture-index schema, existing CPU train/export/validation-parity commands,
+once-only frozen test evaluation, and separate artifact transfer instructions.
+Added `scripts/bundle_mark_models.py` to package two existing real calibrated
+exports with matching sensor contracts, model hashes, training/calibration and
+test evidence. It generates a portable config with the recorded model crops,
+copies version/evidence files and records handoff SHA256 hashes. Optional
+`--check-runtime` compiles both exports on CPU without opening cameras or arms.
+The tool checks evidence consistency; it does not prove label correctness or
+impose a held-out accuracy acceptance policy.
+
+Executed `uv sync --locked`, `uv run pytest` (**253 passed, 16 skipped**, two
+upstream deprecation warnings), `uv run ruff check src tests scripts`, and
+`uv run ruff format --check src tests scripts` (128 files). Checked bundle CLI
+help. Eight new tests use explicitly fake IR/weights, covering portable paths,
+hashes, missing weights, tampering, synthetic/wrong-camera metadata, invalid
+thresholds, failed parity and stale test evidence. They do not compile OpenVINO
+or demonstrate model accuracy. Skips remain optional FastAPI/Frax/MuJoCo/JAX,
+live simulation and four unconfigured trained-model tests.
+
+No real paired exports exist locally; no model bundle or weights were produced,
+no training/calibration/test evaluation was performed, and optional runtime
+compilation was not executed against a real pair. No SSH connection, camera
+access, service restart, robot motion or interrupted-cycle recovery occurred.
+Actual paired labeled captures/calibrated exports remain required before the
+teammate can run trusted two-camera inspection.
