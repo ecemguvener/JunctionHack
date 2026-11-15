@@ -1999,3 +1999,119 @@ four calibrated-model tests remain skipped. After reloading the final native
 module, confirmed fresh live results and rejection (HTTP 400) of top-camera
 inspection evidence. Existing Studio browser requests to the new inspection
 route appear in backend logs. End-to-end visual browser QA remains unavailable.
+
+### Clean yellow calibration candidate (2026-11-15)
+
+After the user's ready signal captured six distinct fresh real plate RGB frames
+under ignored `artifacts/calibration-candidates/20261115T011804Z/yellow-clean/`.
+User supplies clean label; physical identity relative to the fitting brick is
+unconfirmed, so object ID remains unset, formal partition unset and calibration
+eligibility false pending confirmation. First/last visual review shows the yellow
+smooth wall with no visible marker or hand occlusion. Other blocks are present
+on the plate but excluded by reviewed crop `[221,273,327,363]`. All six masks
+passed existing quality checks; reviewed the surface preview visually. Verified
+original hashes and no original-byte match to yellow fitting captures. This does
+not establish physical group independence.
+
+Frozen yellow v2 model scored these clean candidate views 2.393213–2.518535.
+No threshold was selected, no model refit, and no test partition evaluated.
+Source IDs, crop, hashes, frozen checkpoint hash and candidate scores retained.
+Updated the uncalibrated Studio publisher crop to the yellow brick's new position;
+its display still cannot authorize sorting. No arm commands were issued.
+
+### Eight hand-held yellow marked-object views (2026-11-15)
+
+Reviewed the user's eight 03.11/03.12 screenshots. Black marks are visible in
+images 1 (underside rim), 2 (broad wall), 5 (narrow wall) and 8 (inside stud).
+Other views show unmarked-looking faces of the same marked object, not clean
+physical-object examples. User previously confirmed this is the training brick.
+Saved screenshot hashes, reviewed development crops and per-view annotations in
+ignored `artifacts/handheld-yellow-mark-review-20261115/review.json`. None fitted
+or admitted to formal calibration/test partitions. All eight reviewed crops
+failed the current frozen yellow foreground quality contract, so no calibrated
+inference was performed or threshold selected. Images are human-held, not
+follower-held inspection views, and source camera acquisition provenance is
+unavailable from screenshots. These are useful defect appearance diagnostics,
+not evidence of transfer to the follower presentation setup. No arm commands.
+
+### Bounded presentation recording started (2026-11-15)
+
+At the user's request to collect images during camera presentation, started a
+read-only 300-second plate snapshot recording, target 2 fps and cap 600 frames,
+under ignored `artifacts/arm-presentation-capture/20261115T012318Z/`. Verified the
+first 18 real 640x480 frames saved without acquisition errors. Records contain
+source serial, distinct frame ID, acquisition/receive times, SHA256, and optional
+read-only follower state (explicitly not synchronized to image acquisition).
+First-frame visual review shows bricks resting on the plate, not a follower-held
+presentation. The recorder does not establish that the arm is moving or holding
+a brick. No robot/torque/sorting command was issued. Object IDs, labels and formal
+partitions remain unset; all data requires review before fitting/calibration.
+The collector runs from an ignored local temporary script and records progress,
+errors and final completion metadata. No model/threshold was changed.
+
+### Grouped frozen-detector rerun — 2026-11-15 02:10 UTC
+
+Executed a read-only development diagnostic on 23 existing images; report:
+`artifacts/grouped-detector-check/20261115T021054Z/report.json` and visual index
+`review.jpg`. Verified source image hashes and model checkpoint hashes. Groups
+were kept separate, with no pooled threshold fitting or model changes:
+
+- 9 follower-arm-held screenshot views, distance approximately 15 cm according
+  to user (not measured from image metadata): all returned REINSPECT at the
+  existing surface masking gate; no anomaly distances or clean/defective verdicts.
+- 8 human-held yellow screenshot views: all returned REINSPECT, separately.
+- 6 prior clean yellow plate-resting crops: valid preprocessing and frozen CPU
+  PatchCore distances 2.393213–2.518535, but all remain UNCALIBRATED. User had
+  confirmed the same physical brick as fitting, so these are not independent
+  validation, despite distinct image hashes.
+
+White screenshot object labels remain unconfirmed; a clear-looking face of a
+marked object is not a clean-object label. The 476 continuous-recording images
+remain excluded from this rerun because per-frame setup, object ROI and labels
+have not been reviewed. This rerun does not claim all saved images were evaluated.
+No test partition was evaluated, threshold selected, robot commanded, or camera
+opened. Existing images and frozen models only. No software changes or new tests;
+upstream import deprecation warnings occurred. Current arm-held masking must be
+resolved before detector calibration can be established on independent real val
+objects/sessions.
+
+### Missing-model deployment preflight — 2026-11-15
+
+User supplied a teammate's hardware deployment report: pickup/lift occurred,
+then presentation stopped with `missing_mark_models(plate,wrist)`. This is a
+reported physical event, not a locally observed successful pickup.
+
+Inspection confirmed `configs/mark-viewer.json` has empty model mappings. Local
+real plate pilots have null thresholds; there is no trained real wrist model.
+The existing local `model.xml` files are synthetic simulation exports, not
+eligible replacements. Intel's `/home/intel/brickcell-captures/collection`
+contains 7 labelled side-camera records; these do not establish a paired,
+independent plate/wrist training and validation dataset. No models were trained,
+exported, calibrated, installed, or represented as deployable in this fix.
+
+Changed `run_physical_cell_deployment` to require both loaded plate and wrist RGB
+models before initializing cameras, arm, reporters or executor, regardless of
+`require_anomalib` or dry-run selection. The loader already checks real sensor
+contracts and calibrated thresholds. Runtime export bundles require `model.xml`,
+`model.bin`, `model.json` (the sidecar), not just training `metadata.json`.
+
+Executed `uv sync --locked`, `uv run pytest` (245 passed, 16 skipped, 2 upstream
+warnings), `uv run ruff check src tests scripts`, `uv run ruff format --check src
+tests scripts` (126 files), and `git diff --check`. Eight added regression cases
+execute the actual deployment function with hardware/service constructors
+forbidden and missing/partial/wrong-modality camera mappings. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX/live simulator and four unconfigured model tests;
+no new model accuracy evidence is claimed.
+
+Applied only the matching preflight block to Intel's newer deployment copy at
+`/home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py`,
+preserving its other code and CRLF line endings. Verified an exact source hash
+before replacement and backed up to sibling
+`hardware_cell.py.before-model-preflight-20261115`. New source SHA256:
+`525a2ae4243cdd65ff0f9dd7ee1da39e6d54ad3a2caab0f2fa79570f4c8cfd88`.
+Parsed the remote source and executed its isolated deployment function with empty
+model mappings: it raised `missing_mark_models(plate,wrist)` before any hardware
+constructor. No running service restarted, deployment cycle launched, torque
+changed, or arm moved. The patch takes effect on the next invocation; it does not
+recover a currently held brick. Automatic anomaly sorting remains blocked until
+both real models and their validation evidence exist.

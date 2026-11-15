@@ -3380,11 +3380,18 @@ def run_physical_cell_deployment(
         openvino_model_path=openvino_config_path,
         rgbd_viewer_config_path=rgbd_viewer_config_path,
     )
-    if require_anomalib and not cam_detectors:
+    missing_models = [
+        camera for camera in ("plate", "wrist") if "rgb" not in cam_detectors.get(camera, {})
+    ]
+    if missing_models:
         raise ValueError(
-            "No trained real Anomalib OpenVINO models configured (--require-anomalib). "
-            "Provide --openvino-model path/to/model.xml or populate model_path entries "
-            "in configs/rgbd-viewer.json."
+            f"missing_mark_models({','.join(missing_models)}): deployment refused before "
+            "camera/arm initialization or pickup. Both plate and wrist require real, "
+            "calibrated RGB OpenVINO models. Configure cameras.<camera>.models.rgb in "
+            "configs/mark-viewer.json (paths relative to the config), or pass "
+            "--openvino-model. Each export needs model.xml, model.bin and model.json "
+            "with a calibrated threshold and matching sensor contract. "
+            "Uncalibrated pilots and lab_dark_mark_fallback cannot authorize sorting."
         )
 
     frame_source = LiveBenchHttpFrameSource(

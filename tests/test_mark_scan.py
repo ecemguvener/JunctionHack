@@ -89,3 +89,45 @@ def test_actual_scan_preflight_requires_both_models_before_any_motion():
     assert not result.succeeded
     assert result.reason == "missing_mark_models(wrist)"
     assert not cell.plate_scan_completed
+
+
+@pytest.mark.parametrize(
+    ("detectors", "missing"),
+    [
+        ({}, "plate,wrist"),
+        ({"plate": {"rgb": object()}}, "wrist"),
+        ({"wrist": {"rgb": object()}}, "plate"),
+        ({"plate": {"depth": object()}, "wrist": {"rgb": object()}}, "plate"),
+    ],
+)
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_deployment_rejects_missing_models_before_opening_hardware(
+    tmp_path, detectors, missing, dry_run
+):
+    """Run the deployment entry point with every hardware constructor forbidden."""
+    source = ast.parse(Path("src/brickcell/block_inspector/hardware_cell.py").read_text())
+    method = next(
+        node
+        for node in source.body
+        if isinstance(node, ast.FunctionDef) and node.name == "run_physical_cell_deployment"
+    )
+    module = ast.Module(
+        body=ast.parse("from __future__ import annotations").body + [method], type_ignores=[]
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Deployment touched a camera, arm or service before model preflight")
+
+    namespace = {
+        "Path": Path,
+        "load_anomalib_camera_detectors": lambda **kwargs: (detectors, {}),
+        "LiveBenchHttpFrameSource": forbidden,
+        "PhysicalArmController": forbidden,
+        "RealCameraAnomalyInspector": forbidden,
+        "TwinDashboardReporter": forbidden,
+        "CamUiReporter": forbidden,
+        "LiveInspectionHudServer": forbidden,
+    }
+    exec(compile(module, "<actual-deployment-entry>", "exec"), namespace)
+    with pytest.raises(ValueError, match=rf"missing_mark_models\({missing}\)"):
+        namespace[method.name](output_dir=tmp_path, dry_run=dry_run, require_anomalib=False)
