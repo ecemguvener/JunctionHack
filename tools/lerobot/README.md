@@ -25,6 +25,21 @@ The serial ports are set in the scripts (follower `...5B3D040991...`, leader `..
 
 ## Start teleoperation
 
+### One-shot command (from your computer)
+
+`teleop.sh` does all the steps through SSH (alias `intel`). It releases the arms in armd, makes sure that the ports are free, and starts `teleop_aligned.py` in tmux on the server. In Claude Code, `/teleop` runs the same script.
+
+```bash
+tools/lerobot/teleop.sh start    # Release the arms in armd and start teleoperation.
+tools/lerobot/teleop.sh attach   # Show the live screen. Ctrl+B then D to detach.
+tools/lerobot/teleop.sh status   # Show the process, the ports, armd and the last screen.
+tools/lerobot/teleop.sh stop     # HOLD the follower. Stop teleoperation and acquire the arms in armd.
+```
+
+Settings: `ALIGN_LIMIT`, `MAX_STEP`, `TELEOP_HOST`, `TELEOP_DIR` (see the script header).
+
+### Manual steps (on the server)
+
 1. Make sure that no other process uses the ports.
 2. Run `teleop_aligned.py`. Move the leader until all joints show `OK`. Teleoperation then starts.
 3. To stop, push Ctrl+C. LeRobot turns off the follower torque. Hold the follower arm.
