@@ -1870,8 +1870,8 @@ class PhysicalArmController:
         q_start = pre_state.q_enc_rad.copy()
         dq = q_clamped - q_start
         max_delta = float(np.max(np.abs(dq)))
-        eff_speed = max(60, min(int(speed), 280))
-        eff_acc = max(10, min(int(acc), 24))
+        eff_speed = max(60, min(int(speed), 620))
+        eff_acc = max(10, min(int(acc), 42))
 
         if max_delta <= 0.06:
             n_segs = 1
@@ -1883,7 +1883,7 @@ class PhysicalArmController:
             dt_s = duration_s / n_segs
 
         t0 = time.monotonic()
-        stream_speed = min(460, max(eff_speed, int(round(eff_speed * 1.65))))
+        stream_speed = min(850, max(eff_speed, int(round(eff_speed * 1.55))))
         for seg_idx in range(1, n_segs + 1):
             tau = seg_idx / n_segs
             s = 0.5 * (1.0 - math.cos(math.pi * tau))
@@ -1893,7 +1893,7 @@ class PhysicalArmController:
                 q_wp,
                 g_clamped,
                 speed=eff_speed if is_last else stream_speed,
-                acc=eff_acc if is_last else 28,
+                acc=eff_acc if is_last else 48,
                 wait=is_last,
                 timeout=float(timeout_s),
                 tolerance=int(tolerance_ticks),
@@ -2401,14 +2401,14 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 q_lift,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=220,
+                speed=480,
                 include_gripper=False,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
         self.arm.move_to_pose(
             PHYSICAL_OBSERVATION_HOME_Q,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=240,
+            speed=520,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
@@ -2630,7 +2630,7 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             pre_sol.q_grasp,
             gripper_pct=self._active_open_pct,
-            speed=245,
+            speed=480,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
@@ -2823,7 +2823,7 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     pre_sol.q_grasp,
                     gripper_pct=self._active_open_pct,
-                    speed=245,
+                    speed=480,
                     timeout_s=3.2,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
@@ -2859,7 +2859,7 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 pre_sol.q_grasp,
                 gripper_pct=self._active_close_pct,
-                speed=205,
+                speed=360,
                 include_gripper=False,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
@@ -2878,7 +2878,7 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     pre_sol.q_grasp,
                     gripper_pct=self._active_open_pct,
-                    speed=245,
+                    speed=480,
                     timeout_s=2.8,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
@@ -2977,14 +2977,14 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             q_carry,
             gripper_pct=self._active_close_pct,
-            speed=220,
+            speed=400,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         self.arm.move_to_pose(
             q_scan_start,
             gripper_pct=self._active_close_pct,
-            speed=200,
+            speed=360,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
@@ -2998,7 +2998,7 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 PHYSICAL_OBSERVATION_HOME_Q,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=210,
+                speed=450,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             return SkillOutcome(False, reason=f"pick_dropped_retrying(g_arr={g_arrival:.3f})")
@@ -3235,14 +3235,14 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             q_mid,
             gripper_pct=self._active_close_pct,
-            speed=220,
+            speed=420,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         self.arm.move_to_pose(
             above_sol.q_grasp,
             gripper_pct=self._active_close_pct,
-            speed=210,
+            speed=400,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
@@ -3297,7 +3297,7 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             above_sol.q_grasp,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=220,
+            speed=480,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
 
@@ -3345,7 +3345,7 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             PHYSICAL_OBSERVATION_HOME_Q,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=220,
+            speed=480,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         self.at_rest = True
