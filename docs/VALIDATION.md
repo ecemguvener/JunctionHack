@@ -2381,3 +2381,21 @@ This parser check did not initialize a camera/controller or start hardware.
 The teammate's primary deployment source was not overwritten; use the staged
 snapshot command in `docs/HEURISTIC_SORTER.md`, or deploy the updated branch with
 the launcher. No physical sorting cycle was launched in this change.
+
+### Camera-wall workflow title — 2026-11-15
+
+Changed the valid-frame overlay's workflow title to `PatchCore Inspection` as
+display branding. Visible scan reasons now say `Surface scan`. The running
+detector remains the CIE-Lab dark-mark rule; backend `model_version`, threshold
+provenance, decisions and sorting permissions retain their actual identities.
+No trained PatchCore inference or calibrated result is implied by this title.
+
+Executed `uv sync --locked`, `uv run pytest` (291 passed, 16 skipped; two
+upstream warnings), Ruff lint/format checks and `git diff --check`. Skip reasons
+remain optional hardware/simulation packages and unconfigured model tests.
+Updated and restarted only the detached camera-wall publisher on Intel (PID
+2094107 at restart). Verified fresh frame `243622060450-554739`, actual source
+version `dark-mark-heuristic-5d91eb5d61d7-contrast-16`, and sorting permission
+false at the existing Studio endpoint. That observed frame had no unambiguous
+red target, so no valid-frame overlay was asserted to have been visually checked.
+No sorter or arm was started, and no classification algorithm was changed.

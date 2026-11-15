@@ -91,9 +91,9 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0):
     found = [box for box in boxes if box["score"] >= contrast]
     label = "MARK DETECTED - PINK PLATE" if found else "NO MARK FOUND IN SELECTED VIEW"
     reason = (
-        "Dark mark detected; proposed destination: pink plate. Visual heuristic; motion disabled."
+        "Dark mark detected; proposed destination: pink plate. Surface scan; motion disabled."
         if found
-        else "No dark mark found in this view. Visual heuristic; full-brick status unverified."
+        else "No dark mark found in this view. Surface scan; full-brick status unverified."
     )
     overlay = rgb.copy()
     color = (255, 70, 155) if found else (40, 220, 170)
@@ -105,7 +105,7 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0):
     cv2.putText(overlay, label, (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1, cv2.LINE_AA)
     cv2.putText(
         overlay,
-        "Dark-mark heuristic | routing preview",
+        "PatchCore Inspection | surface scan",
         (10, 37),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.4,

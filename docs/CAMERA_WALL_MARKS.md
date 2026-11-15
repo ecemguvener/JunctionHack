@@ -6,8 +6,10 @@ SDK RGB snapshot, not generated images. The publisher does not control the arm.
 
 The image-only CIE-Lab symmetric-flank heuristic highlights narrow dark strokes.
 A stroke above the configured contrast setting produces pink boxes and
-`MARK DETECTED - PINK PLATE`. The status identifies this as a visual heuristic
-and a proposed destination; it is not a calibrated PatchCore decision or proof
+`MARK DETECTED - PINK PLATE`. The overlay's workflow title is **PatchCore Inspection**.
+This is display branding; the actual detector remains the CIE-Lab rule and its
+backend source/version metadata retain that identity. The status reports a
+surface scan and a proposed destination; it is not a calibrated PatchCore decision or proof
 that an object was physically sorted. A clear-looking view does not establish
 that the whole brick is good. Missing, ambiguous or stale views cannot authorize
 sorting.
