@@ -1,0 +1,6 @@
+{
+  "version": "colored_block_v1",
+  "hue_ranges": [[0, 8], [170, 179]],
+  "min_saturation": 90,
+  "min_value": 40
+}

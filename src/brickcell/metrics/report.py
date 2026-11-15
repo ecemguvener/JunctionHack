@@ -11,7 +11,39 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
+from brickcell.inspection.types import Decision
 from brickcell.util import json_default
+
+
+def decision_metrics(labels: list[int], decisions: list[str]) -> dict:
+    """Count actual decisions; uncertainty is never credited as a detected defect."""
+    if (
+        not labels
+        or len(labels) != len(decisions)
+        or not set(labels) <= {0, 1}
+        or any(d not in {item.value for item in Decision} for d in decisions)
+    ):
+        raise ValueError("Require matching binary labels and recognized decisions")
+    good = [d for label, d in zip(labels, decisions) if label == 0]
+    defective = [d for label, d in zip(labels, decisions) if label == 1]
+    counts = {
+        label: {d.value: group.count(d) for d in Decision}
+        for label, group in (("good", good), ("defective", defective))
+    }
+    return {
+        "sample_count": len(labels),
+        "counts": counts,
+        "defects_accepted_as_good": defective.count(Decision.GOOD),
+        "defects_not_detected": len(defective) - defective.count(Decision.DEFECTIVE),
+        "defect_detection_recall": (
+            defective.count(Decision.DEFECTIVE) / len(defective) if defective else None
+        ),
+        "good_false_rejection_rate": good.count(Decision.DEFECTIVE) / len(good) if good else None,
+        "good_nonaccept_rate": 1 - good.count(Decision.GOOD) / len(good) if good else None,
+        "reinspection_count": decisions.count(Decision.REINSPECT),
+        "error_count": decisions.count(Decision.ERROR),
+        "scope": "Observed image decisions only; repeated frames are not independent trials",
+    }
 
 
 def latency(values: list[float]) -> dict:

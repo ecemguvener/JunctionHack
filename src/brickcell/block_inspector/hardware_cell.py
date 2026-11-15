@@ -68,6 +68,7 @@ from brickcell.block_inspector.twin import (
     SO101InspectionTwin,
     SpawnedBlockInfo,
 )
+from brickcell.inspection.dark_marks import score_brick_roi_dark_mark
 
 # High upright observation posture clear of Top and Plate camera sightlines & strictly in CCW Joint-5 zone
 PHYSICAL_OBSERVATION_HOME_Q = np.array([0.00, -1.15, 0.88, 0.42, 0.55], dtype=np.float64)
@@ -280,121 +281,6 @@ class LiveBenchHttpFrameSource:
         return scene
 
 
-def score_brick_roi_dark_mark(
-    roi_rgb: np.ndarray,
-    fg_mask: np.ndarray | None = None,
-) -> tuple[float, list[dict[str, Any]]]:
-    """Evaluate symmetric-flanked CIE-Lab blackhat raw surface anomaly score on a brick ROI.
-
-    Detects thin dark pen/marker strokes or surface gouges flanked on both transverse sides
-    by uniform brick plastic (same lightness and Lab chromaticity), rejecting outer silhouette
-    edges, plate rims, circular stud shadows, and underside hollow tubes.
-    Never returns or represents a probability: `raw_score` is a Lab contrast distance (>= 0).
-    """
-    if roi_rgb.size == 0 or min(roi_rgb.shape[:2]) < 20:
-        return 0.0, []
-
-    hsv = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2HSV)
-    lab = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2LAB)
-    L = lab[:, :, 0].astype(np.float32)
-    A = lab[:, :, 1].astype(np.float32)
-    B = lab[:, :, 2].astype(np.float32)
-
-    # Exclude aquamarine/blue KALAS plate plastic and purple PLA robot gripper jaws
-    not_plate = ~((hsv[:, :, 0] >= 92) & (hsv[:, :, 0] <= 114) & (hsv[:, :, 1] >= 95))
-    not_purple_jaw = ~((hsv[:, :, 0] >= 118) & (hsv[:, :, 0] <= 148) & (hsv[:, :, 1] >= 75))
-    valid_fg = (
-        not_plate & not_purple_jaw if fg_mask is None else (fg_mask & not_plate & not_purple_jaw)
-    )
-
-    interior = cv2.erode(valid_fg.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
-    if int(np.sum(interior)) < 50:
-        return 0.0, []
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    blackhat = cv2.morphologyEx(L, cv2.MORPH_BLACKHAT, kernel) * interior
-
-    cand = (blackhat >= 14.0) & interior
-    n_comp, lbls, stats, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8))
-    best_score = 0.0
-    detections: list[dict[str, Any]] = []
-    h_img, w_img = L.shape
-
-    for idx in range(1, n_comp):
-        area = int(stats[idx, cv2.CC_STAT_AREA])
-        if area < 9 or area > 280:
-            continue
-        ys, xs = np.where(lbls == idx)
-        pts = np.column_stack([xs.astype(np.float64), ys.astype(np.float64)])
-        centered = pts - pts.mean(axis=0, keepdims=True)
-        cov = (centered.T @ centered) / max(1, len(pts) - 1)
-        evals, evecs = np.linalg.eigh(cov)
-        l1 = float(max(evals[-1], 1e-6))
-        l2 = float(max(evals[0], 0.0))
-        linearity = (l1 - l2) / l1
-        _, (w_r, h_r), _ = cv2.minAreaRect(pts.astype(np.float32))
-        maj = max(float(w_r), float(h_r))
-        min_s = max(min(float(w_r), float(h_r)), 1.0)
-        if maj < 7.5 or min_s > 6.8 or linearity < 0.70:
-            continue
-
-        normal = evecs[:, 0]
-        p_plus = np.round(pts + 5.0 * normal[None, :]).astype(int)
-        p_minus = np.round(pts - 5.0 * normal[None, :]).astype(int)
-        in_bounds = (
-            (p_plus[:, 0] >= 0)
-            & (p_plus[:, 0] < w_img)
-            & (p_plus[:, 1] >= 0)
-            & (p_plus[:, 1] < h_img)
-            & (p_minus[:, 0] >= 0)
-            & (p_minus[:, 0] < w_img)
-            & (p_minus[:, 1] >= 0)
-            & (p_minus[:, 1] < h_img)
-        )
-        if int(np.sum(in_bounds)) < 6:
-            continue
-
-        pp = p_plus[in_bounds]
-        pm = p_minus[in_bounds]
-        pv = pts[in_bounds].astype(int)
-        both_fg = valid_fg[pp[:, 1], pp[:, 0]] & valid_fg[pm[:, 1], pm[:, 0]]
-        if float(np.mean(both_fg)) < 0.72:
-            continue
-
-        l_plus = L[pp[:, 1], pp[:, 0]]
-        l_minus = L[pm[:, 1], pm[:, 0]]
-        l_mid = L[pv[:, 1], pv[:, 0]]
-        side_l_diff = float(np.median(np.abs(l_plus - l_minus)))
-        ab_diff = float(
-            np.median(
-                np.hypot(
-                    A[pp[:, 1], pp[:, 0]] - A[pm[:, 1], pm[:, 0]],
-                    B[pp[:, 1], pp[:, 0]] - B[pm[:, 1], pm[:, 0]],
-                )
-            )
-        )
-        flank_contrast = float(np.median(np.minimum(l_plus, l_minus) - l_mid))
-        if side_l_diff > 14.5 or ab_diff > 12.5 or flank_contrast < 12.0:
-            continue
-
-        raw_score = float(flank_contrast * (0.5 + 0.5 * linearity))
-        x0 = int(stats[idx, cv2.CC_STAT_LEFT])
-        y0 = int(stats[idx, cv2.CC_STAT_TOP])
-        bw = int(stats[idx, cv2.CC_STAT_WIDTH])
-        bh = int(stats[idx, cv2.CC_STAT_HEIGHT])
-        detections.append(
-            {
-                "box": [x0, y0, x0 + bw, y0 + bh],
-                "score": round(raw_score, 4),
-                "label": "dark mark",
-                "linearity": round(linearity, 3),
-            }
-        )
-        best_score = max(best_score, raw_score)
-
-    return best_score, detections
-
-
 def _extract_anomalib_hotspot_boxes(
     anomaly_map: np.ndarray | None,
     u0: int,
@@ -464,7 +350,7 @@ def load_anomalib_camera_detectors(
     rgbd_viewer_config_path: str | Path | None = None,
     allow_synthetic: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[int] | None]]:
-    """Load real Anomalib `OpenVINODetector` models across `top`, `plate`, and `wrist` cameras.
+    """Load plate/wrist RGB models only; top and depth models are excluded.
 
     Supports:
       1. `configs/rgbd-viewer.json` (`cameras.{top,plate,wrist}.models.{rgb,depth}` + `crop`),
@@ -487,7 +373,7 @@ def load_anomalib_camera_detectors(
         if not xml_resolved.exists() or not meta_path.exists():
             return
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if not allow_synthetic and bool(meta.get("synthetic", False)):
+        if not allow_synthetic and bool(meta.get("synthetic", True)):
             return
         contract = meta.get("sensor_contract") or {}
         cam_key = cam_hint or serial_to_cam.get(str(contract.get("serial", "")))
@@ -499,6 +385,13 @@ def load_anomalib_camera_detectors(
                     break
         cam_key = cam_key or "default"
         modality = str(contract.get("modality") or mod_hint or "rgb")
+        if cam_key not in ("plate", "wrist") or modality != "rgb":
+            return
+        if (
+            meta.get("synthetic") is not False
+            or serial_to_cam.get(str(contract.get("serial", ""))) != cam_key
+        ):
+            raise ValueError("Mark model requires matching real plate/wrist RGB sensor contract")
         det = OpenVINODetector(xml_resolved)
         if det.threshold is None:
             raise ValueError(
@@ -563,7 +456,7 @@ class FrameInspectionResult:
 
 
 class RealCameraAnomalyInspector:
-    """`Inspector` boundary wrapping Anomalib `OpenVINODetector` across `top`, `plate`, & `wrist`.
+    """`Inspector` boundary wrapping the same Anomalib architecture for plate/wrist RGB.
 
     Strictly isolated from robot control (zero robot handles per `AGENTS.md`).
     When Anomalib `OpenVINODetector` model(s) are loaded (`has_anomalib_models == True`),
@@ -577,9 +470,21 @@ class RealCameraAnomalyInspector:
         camera_detectors: dict[str, dict[str, Any]] | None = None,
         camera_crops: dict[str, list[int] | None] | None = None,
         worker_timeout_s: float = 2.5,
+        allow_heuristic_sorting: bool = False,
     ) -> None:
-        if dark_mark_threshold is None or not math.isfinite(float(dark_mark_threshold)):
-            raise ValueError("RealCameraAnomalyInspector requires a finite dark_mark_threshold")
+        if (
+            dark_mark_threshold is None
+            or not math.isfinite(float(dark_mark_threshold))
+            or float(dark_mark_threshold) <= 0
+        ):
+            raise ValueError(
+                "RealCameraAnomalyInspector requires a positive finite dark_mark_threshold"
+            )
+        if type(allow_heuristic_sorting) is not bool:
+            raise ValueError("Heuristic sorting selection must be explicit boolean")
+        if allow_heuristic_sorting and (openvino_detector is not None or camera_detectors):
+            raise ValueError("Do not mix heuristic sorting with Anomalib models")
+        self.allow_heuristic_sorting = allow_heuristic_sorting
         if openvino_detector is not None and getattr(openvino_detector, "threshold", None) is None:
             raise ValueError("OpenVINODetector requires a calibrated threshold before deployment")
         self.dark_mark_threshold = float(dark_mark_threshold)
@@ -587,14 +492,19 @@ class RealCameraAnomalyInspector:
         self.camera_detectors: dict[str, dict[str, Any]] = {}
         if camera_detectors:
             for cam_k, mod_map in camera_detectors.items():
+                cam_k = "plate" if cam_k == "side" else str(cam_k)
+                if cam_k not in ("plate", "wrist"):
+                    continue
                 for mod_k, det in mod_map.items():
+                    if mod_k != "rgb":
+                        raise ValueError("Plate/wrist mark inspection accepts RGB models only")
                     if getattr(det, "threshold", None) is None:
                         raise ValueError(
                             f"Anomalib detector for {cam_k}/{mod_k} lacks a calibrated threshold"
                         )
                     self.camera_detectors.setdefault(str(cam_k), {})[str(mod_k)] = det
-        if openvino_detector is not None and "default" not in self.camera_detectors:
-            self.camera_detectors["default"] = {"rgb": openvino_detector}
+        if openvino_detector is not None and "plate" not in self.camera_detectors:
+            self.camera_detectors["plate"] = {"rgb": openvino_detector}
         self.camera_crops: dict[str, list[int] | None] = dict(camera_crops or {})
         self.worker_timeout_s = float(worker_timeout_s)
         self._executor: concurrent.futures.ThreadPoolExecutor | None = (
@@ -608,6 +518,8 @@ class RealCameraAnomalyInspector:
 
     @property
     def inspector_mode(self) -> str:
+        if self.allow_heuristic_sorting:
+            return "lab_dark_mark_plate_sort"
         return "anomalib_openvino_cpu" if self.has_anomalib_models else "lab_dark_mark_fallback"
 
     def configured_cameras(self) -> list[str]:
@@ -615,7 +527,9 @@ class RealCameraAnomalyInspector:
 
     def has_detector_for_camera(self, camera_name: str) -> bool:
         norm = "plate" if camera_name == "side" else camera_name
-        return norm in self.camera_detectors or "default" in self.camera_detectors
+        if self.allow_heuristic_sorting:
+            return norm == "plate"
+        return norm in ("plate", "wrist") and norm in self.camera_detectors
 
     def resolve_crop_for_camera(
         self, camera_name: str, fallback_box: list[int] | None
@@ -630,7 +544,7 @@ class RealCameraAnomalyInspector:
         norm = "plate" if camera_name == "side" else camera_name
         if norm in self.camera_detectors:
             return self.camera_detectors[norm]
-        return self.camera_detectors.get("default", {})
+        return {}
 
     def close(self) -> None:
         if self._executor is not None:
@@ -646,10 +560,28 @@ class RealCameraAnomalyInspector:
         z_band_m: float,
         camera_name: str,
     ) -> FrameInspectionResult:
+        from brickcell.inspection.block_surface import SurfaceViewError
         from brickcell.inspection.rgbd import encode_depth
         from brickcell.inspection.types import Decision
 
         h_img, w_img = rgb.shape[:2]
+        if (
+            len(crop_box) != 4
+            or any(type(v) is not int for v in crop_box)
+            or not (
+                0 <= crop_box[0] < crop_box[2] <= w_img and 0 <= crop_box[1] < crop_box[3] <= h_img
+            )
+        ):
+            return FrameInspectionResult(
+                False,
+                0.0,
+                self.dark_mark_threshold,
+                False,
+                [],
+                0,
+                reason="invalid_or_clipped_crop",
+                inspector_backend=self.inspector_mode,
+            )
         u0 = max(0, min(w_img - 1, int(crop_box[0])))
         v0 = max(0, min(h_img - 1, int(crop_box[1])))
         u1 = max(u0 + 1, min(w_img, int(crop_box[2])))
@@ -703,7 +635,19 @@ class RealCameraAnomalyInspector:
 
             rgb_det = cam_dets.get("rgb")
             if rgb_det is not None:
-                pred_rgb = rgb_det.predict(roi_rgb)
+                try:
+                    pred_rgb = rgb_det.predict(roi_rgb)
+                except SurfaceViewError as exc:
+                    return FrameInspectionResult(
+                        valid_view=False,
+                        raw_anomaly_distance=0.0,
+                        threshold_value=float(rgb_det.threshold.value),
+                        flagged=False,
+                        detections=[],
+                        foreground_pixels=fg_count,
+                        reason=f"surface_reinspect:{exc}",
+                        inspector_backend=self.inspector_mode,
+                    )
                 sc_rgb = float(pred_rgb.score)
                 thr_rgb = float(rgb_det.threshold.value)
                 if not math.isfinite(sc_rgb):
@@ -815,14 +759,18 @@ class RealCameraAnomalyInspector:
             )
 
         return FrameInspectionResult(
-            valid_view=True,
+            valid_view=self.allow_heuristic_sorting,
             raw_anomaly_distance=dark_score,
             threshold_value=self.dark_mark_threshold,
-            flagged=dark_score >= self.dark_mark_threshold,
+            flagged=self.allow_heuristic_sorting and dark_score >= self.dark_mark_threshold,
             detections=full_dets,
             foreground_pixels=fg_count,
-            reason="ok",
-            inspector_backend="lab_dark_mark_fallback",
+            reason=(
+                "explicit_lab_contrast_rule"
+                if self.allow_heuristic_sorting
+                else "uncalibrated_dark_mark_reference_not_trusted"
+            ),
+            inspector_backend=self.inspector_mode,
         )
 
     def evaluate_frame(
@@ -837,6 +785,22 @@ class RealCameraAnomalyInspector:
         """Run bounded-timeout inspection; retire worker permanently on timeout (`AGENTS.md`)."""
         if self.timed_out or self._executor is None:
             raise TimeoutError("Inspector worker previously timed out and cannot be reused")
+        camera_name = "plate" if camera_name == "side" else camera_name
+        if camera_name not in ("plate", "wrist") or (
+            self.allow_heuristic_sorting and camera_name != "plate"
+        ):
+            return FrameInspectionResult(
+                False,
+                0.0,
+                self.dark_mark_threshold,
+                False,
+                [],
+                0,
+                reason="camera_excluded_from_mark_inspection",
+                inspector_backend=self.inspector_mode,
+            )
+        # RGB mark detection must not use depth gating or depth features.
+        depth_m, expected_z_m = None, None
         fut = self._executor.submit(
             self._score_sync, rgb, depth_m, crop_box, expected_z_m, z_band_m, camera_name
         )
@@ -1070,9 +1034,10 @@ def localize_plates_and_bricks_top_rgb(
             long_vec, long_m, short_m = e12, len12, len01
 
         spec = _infer_duplo_spec_from_2d_extents(short_m, long_m)
-        # In DUPLO_CATALOG, dims_m[0] <= dims_m[1] (X_block = short axis, Y_block = long axis)
+        # Match DUPLO_CATALOG axis order: if dims_m[0] >= dims_m[1] (e.g. 2x4, 1x2x2), X_block is
+        # the long axis; otherwise (e.g. 2x3), Y_block is the long axis.
         yaw_long = math.atan2(float(long_vec[1]), float(long_vec[0]))
-        yaw_block = yaw_long - 0.5 * math.pi
+        yaw_block = yaw_long if spec.dims_m[0] >= spec.dims_m[1] else (yaw_long - 0.5 * math.pi)
 
         hz = float(spec.dims_m[2])
         z_center = 0.006 + 0.5 * hz
@@ -1631,6 +1596,7 @@ def solve_adaptive_grasp_pose(
     jaw_yaw_world: float,
     q_posture: np.ndarray | None = None,
     pitches_deg: tuple[float, ...] = (88.0, 82.0, 74.0, 65.0, 56.0),
+    local_seed_only: bool = False,
 ) -> tuple[GraspIKSolution, float]:
     """Solve collision-safe 5-DOF grasp/drop IK within the valid CCW Joint-5 range [+0.45, +2.98] rad."""
     p_tgt = np.asarray(p_target_world, dtype=np.float64)
@@ -1642,6 +1608,39 @@ def solve_adaptive_grasp_pose(
     seed_posture[4] = float(
         np.clip(seed_posture[4], PHYSICAL_JOINT5_CCW_START_RAD, PHYSICAL_JOINT5_CCW_END_RAD)
     )
+    if local_seed_only and q_posture is not None:
+        p0 = float(pitches_deg[0])
+        sol0 = ik.solve_grasp_pose(
+            p_tgt,
+            jaw_yaw_world=jaw_yaw_world,
+            pitch_down_deg=p0,
+            q_posture=seed_posture,
+            local_only=True,
+        )
+        q0 = sol0.q_grasp.copy()
+        for shift_2pi in (0.0, 2.0 * math.pi, -2.0 * math.pi):
+            j5_try = float(q0[4]) + shift_2pi
+            if PHYSICAL_JOINT5_CCW_START_RAD <= j5_try <= PHYSICAL_JOINT5_CCW_END_RAD:
+                q0[4] = j5_try
+                break
+        if PHYSICAL_JOINT5_CCW_START_RAD <= float(q0[4]) <= PHYSICAL_JOINT5_CCW_END_RAD:
+            clr0, _ = check_bench_obstacle_clearance_m(ik, q0)
+            if clr0 >= 0.012:
+                T_tcp0 = ik.fk_world_tcp(q0)
+                pos_err0 = float(np.linalg.norm(T_tcp0[:3, 3] - p_tgt))
+                if sol0.feasible and pos_err0 <= 0.006:
+                    return (
+                        GraspIKSolution(
+                            feasible=True,
+                            q_grasp=q0,
+                            p_tcp_world=T_tcp0[:3, 3].copy(),
+                            jaw_yaw_world=math.atan2(float(T_tcp0[1, 0]), float(T_tcp0[0, 0])),
+                            cost=sol0.cost,
+                            manipulability_5d=sol0.manipulability_5d,
+                        ),
+                        p0,
+                    )
+
     best_sol: GraspIKSolution | None = None
     best_pitch = float(pitches_deg[0])
     best_score = -1e9
@@ -1880,7 +1879,7 @@ class PhysicalArmController:
             dt_s = 0.0
         else:
             max_ticks = max_delta * (4096.0 / (2.0 * math.pi))
-            duration_s = max(0.36, (0.5 * math.pi * max_ticks) / float(eff_speed))
+            duration_s = max(0.12, (0.5 * math.pi * max_ticks) / float(eff_speed))
             n_segs = max(2, int(math.ceil(duration_s / 0.065)))
             dt_s = duration_s / n_segs
 
@@ -2230,15 +2229,25 @@ class PhysicalSO101CellExecutor:
                 if float(np.linalg.norm(p_b[:2] - m_xy)) < 0.026
             )
 
-            yaw_spans: list[tuple[float, float, int]] = []
+            horiz_axes: list[tuple[float, float, int]] = []
             for idx, span in enumerate(b.spec.dims_m):
                 ax = R_wb[:, idx]
                 if abs(float(ax[2])) < 0.30 and span <= 0.038:
-                    y0 = math.atan2(float(ax[1]), float(ax[0]))
-                    yaw_spans.extend([(y0, float(span), idx), (y0 + math.pi, float(span), idx)])
+                    horiz_axes.append((math.atan2(float(ax[1]), float(ax[0])), float(span), idx))
+            if horiz_axes:
+                min_span = min(sp for _, sp, _ in horiz_axes)
+                max_span = max(sp for _, sp, _ in horiz_axes)
+                # For elongated bricks (e.g. 1x2x2 with 32x16 mm), restrict to the short axis.
+                if max_span / max(min_span, 1e-4) >= 1.18:
+                    horiz_axes = [item for item in horiz_axes if item[1] <= min_span + 0.004]
+            yaw_spans: list[tuple[float, float, int]] = []
+            for y0, span, idx in horiz_axes:
+                yaw_spans.extend([(y0, span, idx), (y0 + math.pi, span, idx)])
             if not yaw_spans:
-                y0 = math.atan2(float(R_wb[1, 1]), float(R_wb[0, 1]))
-                yaw_spans = [(y0, 0.032, 0), (y0 + math.pi, 0.032, 0)]
+                short_idx = 0 if b.spec.dims_m[0] <= b.spec.dims_m[1] else 1
+                y0 = math.atan2(float(R_wb[1, short_idx]), float(R_wb[0, short_idx]))
+                span_fb = float(b.spec.dims_m[short_idx])
+                yaw_spans = [(y0, span_fb, short_idx), (y0 + math.pi, span_fb, short_idx)]
 
             along_offsets = (0.0, -0.014, +0.014) if max(b.spec.dims_m[:2]) >= 0.056 else (0.0,)
             radial_vec = p_b[:2] - source_xy
@@ -2414,21 +2423,12 @@ class PhysicalSO101CellExecutor:
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
-            time.sleep(0.25)
+            time.sleep(0.08)
 
         q_now, g_now = self.arm.current_q_and_grip(fresh=True)
         top_snap = self.frame_source.fetch_d415_snapshot("top")
         plate_snap = self.frame_source.fetch_d415_snapshot("plate")
         wrist_snap = self.frame_source.fetch_wrist_snapshot()
-
-        # Run D415 depth perception strictly in parallel for the Real2Sim MuJoCo 3D Twin mirror!
-        scene: Real2SimSceneState | None = None
-        try:
-            scene = self.frame_source.perceive_scene(self.real2sim, q_arm_rad=q_now)
-            self._latest_scene = scene
-            self.twin.sync_real2sim_scene(scene, settle_steps=0)
-        except Exception:
-            scene = self._latest_scene
 
         # Primary pick/place localization: crisp 2D Top-RGB (zero stereo depth drift!)
         R_top, p_top, K_top = self.real_cams["top"]
@@ -2440,16 +2440,24 @@ class PhysicalSO101CellExecutor:
         if rgb_bricks:
             source_bricks = rgb_bricks
             source_xy = rgb_plates["source"][:2]
-        elif scene is not None:
-            # Fallback for synthetic uniform-color mock tests where 2D plate rings are not drawn
-            source_bricks = [b for b in scene.bricks if b.support_region == "source"]
-            source_xy = scene.plates["source"].pos_world[:2]
-            for role_k, pl_obj in scene.plates.items():
-                if role_k not in self._rgb_plate_positions or float(top_snap.rgb.std()) < 8.0:
-                    self._rgb_plate_positions[role_k] = pl_obj.pos_world.copy()
         else:
-            source_bricks = []
-            source_xy = rgb_plates["source"][:2]
+            # Fallback for synthetic uniform-color mock tests where 2D plate rings are not drawn
+            scene: Real2SimSceneState | None = None
+            try:
+                scene = self.frame_source.perceive_scene(self.real2sim, q_arm_rad=q_now)
+                self._latest_scene = scene
+                self.twin.sync_real2sim_scene(scene, settle_steps=0)
+            except Exception:
+                scene = self._latest_scene
+            if scene is not None:
+                source_bricks = [b for b in scene.bricks if b.support_region == "source"]
+                source_xy = scene.plates["source"].pos_world[:2]
+                for role_k, pl_obj in scene.plates.items():
+                    if role_k not in self._rgb_plate_positions or float(top_snap.rgb.std()) < 8.0:
+                        self._rgb_plate_positions[role_k] = pl_obj.pos_world.copy()
+            else:
+                source_bricks = []
+                source_xy = rgb_plates["source"][:2]
 
         self.remaining_source_blocks = len(source_bricks)
         if not source_bricks:
@@ -2509,7 +2517,7 @@ class PhysicalSO101CellExecutor:
             is_target = cand_b.block_id == brick.block_id
 
             # 1) Overhead `top` camera evaluation
-            if cand_tbox is not None:
+            if cand_tbox is not None and self.inspector.has_detector_for_camera("top"):
                 try:
                     top_res = self.inspector.evaluate_frame(
                         top_snap.rgb,
@@ -2624,6 +2632,7 @@ class PhysicalSO101CellExecutor:
             jaw_yaw_world=jaw_yaw,
             q_posture=grasp_sol.q_grasp,
             pitches_deg=steep_pitches,
+            local_seed_only=True,
         )
 
         self.status_banner = (
@@ -2632,231 +2641,270 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             pre_sol.q_grasp,
             gripper_pct=self._active_open_pct,
-            speed=230,
+            speed=245,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
-            time.sleep(0.18)
+            time.sleep(0.06)
 
-        # Pass 1 (High Pre-Grasp ~9.6 cm): Align jaw yaw + coarse XY relative to inner jaw surfaces
-        try:
-            q_pre_meas, g_pre_meas = self.arm.current_q_and_grip(fresh=True)
-            wrist_pre_snap = self.frame_source.fetch_wrist_snapshot()
-            p_refined, yaw_refined, wrist_crop, _, servo_info = servo_grasp_with_jaw_corridor(
-                wrist_pre_snap.rgb,
-                q_pose=q_pre_meas,
-                p_tcp_nominal=p_tcp,
-                jaw_yaw_nominal=jaw_yaw,
-                ik=self.ik,
-                wrist_cam=self.rig.wrist,
-                max_step_m=0.036,
-                gain=0.92,
-            )
+        max_local_attempts = 1 if self.arm.dry_run else 2
+        q_clamped = grasp_sol.q_grasp.copy()
+        g_contact = self._active_close_pct
+        for local_attempt in range(max_local_attempts):
+            pass1_straddle_ok = False
+            pass1_saw_brick = True
+
+            # Pass 1 (High Pre-Grasp ~9.6 cm): Align jaw yaw + coarse XY relative to inner jaw surfaces
             try:
-                self._evaluate_camera_crop_and_record(
-                    wrist_pre_snap,
-                    wrist_crop,
-                    stage_tag="pre_grasp",
-                )
-            except Exception as exc:
-                self.anomaly_untrusted_error = f"wrist_pre_grasp_inspector_error:{exc}"
-                return SkillOutcome(False, reason=self.anomaly_untrusted_error)
-
-            if not self.arm.dry_run and servo_info.get("status") == "ok":
-                p_tcp = p_refined
-                jaw_yaw = yaw_refined
-                grasp_sol, _ = solve_adaptive_grasp_pose(
-                    self.ik,
-                    p_tcp,
-                    jaw_yaw_world=jaw_yaw,
-                    q_posture=grasp_sol.q_grasp,
-                    pitches_deg=steep_pitches,
-                )
-                jaw_yaw = float(grasp_sol.jaw_yaw_world)
-                pre_sol, _ = solve_adaptive_grasp_pose(
-                    self.ik,
-                    np.array([p_tcp[0], p_tcp[1], float(p_tcp[2]) + 0.075], dtype=np.float64),
-                    jaw_yaw_world=jaw_yaw,
-                    q_posture=pre_sol.q_grasp,
-                    pitches_deg=steep_pitches,
-                )
-                self._active_grasp_sol = grasp_sol
-            self._sync_mirror_and_telemetry(q_pre_meas, g_pre_meas, wrist_rgb=wrist_pre_snap.rgb)
-        except StaleCameraFrameError:
-            pass
-
-        # Pass 2 (Low-Hover Straddle Loop at z = z_grasp + 27 mm ≈ 48 mm, just above brick studs!):
-        # Track the inner purple gripper surfaces directly around the brick and trim until centered!
-        if not self.arm.dry_run:
-            z_low = float(p_tcp[2]) + 0.027
-            low_sol, _ = solve_adaptive_grasp_pose(
-                self.ik,
-                np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
-                jaw_yaw_world=jaw_yaw,
-                q_posture=grasp_sol.q_grasp,
-                pitches_deg=steep_pitches,
-            )
-            self.status_banner = (
-                f"PickBlock({brick.spec.part_id}): Low-hover inner-jaw straddle align"
-            )
-            self.arm.move_to_pose(
-                low_sol.q_grasp,
-                gripper_pct=self._active_open_pct,
-                speed=195,
-                include_gripper=False,
-                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-            )
-            time.sleep(0.15)
-
-            for trim_iter in range(2):
-                try:
-                    q_low_meas, _ = self.arm.current_q_and_grip(fresh=True)
-                    wrist_low_snap = self.frame_source.fetch_wrist_snapshot()
-                    p_trim, yaw_trim, _, straddle_ok, low_info = servo_grasp_with_jaw_corridor(
-                        wrist_low_snap.rgb,
-                        q_pose=q_low_meas,
+                q_pre_meas, g_pre_meas = self.arm.current_q_and_grip(fresh=True)
+                wrist_pre_snap = self.frame_source.fetch_wrist_snapshot()
+                p_refined, yaw_refined, wrist_crop, pass1_straddle_ok, servo_info = (
+                    servo_grasp_with_jaw_corridor(
+                        wrist_pre_snap.rgb,
+                        q_pose=q_pre_meas,
                         p_tcp_nominal=p_tcp,
                         jaw_yaw_nominal=jaw_yaw,
                         ik=self.ik,
                         wrist_cam=self.rig.wrist,
-                        max_step_m=0.020,
-                        gain=0.85,
+                        max_step_m=0.036,
+                        gain=0.92,
                     )
-                    if low_info.get("status") != "ok" or straddle_ok:
-                        self._sync_mirror_and_telemetry(
-                            q_low_meas, self._active_open_pct, wrist_rgb=wrist_low_snap.rgb
+                )
+                if local_attempt == 0:
+                    try:
+                        self._evaluate_camera_crop_and_record(
+                            wrist_pre_snap,
+                            wrist_crop,
+                            stage_tag="pre_grasp",
                         )
-                        break
+                    except Exception as exc:
+                        self.anomaly_untrusted_error = f"wrist_pre_grasp_inspector_error:{exc}"
+                        return SkillOutcome(False, reason=self.anomaly_untrusted_error)
 
-                    d_trim = float(np.linalg.norm(p_trim[:2] - p_tcp[:2]))
-                    dyaw_trim = abs((yaw_trim - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
-                    if d_trim < 0.0022 and dyaw_trim < math.radians(4.5):
-                        break
-
-                    p_tcp = p_trim
-                    jaw_yaw = yaw_trim
+                pass1_saw_brick = servo_info.get("status") == "ok"
+                if not self.arm.dry_run and pass1_saw_brick:
+                    p_tcp = p_refined
+                    jaw_yaw = yaw_refined
                     grasp_sol, _ = solve_adaptive_grasp_pose(
                         self.ik,
                         p_tcp,
                         jaw_yaw_world=jaw_yaw,
                         q_posture=grasp_sol.q_grasp,
                         pitches_deg=steep_pitches,
+                        local_seed_only=True,
                     )
                     jaw_yaw = float(grasp_sol.jaw_yaw_world)
-                    low_sol, _ = solve_adaptive_grasp_pose(
-                        self.ik,
-                        np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
-                        jaw_yaw_world=jaw_yaw,
-                        q_posture=low_sol.q_grasp,
-                        pitches_deg=steep_pitches,
-                    )
                     pre_sol, _ = solve_adaptive_grasp_pose(
                         self.ik,
                         np.array([p_tcp[0], p_tcp[1], float(p_tcp[2]) + 0.075], dtype=np.float64),
                         jaw_yaw_world=jaw_yaw,
                         q_posture=pre_sol.q_grasp,
                         pitches_deg=steep_pitches,
+                        local_seed_only=True,
                     )
                     self._active_grasp_sol = grasp_sol
-                    self.status_banner = (
-                        f"PickBlock({brick.spec.part_id}): Jaw-corridor trim #{trim_iter + 1} "
-                        f"(dxy={d_trim * 1000:.1f}mm, gap={low_info.get('jaw_gap_px')}px)"
-                    )
-                    self.arm.move_to_pose(
-                        low_sol.q_grasp,
-                        gripper_pct=self._active_open_pct,
-                        speed=175,
-                        include_gripper=False,
-                        on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(
-                            q, g, wrist_rgb=wrist_low_snap.rgb
-                        ),
-                    )
-                    time.sleep(0.12)
-                except StaleCameraFrameError:
-                    break
+                self._sync_mirror_and_telemetry(
+                    q_pre_meas, g_pre_meas, wrist_rgb=wrist_pre_snap.rgb
+                )
+            except StaleCameraFrameError:
+                pass
 
-        self.status_banner = f"PickBlock({brick.spec.part_id}): Vertical plunge & clamping jaws"
-        self.arm.move_to_pose(
-            grasp_sol.q_grasp,
-            gripper_pct=self._active_open_pct,
-            speed=145,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
-        # Mark `holding_object = True` BEFORE clamping so gripper holding torque is never relaxed!
-        self.arm.holding_object = True
-        q_clamped, g_contact = self.arm.close_gripper_until_contact(
-            open_pct=self._active_open_pct,
-            speed=260,
-            max_wait_s=3.8,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
-        if not self.arm.dry_run and (
-            float(g_contact) <= PHYSICAL_EMPTY_JAW_MAX_PCT
-            or float(g_contact) >= (self._active_open_pct - 0.022)
-        ):
-            # Jaws closed empty or stopped early — release cleanly, record XY, and retry pick!
-            self.arm.clear_gripper_overload_for_release()
-            self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
-            self.arm.move_to_pose(
-                pre_sol.q_grasp,
-                gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=240,
-                timeout_s=3.2,
-                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-            )
-            self.hand_empty = True
-            self.ledger.reset_all()
-            return SkillOutcome(False, reason=f"grasp_missed_retrying(g={g_contact:.3f})")
+            # Pass 2 (Low-Hover Straddle Loop at z = z_grasp + 27 mm ≈ 48 mm, just above brick studs!):
+            # Skip if Pass 1 already verified inner-jaw straddle alignment.
+            if not self.arm.dry_run and not pass1_straddle_ok:
+                z_low = float(p_tcp[2]) + 0.027
+                low_sol, _ = solve_adaptive_grasp_pose(
+                    self.ik,
+                    np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
+                    jaw_yaw_world=jaw_yaw,
+                    q_posture=grasp_sol.q_grasp,
+                    pitches_deg=steep_pitches,
+                    local_seed_only=True,
+                )
+                self.status_banner = (
+                    f"PickBlock({brick.spec.part_id}): Low-hover inner-jaw straddle align"
+                )
+                self.arm.move_to_pose(
+                    low_sol.q_grasp,
+                    gripper_pct=self._active_open_pct,
+                    speed=210,
+                    include_gripper=False,
+                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                )
+                time.sleep(0.05)
 
-        # Command demonstrated strong carry pinch (~0.035 = ~1391 ticks) — never relaxed while held!
-        self._active_close_pct = (
-            PHYSICAL_CARRY_GRIPPER_PCT
-            if self.arm.dry_run
-            else max(0.024, min(0.040, float(g_contact) - 0.058))
-        )
-        if not self.arm.dry_run:
+                trimmed_xy_yaw = False
+                for trim_iter in range(2):
+                    try:
+                        q_low_meas, _ = self.arm.current_q_and_grip(fresh=True)
+                        wrist_low_snap = self.frame_source.fetch_wrist_snapshot()
+                        p_trim, yaw_trim, _, straddle_ok, low_info = servo_grasp_with_jaw_corridor(
+                            wrist_low_snap.rgb,
+                            q_pose=q_low_meas,
+                            p_tcp_nominal=p_tcp,
+                            jaw_yaw_nominal=jaw_yaw,
+                            ik=self.ik,
+                            wrist_cam=self.rig.wrist,
+                            max_step_m=0.020,
+                            gain=0.85,
+                        )
+                        if low_info.get("status") != "ok" or straddle_ok:
+                            self._sync_mirror_and_telemetry(
+                                q_low_meas, self._active_open_pct, wrist_rgb=wrist_low_snap.rgb
+                            )
+                            break
+
+                        d_trim = float(np.linalg.norm(p_trim[:2] - p_tcp[:2]))
+                        dyaw_trim = abs((yaw_trim - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
+                        if d_trim < 0.0022 and dyaw_trim < math.radians(4.5):
+                            break
+
+                        p_tcp = p_trim
+                        jaw_yaw = yaw_trim
+                        trimmed_xy_yaw = True
+                        low_sol, _ = solve_adaptive_grasp_pose(
+                            self.ik,
+                            np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
+                            jaw_yaw_world=jaw_yaw,
+                            q_posture=low_sol.q_grasp,
+                            pitches_deg=steep_pitches,
+                            local_seed_only=True,
+                        )
+                        jaw_yaw = float(low_sol.jaw_yaw_world)
+                        self.status_banner = (
+                            f"PickBlock({brick.spec.part_id}): Jaw-corridor trim #{trim_iter + 1} "
+                            f"(dxy={d_trim * 1000:.1f}mm, gap={low_info.get('jaw_gap_px')}px)"
+                        )
+                        self.arm.move_to_pose(
+                            low_sol.q_grasp,
+                            gripper_pct=self._active_open_pct,
+                            speed=195,
+                            include_gripper=False,
+                            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(
+                                q, g, wrist_rgb=wrist_low_snap.rgb
+                            ),
+                        )
+                        time.sleep(0.05)
+                    except StaleCameraFrameError:
+                        break
+
+                if trimmed_xy_yaw:
+                    grasp_sol, _ = solve_adaptive_grasp_pose(
+                        self.ik,
+                        p_tcp,
+                        jaw_yaw_world=jaw_yaw,
+                        q_posture=low_sol.q_grasp,
+                        pitches_deg=steep_pitches,
+                        local_seed_only=True,
+                    )
+                    jaw_yaw = float(grasp_sol.jaw_yaw_world)
+                    pre_sol, _ = solve_adaptive_grasp_pose(
+                        self.ik,
+                        np.array([p_tcp[0], p_tcp[1], float(p_tcp[2]) + 0.075], dtype=np.float64),
+                        jaw_yaw_world=jaw_yaw,
+                        q_posture=pre_sol.q_grasp,
+                        pitches_deg=steep_pitches,
+                        local_seed_only=True,
+                    )
+                    self._active_grasp_sol = grasp_sol
+
+            self.status_banner = f"PickBlock({brick.spec.part_id}): Vertical plunge & clamping jaws"
             self.arm.move_to_pose(
                 grasp_sol.q_grasp,
-                gripper_pct=self._active_close_pct,
-                speed=185,
-                timeout_s=0.70,
-            )
-
-        T_body3_grasp = self.ik.fk_world_body3(q_clamped)
-        self._T_body3_block_held = np.linalg.inv(T_body3_grasp) @ brick.T_world_block
-
-        self.status_banner = f"PickBlock({brick.spec.part_id}): Lifting & confirming physical grip"
-        self.arm.move_to_pose(
-            pre_sol.q_grasp,
-            gripper_pct=self._active_close_pct,
-            speed=185,
-            include_gripper=False,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
-        if not self.arm.dry_run:
-            time.sleep(0.22)
-
-        # Post-lift physical pick confirmation: verify jaws did NOT close to empty stop during lift!
-        q_lifted, g_lifted = self.arm.current_q_and_grip(fresh=True)
-        if not self.arm.dry_run and (
-            float(g_lifted) <= PHYSICAL_EMPTY_JAW_MAX_PCT
-            or float(g_lifted) < (float(g_contact) - 0.042)
-        ):
-            self.arm.clear_gripper_overload_for_release()
-            self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
-            self.arm.move_to_pose(
-                pre_sol.q_grasp,
-                gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=230,
-                timeout_s=2.8,
+                gripper_pct=self._active_open_pct,
+                speed=160,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
-            self.hand_empty = True
-            self.ledger.reset_all()
-            return SkillOutcome(
-                False,
-                reason=f"pick_not_confirmed_after_lift_retrying(g_lift={g_lifted:.3f},g_contact={g_contact:.3f})",
+            # Mark `holding_object = True` BEFORE clamping so gripper holding torque is never relaxed!
+            self.arm.holding_object = True
+            q_clamped, g_contact = self.arm.close_gripper_until_contact(
+                open_pct=self._active_open_pct,
+                speed=260,
+                max_wait_s=3.8,
+                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
+            if not self.arm.dry_run and (
+                float(g_contact) <= PHYSICAL_EMPTY_JAW_MAX_PCT
+                or float(g_contact) >= (self._active_open_pct - 0.022)
+            ):
+                # Jaws closed empty or stopped early — lift to pre_sol and retry in-place once before homing!
+                self.arm.clear_gripper_overload_for_release()
+                self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
+                self._active_open_pct = min(0.32, self._active_open_pct + 0.03)
+                self.arm.move_to_pose(
+                    pre_sol.q_grasp,
+                    gripper_pct=self._active_open_pct,
+                    speed=245,
+                    timeout_s=3.2,
+                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                )
+                if local_attempt + 1 < max_local_attempts and pass1_saw_brick:
+                    self.status_banner = (
+                        f"PickBlock({brick.spec.part_id}): Missed — retrying in-place"
+                    )
+                    continue
+                self.hand_empty = True
+                self.ledger.reset_all()
+                return SkillOutcome(False, reason=f"grasp_missed_retrying(g={g_contact:.3f})")
+
+            # Command demonstrated strong carry pinch (~0.035 = ~1391 ticks) — never relaxed while held!
+            self._active_close_pct = (
+                PHYSICAL_CARRY_GRIPPER_PCT
+                if self.arm.dry_run
+                else max(0.024, min(0.040, float(g_contact) - 0.058))
+            )
+            if not self.arm.dry_run:
+                self.arm.move_to_pose(
+                    grasp_sol.q_grasp,
+                    gripper_pct=self._active_close_pct,
+                    speed=185,
+                    timeout_s=0.70,
+                )
+
+            T_body3_grasp = self.ik.fk_world_body3(q_clamped)
+            self._T_body3_block_held = np.linalg.inv(T_body3_grasp) @ brick.T_world_block
+
+            self.status_banner = (
+                f"PickBlock({brick.spec.part_id}): Lifting & confirming physical grip"
+            )
+            self.arm.move_to_pose(
+                pre_sol.q_grasp,
+                gripper_pct=self._active_close_pct,
+                speed=205,
+                include_gripper=False,
+                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+            )
+            if not self.arm.dry_run:
+                time.sleep(0.08)
+
+            # Post-lift physical pick confirmation: verify jaws did NOT close to empty stop during lift!
+            q_lifted, g_lifted = self.arm.current_q_and_grip(fresh=True)
+            if not self.arm.dry_run and (
+                float(g_lifted) <= PHYSICAL_EMPTY_JAW_MAX_PCT
+                or float(g_lifted) < (float(g_contact) - 0.042)
+            ):
+                self.arm.clear_gripper_overload_for_release()
+                self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
+                self._active_open_pct = min(0.32, self._active_open_pct + 0.03)
+                self.arm.move_to_pose(
+                    pre_sol.q_grasp,
+                    gripper_pct=self._active_open_pct,
+                    speed=245,
+                    timeout_s=2.8,
+                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                )
+                if local_attempt + 1 < max_local_attempts and pass1_saw_brick:
+                    self.status_banner = (
+                        f"PickBlock({brick.spec.part_id}): Slipped — retrying in-place"
+                    )
+                    continue
+                self.hand_empty = True
+                self.ledger.reset_all()
+                return SkillOutcome(
+                    False,
+                    reason=f"pick_not_confirmed_after_lift_retrying(g_lift={g_lifted:.3f},g_contact={g_contact:.3f})",
+                )
+            break
 
         # Also score close-up wrist view of the held block right after lift!
         try:
@@ -2891,9 +2939,26 @@ class PhysicalSO101CellExecutor:
         )
 
     def _skill_present_and_spin_at_plate_camera(self) -> SkillOutcome:
-        """Present held brick at demonstrated side-camera pose & sweep Joint 5 CCW across 3 cameras."""
+        """Present held brick and require the selected policy's scheduled RGB views."""
+        from brickcell.inspection.mark_scan import MarkScanEvidence
+        from brickcell.inspection.types import Decision
+
+        self.plate_scan_completed = False
         if self.hand_empty or self._active_brick is None:
             return SkillOutcome(False, reason="block_not_held")
+        heuristic = getattr(self.inspector, "allow_heuristic_sorting", False)
+        missing_models = [
+            camera
+            for camera in ("plate", "wrist")
+            if not self.inspector.has_detector_for_camera(camera)
+        ]
+        if missing_models and not heuristic:
+            return SkillOutcome(False, reason=f"missing_mark_models({','.join(missing_models)})")
+        scan_evidence = (
+            MarkScanEvidence(required=frozenset(("plate", i) for i in range(7)))
+            if heuristic
+            else MarkScanEvidence()
+        )
 
         brick = self._active_brick
         dash_obj_id = PART_ID_TO_DASHBOARD_ID.get(brick.spec.part_id, "part-001")
@@ -2964,7 +3029,7 @@ class PhysicalSO101CellExecutor:
             swept_deg = math.degrees(q_step[4] - q_scan_start[4])
             self.status_banner = (
                 f"Side Camera CCW Spin +{swept_deg:.0f} deg | "
-                f"{'ANOMALY FLAGGED' if self.anomaly_flagged else 'Scanning 3 cameras...'}"
+                f"{'ANOMALY FLAGGED' if self.anomaly_flagged else 'Inspecting plate and wrist...'}"
             )
             # `include_gripper=False` ensures gripper goal NEVER relaxes during the spin!
             self.arm.move_to_pose(
@@ -2975,7 +3040,7 @@ class PhysicalSO101CellExecutor:
                 include_gripper=False,
             )
             if not self.arm.dry_run:
-                time.sleep(0.16)
+                time.sleep(0.06)
 
             q_meas, g_meas = self.arm.current_q_and_grip(fresh=True)
             T_held = self.ik.fk_world_body3(q_meas) @ self._T_body3_block_held
@@ -3020,15 +3085,14 @@ class PhysicalSO101CellExecutor:
                     stage_tag=f"spin_{step_idx}",
                     expected_z_m=None,
                 )
-                # Multi-camera pass on `top` and `wrist` alongside `plate`!
-                if step_idx in (0, 3, 6) and top_box is not None:
-                    self._evaluate_camera_crop_and_record(
-                        top_snap,
-                        top_box,
-                        stage_tag=f"spin_{step_idx}",
-                        require_configured_detector=self.inspector.has_anomalib_models,
-                    )
-                if step_idx in (0, 3, 6):
+                scan_evidence.record(
+                    "plate",
+                    step_idx,
+                    plate_snap.frame_id,
+                    valid=res_plate is not None and res_plate.valid_view,
+                    flagged=res_plate is not None and res_plate.flagged,
+                )
+                if not heuristic and step_idx in (0, 3, 6):
                     hw_w = wrist_snap.rgb.shape[:2]
                     w_box = [
                         int(0.24 * hw_w[1]),
@@ -3036,11 +3100,18 @@ class PhysicalSO101CellExecutor:
                         int(0.76 * hw_w[1]),
                         int(0.92 * hw_w[0]),
                     ]
-                    self._evaluate_camera_crop_and_record(
+                    res_wrist = self._evaluate_camera_crop_and_record(
                         wrist_snap,
                         w_box,
                         stage_tag=f"spin_{step_idx}",
                         require_configured_detector=True,
+                    )
+                    scan_evidence.record(
+                        "wrist",
+                        step_idx,
+                        wrist_snap.frame_id,
+                        valid=res_wrist is not None and res_wrist.valid_view,
+                        flagged=res_wrist is not None and res_wrist.flagged,
                     )
             except Exception as exc:
                 self.anomaly_untrusted_error = f"inspector_failure:{exc}"
@@ -3088,6 +3159,11 @@ class PhysicalSO101CellExecutor:
                 False, reason=f"insufficient_valid_plate_views({self.plate_scan_valid_frames})"
             )
 
+        if scan_evidence.decision() == Decision.REINSPECT or (heuristic and scan_evidence.missing):
+            return SkillOutcome(
+                False, reason=f"incomplete_plate_wrist_scan({scan_evidence.missing})"
+            )
+
         self.plate_scan_completed = True
         return SkillOutcome(
             True,
@@ -3097,6 +3173,8 @@ class PhysicalSO101CellExecutor:
                 "anomaly_flagged": self.anomaly_flagged,
                 "max_raw_anomaly_distance": self.max_plate_anomaly_distance,
                 "inspector_mode": self.inspector.inspector_mode,
+                "mark_scan_decision": str(scan_evidence.decision()),
+                "missing_mark_views": scan_evidence.missing,
             },
         )
 
@@ -3224,7 +3302,7 @@ class PhysicalSO101CellExecutor:
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
-            time.sleep(0.18)
+            time.sleep(0.06)
         self.hand_empty = True
 
         self.arm.move_to_pose(
@@ -3303,6 +3381,7 @@ def run_physical_cell_deployment(
     rgbd_viewer_config_path: str | Path | None = None,
     require_anomalib: bool = False,
     output_dir: str | Path | None = None,
+    inspection_mode: str = "lab-dark-mark",
 ) -> dict[str, Any]:
     """Run the full physical SO-101 3-plate inspection deployment on `intel`."""
     out_root = (
@@ -3312,25 +3391,41 @@ def run_physical_cell_deployment(
     )
     out_root.mkdir(parents=True, exist_ok=True)
 
-    cam_detectors, cam_crops = load_anomalib_camera_detectors(
-        openvino_model_path=openvino_config_path,
-        rgbd_viewer_config_path=rgbd_viewer_config_path,
-    )
-    if require_anomalib and not cam_detectors:
+    if inspection_mode not in ("patchcore", "lab-dark-mark"):
+        raise ValueError("Unknown inspection mode")
+    heuristic = inspection_mode == "lab-dark-mark"
+    if heuristic and (require_anomalib or openvino_config_path is not None):
+        raise ValueError("lab-dark-mark cannot be combined with Anomalib model selection")
+    if heuristic:
+        cam_detectors, cam_crops = {}, {}
+    else:
+        cam_detectors, cam_crops = load_anomalib_camera_detectors(
+            openvino_model_path=openvino_config_path,
+            rgbd_viewer_config_path=rgbd_viewer_config_path,
+        )
+    missing_models = [
+        camera for camera in ("plate", "wrist") if "rgb" not in cam_detectors.get(camera, {})
+    ]
+    if missing_models and not heuristic:
         raise ValueError(
-            "No trained real Anomalib OpenVINO models configured (--require-anomalib). "
-            "Provide --openvino-model path/to/model.xml or populate model_path entries "
-            "in configs/rgbd-viewer.json."
+            f"missing_mark_models({','.join(missing_models)}): deployment refused before "
+            "camera/arm initialization or pickup. Both plate and wrist require real, "
+            "calibrated RGB OpenVINO models. Configure cameras.<camera>.models.rgb in "
+            "configs/mark-viewer.json (paths relative to the config), or pass "
+            "--openvino-model. Each export needs model.xml, model.bin and model.json "
+            "with a calibrated threshold and matching sensor contract. "
+            "Uncalibrated pilots and lab_dark_mark_fallback cannot authorize sorting."
         )
 
-    frame_source = LiveBenchHttpFrameSource(
-        live_depth_url=live_depth_url,
-        wrist_http_url=wrist_http_url,
-    )
     inspector = RealCameraAnomalyInspector(
         dark_mark_threshold=dark_mark_threshold,
         camera_detectors=cam_detectors,
         camera_crops=cam_crops,
+        allow_heuristic_sorting=heuristic,
+    )
+    frame_source = LiveBenchHttpFrameSource(
+        live_depth_url=live_depth_url,
+        wrist_http_url=wrist_http_url,
     )
     arm = PhysicalArmController(armd_url=armd_url, dry_run=dry_run)
     dashboard = TwinDashboardReporter(base_url=dashboard_url) if dashboard_url else None
@@ -3376,6 +3471,11 @@ def run_physical_cell_deployment(
             "synthetic_simulation": False,
             "inspector_mode": inspector.inspector_mode,
             "anomalib_cameras": inspector.configured_cameras(),
+            "inspection_policy": inspection_mode,
+            "threshold_kind": "operator_selected_lab_contrast"
+            if heuristic
+            else "validation_calibrated",
+            "lab_contrast_threshold": dark_mark_threshold if heuristic else None,
             "succeeded": bool(report.succeeded),
             "termination_reason": last_reason,
             "elapsed_s": report.elapsed_s,

@@ -1,3 +1,7 @@
+> For mark inspection, the default viewer now uses **plate + wrist RGB only**.
+> See [PLATE_WRIST_MARKS.md](PLATE_WRIST_MARKS.md) for training and dataset setup.
+> The RGB/depth workflow below remains a separate explicit configuration.
+
 # PatchCore RGB + depth review
 
 The viewer can run separate real RGB and encoded-depth PatchCore models for

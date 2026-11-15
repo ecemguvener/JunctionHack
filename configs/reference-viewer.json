@@ -1,0 +1,36 @@
+{
+  "cameras": {
+    "plate_red": {
+      "type": "reference_rgb",
+      "serial": "243622060450",
+      "source_format": "snapshot_rgb",
+      "source": "http://127.0.0.1:8094/snapshot/plate",
+      "crop": null,
+      "models": {"rgb": "../artifacts/trained-plate-references-20261115-v1/red/model.xml"}
+    },
+    "plate_blue": {
+      "type": "reference_rgb",
+      "serial": "243622060450",
+      "source_format": "snapshot_rgb",
+      "source": "http://127.0.0.1:8094/snapshot/plate",
+      "crop": null,
+      "models": {"rgb": "../artifacts/trained-plate-references-20261115-v1/blue/model.xml"}
+    },
+    "plate_yellow": {
+      "type": "reference_rgb",
+      "serial": "243622060450",
+      "source_format": "snapshot_rgb",
+      "source": "http://127.0.0.1:8094/snapshot/plate",
+      "crop": null,
+      "models": {"rgb": "../artifacts/trained-plate-references-20261115-v1/yellow/model.xml"}
+    },
+    "plate_white": {
+      "type": "reference_rgb",
+      "serial": "243622060450",
+      "source_format": "snapshot_rgb",
+      "source": "http://127.0.0.1:8094/snapshot/plate",
+      "crop": null,
+      "models": {"rgb": "../artifacts/trained-plate-references-20261115-v1/white/model.xml"}
+    }
+  }
+}
