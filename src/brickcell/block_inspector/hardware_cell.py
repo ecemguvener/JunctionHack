@@ -262,13 +262,13 @@ class LiveBenchHttpFrameSource:
         real2sim: Real2SimPipeline,
         q_arm_rad: np.ndarray | None = None,
     ) -> Real2SimSceneState:
-        """Perceive fused Dual-D415 (`fused` top + plate) 3D scene via `live_depth.py`."""
+        """Perceive 3D scene using depth from the `top` D415 camera only via `live_depth.py`."""
         scene = real2sim.perceive_from_live_depth_http(
             base_url=self.live_depth_url,
             q_arm_rad=q_arm_rad,
             timeout_s=self.timeout_s,
             prefer_snapshots=False,
-            camera_mode="fused",
+            camera_mode="top",
         )
         if not scene.bricks:
             scene = real2sim.perceive_from_live_depth_http(
@@ -276,7 +276,7 @@ class LiveBenchHttpFrameSource:
                 q_arm_rad=q_arm_rad,
                 timeout_s=self.timeout_s,
                 prefer_snapshots=True,
-                camera_mode="fused",
+                camera_mode="top",
             )
         return scene
 
@@ -904,17 +904,24 @@ def localize_plates_and_bricks_top_rgb(
             area = float(cv2.contourArea(c))
             if area < 1400.0:
                 continue
-            M = cv2.moments(c)
-            if M["m00"] <= 1e-6:
-                continue
-            cu = float(M["m10"] / M["m00"])
-            cv_y = float(M["m01"] / M["m00"])
-            pw = _ray_intersect_z_plane(cu, cv_y, R_top, p_top, K_top, z_world=0.008)
+            if role in {"good", "defective"}:
+                (cu, cv_y), radius_px = cv2.minEnclosingCircle(c_poly_or_hull := cv2.convexHull(c))
+                if radius_px < 18.0:
+                    continue
+                c_poly_val = c_poly_or_hull
+            else:
+                M = cv2.moments(c)
+                if M["m00"] <= 1e-6:
+                    continue
+                cu = float(M["m10"] / M["m00"])
+                cv_y = float(M["m01"] / M["m00"])
+                c_poly_val = c
+            pw = _ray_intersect_z_plane(float(cu), float(cv_y), R_top, p_top, K_top, z_world=0.008)
             if pw is None or not (0.06 <= pw[0] <= 0.46 and -0.28 <= pw[1] <= 0.28):
                 continue
             if area > best_area:
                 best_area = area
-                best_c = (c, cu, cv_y, pw)
+                best_c = (c_poly_val, float(cu), float(cv_y), pw)
         if best_c is not None:
             c_poly, cu, cv_y, pw = best_c
             # Track live movable plate XY directly from 2D RGB (priors only used if off-camera!)
@@ -1034,9 +1041,10 @@ def localize_plates_and_bricks_top_rgb(
             long_vec, long_m, short_m = e12, len12, len01
 
         spec = _infer_duplo_spec_from_2d_extents(short_m, long_m)
-        # In DUPLO_CATALOG, dims_m[0] <= dims_m[1] (X_block = short axis, Y_block = long axis)
+        # Match DUPLO_CATALOG axis order: if dims_m[0] >= dims_m[1] (e.g. 2x4, 1x2x2), X_block is
+        # the long axis; otherwise (e.g. 2x3), Y_block is the long axis.
         yaw_long = math.atan2(float(long_vec[1]), float(long_vec[0]))
-        yaw_block = yaw_long - 0.5 * math.pi
+        yaw_block = yaw_long if spec.dims_m[0] >= spec.dims_m[1] else (yaw_long - 0.5 * math.pi)
 
         hz = float(spec.dims_m[2])
         z_center = 0.006 + 0.5 * hz
@@ -2228,15 +2236,25 @@ class PhysicalSO101CellExecutor:
                 if float(np.linalg.norm(p_b[:2] - m_xy)) < 0.026
             )
 
-            yaw_spans: list[tuple[float, float, int]] = []
+            horiz_axes: list[tuple[float, float, int]] = []
             for idx, span in enumerate(b.spec.dims_m):
                 ax = R_wb[:, idx]
                 if abs(float(ax[2])) < 0.30 and span <= 0.038:
-                    y0 = math.atan2(float(ax[1]), float(ax[0]))
-                    yaw_spans.extend([(y0, float(span), idx), (y0 + math.pi, float(span), idx)])
+                    horiz_axes.append((math.atan2(float(ax[1]), float(ax[0])), float(span), idx))
+            if horiz_axes:
+                min_span = min(sp for _, sp, _ in horiz_axes)
+                max_span = max(sp for _, sp, _ in horiz_axes)
+                # For elongated bricks (e.g. 1x2x2 with 32x16 mm), restrict to the short axis.
+                if max_span / max(min_span, 1e-4) >= 1.18:
+                    horiz_axes = [item for item in horiz_axes if item[1] <= min_span + 0.004]
+            yaw_spans: list[tuple[float, float, int]] = []
+            for y0, span, idx in horiz_axes:
+                yaw_spans.extend([(y0, span, idx), (y0 + math.pi, span, idx)])
             if not yaw_spans:
-                y0 = math.atan2(float(R_wb[1, 1]), float(R_wb[0, 1]))
-                yaw_spans = [(y0, 0.032, 0), (y0 + math.pi, 0.032, 0)]
+                short_idx = 0 if b.spec.dims_m[0] <= b.spec.dims_m[1] else 1
+                y0 = math.atan2(float(R_wb[1, short_idx]), float(R_wb[0, short_idx]))
+                span_fb = float(b.spec.dims_m[short_idx])
+                yaw_spans = [(y0, span_fb, short_idx), (y0 + math.pi, span_fb, short_idx)]
 
             along_offsets = (0.0, -0.014, +0.014) if max(b.spec.dims_m[:2]) >= 0.056 else (0.0,)
             radial_vec = p_b[:2] - source_xy
@@ -2672,6 +2690,8 @@ class PhysicalSO101CellExecutor:
 
                 pass1_saw_brick = servo_info.get("status") == "ok"
                 if not self.arm.dry_run and pass1_saw_brick:
+                    dyaw_p1 = abs((yaw_refined - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
+                    dxy_p1 = float(np.linalg.norm(p_refined[:2] - p_tcp[:2]))
                     p_tcp = p_refined
                     jaw_yaw = yaw_refined
                     grasp_sol, _ = solve_adaptive_grasp_pose(
@@ -2692,6 +2712,20 @@ class PhysicalSO101CellExecutor:
                         local_seed_only=True,
                     )
                     self._active_grasp_sol = grasp_sol
+                    # For elongated bricks (e.g. 2x4), rotate perpendicular to the longitudinal side
+                    # and stretch out at pre_sol height BEFORE coming down to adjust.
+                    is_elongated = max(brick.spec.dims_m[:2]) >= 0.042 or (
+                        float(brick.spec.dims_m[0]) != float(brick.spec.dims_m[1])
+                    )
+                    if is_elongated and (dyaw_p1 > math.radians(4.5) or dxy_p1 > 0.004):
+                        self.arm.move_to_pose(
+                            pre_sol.q_grasp,
+                            gripper_pct=self._active_open_pct,
+                            speed=420,
+                            include_gripper=False,
+                            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                        )
+                        time.sleep(0.05)
                 self._sync_mirror_and_telemetry(
                     q_pre_meas, g_pre_meas, wrist_rgb=wrist_pre_snap.rgb
                 )
@@ -3170,11 +3204,10 @@ class PhysicalSO101CellExecutor:
     def _compute_safe_plate_drop_xy(
         self, pile: str, slot_idx: int
     ) -> tuple[np.ndarray, tuple[float, float]]:
-        """Compute reachable, collision-safe drop XY inside the live movable `good` or `defective` plate."""
+        """Target the top-camera bounding-circle center of the live `good` or `defective` bowl."""
+        del slot_idx
         if pile in self._rgb_plate_positions:
             plate_xy = self._rgb_plate_positions[pile][:2].copy()
-        elif self._latest_scene is not None and pile in self._latest_scene.plates:
-            plate_xy = self._latest_scene.plates[pile].pos_world[:2].copy()
         else:
             plate_xy = (
                 np.array([0.395, 0.116], dtype=np.float64)
@@ -3188,11 +3221,8 @@ class PhysicalSO101CellExecutor:
             inward = min(0.045, r_center - 0.405)
             plate_xy = plate_xy * ((r_center - inward) / r_center)
 
-        dx, dy = PLATE_DROP_SLOT_OFFSETS_XY[slot_idx % len(PLATE_DROP_SLOT_OFFSETS_XY)]
-        slot_off = (0.45 * float(dx), 0.45 * float(dy))
-        target_xy = np.array(
-            [plate_xy[0] + slot_off[0], plate_xy[1] + slot_off[1]], dtype=np.float64
-        )
+        slot_off = (0.0, 0.0)
+        target_xy = np.array([float(plate_xy[0]), float(plate_xy[1])], dtype=np.float64)
         # Keep strictly clear of left laptop screen (y <= +0.168 m)
         target_xy[1] = min(float(target_xy[1]), 0.168)
         return target_xy, slot_off
@@ -3246,26 +3276,6 @@ class PhysicalSO101CellExecutor:
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
-
-        # Eye-in-hand Wrist RGB refinement over the green/pink plate bowl before descent!
-        if not self.arm.dry_run:
-            try:
-                q_abv, _ = self.arm.current_q_and_grip(fresh=True)
-                wrist_drop_snap = self.frame_source.fetch_wrist_snapshot()
-                refined_xy = refine_plate_drop_with_wrist_rgb(
-                    wrist_drop_snap.rgb,
-                    pile=pile,
-                    q_above=q_abv,
-                    target_xy_nominal=target_xy,
-                    slot_offset_xy=slot_off,
-                    ik=self.ik,
-                    wrist_cam=self.rig.wrist,
-                )
-                if float(np.linalg.norm(refined_xy - target_xy)) >= 0.005:
-                    target_xy = refined_xy
-                    drop_yaw = math.atan2(float(target_xy[1]), float(target_xy[0])) + 0.5 * math.pi
-            except Exception:
-                pass
 
         release_sol, _ = solve_adaptive_grasp_pose(
             self.ik,
