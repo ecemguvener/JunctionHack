@@ -8,8 +8,10 @@
     },
     "plate": {
       "serial": "243622060450",
-      "crop": null,
-      "models": {},
+      "crop": [0, 0, 640, 480],
+      "models": {
+        "rgb": "../artifacts/models/plate-calibrated-707-v1/model.xml"
+      },
       "min_depth_fraction": 0.6
     },
     "wrist": {

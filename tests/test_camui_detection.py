@@ -81,3 +81,32 @@ def test_warning_expires_from_capture_not_repeat_post(monkeypatch):
 def test_warning_requires_real_boolean(value):
     with pytest.raises(ValueError):
         ui.Detection(5).update({"malformed": value})
+
+
+def test_calibrated_patchcore_event_bridges_to_camui():
+    bad = bridge.detection_payload(
+        event(
+            decision="DEFECTIVE",
+            model_version="6d8add3e0688a925",
+            threshold_version="4128199aec09eedb",
+            raw_distance=2.61,
+            threshold=2.4538,
+        ),
+        now=101,
+    )
+    assert bad["malformed"] is True
+    assert bad["source"] == "patchcore_openvino_6d8add3e0688a925"
+    assert "DEFECT FLAGGED" in bad["detail"]
+    good = bridge.detection_payload(
+        event(
+            decision="GOOD",
+            model_version="6d8add3e0688a925",
+            threshold_version="4128199aec09eedb",
+            raw_distance=1.82,
+            threshold=2.4538,
+        ),
+        now=101,
+    )
+    assert good["malformed"] is False
+    assert good["source"] == "patchcore_openvino_6d8add3e0688a925"
+    assert "GOOD" in good["detail"]

@@ -492,9 +492,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_dep.add_argument("--dark-mark-threshold", type=float, default=16.0)
     p_dep.add_argument(
         "--inspection-mode",
-        choices=("patchcore", "lab-dark-mark"),
-        default="lab-dark-mark",
-        help="Default lab-dark-mark sorts using the plate-camera contrast rule without trained models; patchcore explicitly selects calibrated RGB models",
+        choices=("patchcore", "patchcore-plate", "lab-dark-mark"),
+        default="patchcore-plate",
+        help="Default patchcore-plate sorts using the calibrated plate-camera PatchCore model; patchcore requires both plate and wrist models; lab-dark-mark uses the contrast rule",
     )
     p_dep.add_argument(
         "--rgbd-viewer-config",
