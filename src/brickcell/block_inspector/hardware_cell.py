@@ -74,7 +74,6 @@ from brickcell.block_inspector.runtime_nodes import (
     detect_bowl_bounding_circles_top_rgb,
 )
 from brickcell.block_inspector.twin import (
-    PLATE_DROP_SLOT_OFFSETS_XY,
     SO101InspectionTwin,
     SpawnedBlockInfo,
 )
@@ -2212,9 +2211,7 @@ class PhysicalSO101CellExecutor:
         self._rt_bus = InProcessRuntimeBus()
         R_top, p_top, K_top = self.real_cams["top"]
         self._bowl_circle_node = BowlCircleTrackerNode(self._rt_bus, R_top, p_top, K_top)
-        wrist_det = self.inspector._detectors_for_camera("wrist").get(
-            "rgb"
-        ) or self.inspector._detectors_for_camera("plate").get("rgb")
+        wrist_det = self.inspector._detectors_for_camera("wrist").get("rgb")
         self._wrist_anomaly_node: WristAnomalyNode | None = (
             WristAnomalyNode(
                 bus=self._rt_bus,
