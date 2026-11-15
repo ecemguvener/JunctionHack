@@ -1673,3 +1673,50 @@ def test_elongated_brick_grasp_aligns_across_short_axis() -> None:
     assert abs(float(long_ax[0])) >= 0.90
     assert abs(float(short_ax[1])) >= 0.90
 
+
+def test_bowl_circle_tracker_babyros_node() -> None:
+    """Verify BowlCircleTrackerNode tracks green & red/pink bowl circles in real time on BabyROS."""
+    from brickcell.block_inspector.hardware_cell import real_intel_camera_poses_world
+    from brickcell.block_inspector.runtime_bus import (
+        CANONICAL_TOPICS,
+        InProcessRuntimeBus,
+        pack_rgbd_frame_nddc,
+    )
+    from brickcell.block_inspector.runtime_nodes import BowlCircleTrackerNode
+
+    R_top, p_top, K_top = real_intel_camera_poses_world()["top"]
+    top_img = np.full((480, 640, 3), [128, 128, 126], dtype=np.uint8)
+
+    def _proj(xyz_w: list[float]) -> tuple[int, int]:
+        pw = np.asarray(xyz_w, dtype=np.float64)
+        pc = R_top.T @ (pw - p_top)
+        return (
+            int(round(K_top[0, 0] * (pc[0] / pc[2]) + K_top[0, 2])),
+            int(round(K_top[1, 1] * (pc[1] / pc[2]) + K_top[1, 2])),
+        )
+
+    good_w = [0.352, 0.132, 0.008]
+    def_w = [0.228, 0.158, 0.008]
+    cv2.circle(top_img, _proj(good_w), 54, (85, 205, 105), -1)  # green bowl
+    cv2.circle(top_img, _proj(def_w), 54, (225, 105, 150), -1)  # pink/red bowl
+
+    bus = InProcessRuntimeBus()
+    published: list[dict] = []
+    bus.subscribe(CANONICAL_TOPICS["bowl_circles"], lambda msg: published.append(msg))
+    node = BowlCircleTrackerNode(bus=bus, R_top=R_top, p_top=p_top, K_top=K_top)
+    try:
+        bus.publish(
+            CANONICAL_TOPICS["realsense_1_frame"],
+            pack_rgbd_frame_nddc(top_img, timestamp_ns=123456),
+        )
+        assert len(published) == 1
+        assert "good" in published[0] and "defective" in published[0]
+        good_xy = node.latest_world_xy("good")
+        def_xy = node.latest_world_xy("defective")
+        assert good_xy is not None and np.linalg.norm(good_xy - np.array(good_w[:2])) < 0.025
+        assert def_xy is not None and np.linalg.norm(def_xy - np.array(def_w[:2])) < 0.025
+    finally:
+        node.close()
+        bus.close()
+
+

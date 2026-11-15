@@ -63,6 +63,11 @@ from brickcell.block_inspector.real2sim import (
     project_world_obb_to_image_box,
     real_intel_camera_poses_world,
 )
+from brickcell.block_inspector.runtime_bus import InProcessRuntimeBus
+from brickcell.block_inspector.runtime_nodes import (
+    BowlCircleTrackerNode,
+    detect_bowl_bounding_circles_top_rgb,
+)
 from brickcell.block_inspector.twin import (
     PLATE_DROP_SLOT_OFFSETS_XY,
     SO101InspectionTwin,
@@ -876,21 +881,20 @@ def localize_plates_and_bricks_top_rgb(
     hsv = cv2.cvtColor(top_rgb, cv2.COLOR_RGB2HSV)
     lab = cv2.cvtColor(top_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
 
-    # 1. Detect the 3 colored KALAS plates in 2D RGB (`source` aquamarine, `good` green, `defective` pink)
+    # 1. Detect the 3 colored KALAS plates in 2D RGB:
+    #    - `good` (green) & `defective` (red/pink) via shared bounding-circle helper
+    #    - `source` (aquamarine) contour for interior brick segmentation
+    for role, circle_info in detect_bowl_bounding_circles_top_rgb(
+        top_rgb, R_top, p_top, K_top, roles=("good", "defective")
+    ).items():
+        xy_w = circle_info["xy_world"]
+        plate_xy_map[role] = np.array([float(xy_w[0]), float(xy_w[1]), 0.0], dtype=np.float64)
+
     plate_hsv_masks = {
         "source": (hsv[:, :, 0] >= 88)
         & (hsv[:, :, 0] <= 115)
         & (hsv[:, :, 1] >= 80)
         & (hsv[:, :, 2] >= 50),
-        "good": (hsv[:, :, 0] >= 36)
-        & (hsv[:, :, 0] <= 82)
-        & (hsv[:, :, 1] >= 65)
-        & (hsv[:, :, 2] >= 55),
-        "defective": (
-            ((hsv[:, :, 0] >= 145) | (hsv[:, :, 0] <= 10))
-            & (hsv[:, :, 1] >= 55)
-            & (hsv[:, :, 2] >= 80)
-        ),
     }
     src_hull_mask: np.ndarray | None = None
     src_plate_uv: tuple[float, float] | None = None
@@ -904,24 +908,17 @@ def localize_plates_and_bricks_top_rgb(
             area = float(cv2.contourArea(c))
             if area < 1400.0:
                 continue
-            if role in {"good", "defective"}:
-                (cu, cv_y), radius_px = cv2.minEnclosingCircle(c_poly_or_hull := cv2.convexHull(c))
-                if radius_px < 18.0:
-                    continue
-                c_poly_val = c_poly_or_hull
-            else:
-                M = cv2.moments(c)
-                if M["m00"] <= 1e-6:
-                    continue
-                cu = float(M["m10"] / M["m00"])
-                cv_y = float(M["m01"] / M["m00"])
-                c_poly_val = c
-            pw = _ray_intersect_z_plane(float(cu), float(cv_y), R_top, p_top, K_top, z_world=0.008)
+            M = cv2.moments(c)
+            if M["m00"] <= 1e-6:
+                continue
+            cu = float(M["m10"] / M["m00"])
+            cv_y = float(M["m01"] / M["m00"])
+            pw = _ray_intersect_z_plane(cu, cv_y, R_top, p_top, K_top, z_world=0.008)
             if pw is None or not (0.06 <= pw[0] <= 0.46 and -0.28 <= pw[1] <= 0.28):
                 continue
             if area > best_area:
                 best_area = area
-                best_c = (c_poly_val, float(cu), float(cv_y), pw)
+                best_c = (c, cu, cv_y, pw)
         if best_c is not None:
             c_poly, cu, cv_y, pw = best_c
             # Track live movable plate XY directly from 2D RGB (priors only used if off-camera!)
@@ -2090,7 +2087,19 @@ class PhysicalSO101CellExecutor:
         self._cycles_completed: int = 0
         self._recent_missed_xys: list[np.ndarray] = []
 
+        # Dedicated real-time BabyROS node tracking green (`good`) & red/pink (`defective`) bowl circles
+        self._rt_bus = InProcessRuntimeBus()
+        R_top, p_top, K_top = self.real_cams["top"]
+        self._bowl_circle_node = BowlCircleTrackerNode(self._rt_bus, R_top, p_top, K_top)
+        if not self.arm.dry_run:
+            self._bowl_circle_node.start_polling(
+                lambda: self.frame_source.fetch_d415_snapshot("top").rgb,
+                hz=12.0,
+            )
+
     def close(self) -> None:
+        self._bowl_circle_node.close()
+        self._rt_bus.close()
         if self.dashboard is not None:
             self.dashboard.clear_focus()
             self.dashboard.clear_anomalies()
@@ -2413,27 +2422,19 @@ class PhysicalSO101CellExecutor:
 
         self.status_banner = f"LocalizeNextClusterBlock: Retracting arm & scanning 2D RGB ({self.inspector.inspector_mode})"
         q_pre_home, _ = self.arm.current_q_and_grip(fresh=False)
-        if float(q_pre_home[1]) > -0.60:
-            q_lift = q_pre_home.copy()
-            q_lift[1] = -0.95
+        if float(np.max(np.abs(q_pre_home - PHYSICAL_OBSERVATION_HOME_Q))) > 0.08:
             self.arm.move_to_pose(
-                q_lift,
+                PHYSICAL_OBSERVATION_HOME_Q,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=480,
-                include_gripper=False,
+                speed=520,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
-        self.arm.move_to_pose(
-            PHYSICAL_OBSERVATION_HOME_Q,
-            gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=520,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
-        if not self.arm.dry_run:
-            time.sleep(0.08)
+            if not self.arm.dry_run:
+                time.sleep(0.06)
 
         q_now, g_now = self.arm.current_q_and_grip(fresh=True)
         top_snap = self.frame_source.fetch_d415_snapshot("top")
+        self._bowl_circle_node.process_rgb(top_snap.rgb)
         plate_snap = self.frame_source.fetch_d415_snapshot("plate")
         wrist_snap = self.frame_source.fetch_wrist_snapshot()
 
@@ -2654,7 +2655,7 @@ class PhysicalSO101CellExecutor:
         if not self.arm.dry_run:
             time.sleep(0.06)
 
-        max_local_attempts = 1 if self.arm.dry_run else 2
+        max_local_attempts = 1 if self.arm.dry_run else 3
         q_clamped = grasp_sol.q_grasp.copy()
         g_contact = self._active_close_pct
         for local_attempt in range(max_local_attempts):
@@ -2861,9 +2862,9 @@ class PhysicalSO101CellExecutor:
                     timeout_s=3.2,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
-                if local_attempt + 1 < max_local_attempts and pass1_saw_brick:
+                if local_attempt + 1 < max_local_attempts:
                     self.status_banner = (
-                        f"PickBlock({brick.spec.part_id}): Missed — retrying in-place"
+                        f"PickBlock({brick.spec.part_id}): Missed — lifting slightly & retrying in-place"
                     )
                     continue
                 self.hand_empty = True
@@ -2887,11 +2888,20 @@ class PhysicalSO101CellExecutor:
             T_body3_grasp = self.ik.fk_world_body3(q_clamped)
             self._T_body3_block_held = np.linalg.inv(T_body3_grasp) @ brick.T_world_block
 
+            lift_z = max(float(p_tcp[2]) + 0.045, 0.072)
+            lift_sol, _ = solve_adaptive_grasp_pose(
+                self.ik,
+                np.array([p_tcp[0], p_tcp[1], lift_z], dtype=np.float64),
+                jaw_yaw_world=jaw_yaw,
+                q_posture=grasp_sol.q_grasp,
+                pitches_deg=steep_pitches,
+                local_seed_only=True,
+            )
             self.status_banner = (
-                f"PickBlock({brick.spec.part_id}): Lifting & confirming physical grip"
+                f"PickBlock({brick.spec.part_id}): Lifting slightly & confirming physical grip"
             )
             self.arm.move_to_pose(
-                pre_sol.q_grasp,
+                lift_sol.q_grasp,
                 gripper_pct=self._active_close_pct,
                 speed=360,
                 include_gripper=False,
@@ -2916,9 +2926,9 @@ class PhysicalSO101CellExecutor:
                     timeout_s=2.8,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
-                if local_attempt + 1 < max_local_attempts and pass1_saw_brick:
+                if local_attempt + 1 < max_local_attempts:
                     self.status_banner = (
-                        f"PickBlock({brick.spec.part_id}): Slipped — retrying in-place"
+                        f"PickBlock({brick.spec.part_id}): Slipped — lifting slightly & retrying in-place"
                     )
                     continue
                 self.hand_empty = True
@@ -3004,21 +3014,11 @@ class PhysicalSO101CellExecutor:
         )
 
         self.arm.holding_object = True
-        q_cur, _ = self.arm.current_q_and_grip(fresh=False)
-        q_carry = 0.5 * (q_cur + q_scan_start)
-        q_carry[1] = min(float(q_cur[1]), float(q_scan_start[1]), -0.45)
-        self.status_banner = "PresentAndSpinAtPlateCamera: Moving held brick to Side/Plate D415"
-        self.arm.move_to_pose(
-            q_carry,
-            gripper_pct=self._active_close_pct,
-            speed=400,
-            include_gripper=False,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
+        self.status_banner = "PresentAndSpinAtPlateCamera: Moving held brick directly to Side/Plate D415"
         self.arm.move_to_pose(
             q_scan_start,
             gripper_pct=self._active_close_pct,
-            speed=360,
+            speed=400,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
@@ -3204,9 +3204,12 @@ class PhysicalSO101CellExecutor:
     def _compute_safe_plate_drop_xy(
         self, pile: str, slot_idx: int
     ) -> tuple[np.ndarray, tuple[float, float]]:
-        """Target the top-camera bounding-circle center of the live `good` or `defective` bowl."""
+        """Target the real-time BabyROS bounding-circle center of the `good` or `defective` bowl."""
         del slot_idx
-        if pile in self._rgb_plate_positions:
+        live_xy = self._bowl_circle_node.latest_world_xy(pile, max_age_s=2.0)
+        if live_xy is not None:
+            plate_xy = live_xy.copy()
+        elif pile in self._rgb_plate_positions:
             plate_xy = self._rgb_plate_positions[pile][:2].copy()
         else:
             plate_xy = (
@@ -3234,15 +3237,18 @@ class PhysicalSO101CellExecutor:
         if pile not in {"good", "defective"}:
             return SkillOutcome(False, reason=f"invalid_pile:{pile}")
 
-        # Re-read fresh 2D Top-RGB plate positions right before sorting in case a plate was moved!
-        try:
-            top_live = self.frame_source.fetch_d415_snapshot("top")
-            R_top, p_top, K_top = self.real_cams["top"]
-            fresh_plates, _ = localize_plates_and_bricks_top_rgb(top_live.rgb, R_top, p_top, K_top)
-            if float(top_live.rgb.std()) >= 8.0:
-                self._rgb_plate_positions.update(fresh_plates)
-        except Exception:
-            pass
+        # Refresh BabyROS bowl bounding circle synchronously only if background stream is stale/absent
+        if self._bowl_circle_node.latest_world_xy(pile, max_age_s=0.45) is None:
+            try:
+                top_live = self.frame_source.fetch_d415_snapshot("top")
+                tracked = self._bowl_circle_node.process_rgb(top_live.rgb)
+                for role_k, info_k in tracked.items():
+                    xy_w = info_k["xy_world"]
+                    self._rgb_plate_positions[role_k] = np.array(
+                        [float(xy_w[0]), float(xy_w[1]), 0.0], dtype=np.float64
+                    )
+            except Exception:
+                pass
 
         slot_idx = int(self.sorted_counts[pile])
         target_xy, slot_off = self._compute_safe_plate_drop_xy(pile, slot_idx)
@@ -3304,10 +3310,11 @@ class PhysicalSO101CellExecutor:
             time.sleep(0.06)
         self.hand_empty = True
 
+        # Return directly to observation home without an extra upward stop above the bowl
         self.arm.move_to_pose(
-            above_sol.q_grasp,
+            PHYSICAL_OBSERVATION_HOME_Q,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=480,
+            speed=500,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
 
@@ -3352,12 +3359,14 @@ class PhysicalSO101CellExecutor:
             f"ParkAtRest: Completed {self._cycles_completed} cycle(s) "
             f"(Good: {self.sorted_counts['good']} | Defective: {self.sorted_counts['defective']})"
         )
-        self.arm.move_to_pose(
-            PHYSICAL_OBSERVATION_HOME_Q,
-            gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=480,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
+        q_cur_park, _ = self.arm.current_q_and_grip(fresh=False)
+        if float(np.max(np.abs(q_cur_park - PHYSICAL_OBSERVATION_HOME_Q))) > 0.08:
+            self.arm.move_to_pose(
+                PHYSICAL_OBSERVATION_HOME_Q,
+                gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
+                speed=480,
+                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+            )
         self.at_rest = True
         self._sync_mirror_and_telemetry()
         return SkillOutcome(True, reason="parked_at_rest")

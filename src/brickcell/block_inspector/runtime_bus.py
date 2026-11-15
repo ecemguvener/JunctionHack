@@ -22,6 +22,7 @@ CANONICAL_TOPICS = {
     "wrist_frame": "so101/camera/wrist/frame",
     "arm_state": "so101/arm/state",
     "block_state": "inspection/perception/block_state",
+    "bowl_circles": "so101/perception/bowl_circles",
     "inspection_anomaly": "so101/inspection/anomaly",
     "symbolic_state": "so101/symbolic/state",
     "skill_execute": "so101/skill/execute",
