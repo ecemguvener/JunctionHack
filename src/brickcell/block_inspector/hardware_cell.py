@@ -2927,10 +2927,10 @@ class PhysicalSO101CellExecutor:
         max_local_attempts = 1 if self.arm.dry_run else 3
         q_clamped = grasp_sol.q_grasp.copy()
         g_contact = self._active_close_pct
-        tri_z_applied = False
         for local_attempt in range(max_local_attempts):
             pass1_straddle_ok = False
             pass1_saw_brick = True
+            tri_z_applied = False
             tri_obs_a: tuple[np.ndarray, tuple[float, float], int, int] | None = None
 
             # Pass 1 (High Pre-Grasp ~9.6 cm): Align jaw yaw + coarse XY + adapt pregrasp width
@@ -2970,15 +2970,11 @@ class PhysicalSO101CellExecutor:
                     if uv1 is not None:
                         tri_obs_a = (q_pre_meas.copy(), (float(uv1[0]), float(uv1[1])), w_w1, h_w1)
                     short_m = servo_info.get("short_m")
-                    if short_m is not None and local_attempt == 0:
-                        target_open = (
-                            PHYSICAL_NARROW_PREGRASP_PCT
-                            if float(short_m) <= 0.022
-                            else PHYSICAL_WIDE_PREGRASP_PCT
+                    # Before two-view Z triangulation, allow widening only; never narrow blindly.
+                    if short_m is not None and local_attempt == 0 and float(short_m) > 0.024:
+                        self._active_open_pct = max(
+                            self._active_open_pct, PHYSICAL_WIDE_PREGRASP_PCT
                         )
-                        self._active_open_pct = max(self._active_open_pct, target_open) if (
-                            float(short_m) > 0.022
-                        ) else min(self._active_open_pct, target_open + 0.015)
 
                     dyaw_p1 = abs((yaw_refined - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
                     dxy_p1 = float(np.linalg.norm(p_refined[:2] - p_tcp[:2]))
@@ -3110,6 +3106,17 @@ class PhysicalSO101CellExecutor:
                                                 z_brick_world=z_brick_est,
                                             )
                                         )
+                                    # Now that `z_brick_est` is depth-calibrated, refine pregrasp width
+                                    short_m_cal = low_info.get("short_m")
+                                    if short_m_cal is not None and local_attempt == 0:
+                                        if float(short_m_cal) <= 0.021:
+                                            self._active_open_pct = min(
+                                                self._active_open_pct, PHYSICAL_NARROW_PREGRASP_PCT + 0.015
+                                            )
+                                        else:
+                                            self._active_open_pct = max(
+                                                self._active_open_pct, PHYSICAL_WIDE_PREGRASP_PCT
+                                            )
 
                         if low_info.get("status") != "ok" or straddle_ok:
                             self._sync_mirror_and_telemetry(
