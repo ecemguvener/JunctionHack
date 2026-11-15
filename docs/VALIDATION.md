@@ -2517,3 +2517,91 @@ launch only, not ten successful sorts. Blue source plate had fewer than ten
 visible bricks; empty-source and safety conditions may end the run early. Colour
 classification and correct final plate placement still require physical review;
 this is not measured anomaly-detection accuracy.
+
+
+### Clean-reference PatchCore fit on Intel — 2026-11-15
+
+At the user's request moved training to SSH host `intel-XPS-16-DA16260`.
+Interrupted the local Mac fit and ran the authoritative job in isolated project
+`/home/intel/brickcell-training/jack-clean-20261115-v1`, without changing deployed
+services. Executed `uv sync --locked` with Python 3.12.16, Anomalib 2.7.0,
+Torch 2.10.0+cpu and torchvision 0.25.0+cpu. Used CPU training, four threads,
+pretrained ResNet18 layer2/layer3, 128x128 full-frame RGB, coreset ratio 0.05,
+three neighbors and seed 42. Transferred input archive SHA256 matched on Mac
+and Intel: `4dec0f58d6eba969aeaf28d0b1df9583b1954fea329fda7693cee193c450171a`.
+Training ran detached and used cached backbone weights offline.
+
+Included all 570 clean RGB frames from `jack-anomaly-data-positive` at `0a6b9d3`:
+white 180, red 120, yellow 180, lavender 90. Explicit good-only train manifest
+preserves four physical object IDs, 19 grip IDs, and one session ID. Executed
+image decode/hash/group validation: zero errors, zero duplicate hashes. No
+val/test split was fabricated within this session. Remote manifest SHA256 is
+`6b404dea975ab31406ea18207c2c4d332ecc4667a9fccee2373f2d91a3254b10`.
+
+Fit completed in 217.88 seconds including checkpoint reload/inference smoke
+verification; memory bank shape is 7296x384. Reloaded checkpoint on Intel CPU
+and obtained finite raw PatchCore distance 1.0695598 for one fitting image.
+This is a checkpoint usability check, not independent accuracy evidence.
+Checkpoint: `artifacts/patchcore-jack-clean-20261115-v1/model/reference.ckpt`
+within the remote project; SHA256
+`c59ce8f5bfb404e028b24718ad428c74c544842e6797decf9a0b411f084c8e78`.
+Exact versions, configuration, source provenance, per-image hashes, audit,
+training log and summary are retained alongside it.
+
+The separately requested earlier approximately 650-image collection was not
+located in the inspected local/Intel capture directories; its location remains
+pending user clarification. The earlier local presentation recording contains
+476 frames with explicit null labels and training eligibility false, so it was
+excluded. This run therefore does not fulfill the combined-dataset fit yet.
+Threshold calibration, held-out test evaluation, OpenVINO export/parity and
+GPU/NPU benchmarks were not executed. Threshold remains null and automatic
+sorting is disabled. No robot/camera commands or runtime deployment occurred.
+No core software was changed; pytest/model suite and repository lint were not
+rerun for this artifact-only training task. The retained training script passed
+Ruff lint and formatting checks; dataset validation and actual checkpoint
+reload/inference were executed as described above.
+
+### camui warning integration and demo_1-sorter-fix1 launch — 2026-11-15
+
+Imported the existing Intel `camui.py` and HTML into tracked `camera-ui/`, adding
+a lower-camera-specific red tint/border on a fresh flagged result. Added the
+standard-library `publish_camui_detection.py` bridge reading existing detector
+events and posting `/api/detection`. Camera/sensor/real-frame identity, supported
+heuristic provenance, finite score/contrast and <=3-second acquisition age are
+required. Invalid/stale/ambiguous events clear the indication. Camui preserves
+captured_at rather than retimestamping repeated events; old warnings expire.
+Strict boolean validation rejects 0/1/string payloads. Red is a recent-result
+indicator; it is not a synchronized pixel segmentation overlay.
+
+Existing live publisher only tracks one unambiguous red brick with the unvalidated
+dark-mark rule. This connection does not turn that rule into PatchCore, does not
+cover all colours, and does not represent the arm's operator-colour policy. The
+camera UI states source/detail explicitly; absent view remains neutral.
+
+Executed `uv run pytest`: 321 passed, 16 skipped, 2 upstream warnings. Added 17
+checks for event identity/freshness/provenance/expiry and strict booleans. Node
+`camera-ui/test_ui.cjs` executes actual page showDetection code: side-only warning,
+no red on other cameras, and stale/none/ok/offline reset; passed. Ruff check and
+format including camera-ui passed (137 files). Browser host was unavailable, so
+live browser visual verification was not performed; no screenshot QA claimed.
+
+Copied candidates to Intel, backed up `camui.py` and `index.html` as siblings
+`.before-red-warning-20261115`, restarted only `camui.service`, and started the
+read-only bridge in tmux. Verified service active and API responding with source
+`live_dark_mark_heuristic_not_patchcore`; actual current state was none. Initial
+bridge connection refusal during restart recovered. No synthetic anomaly was
+posted to the real UI as a test. No arm process interrupted for this deployment.
+
+User then requested branch `demo1-sorter-fix1`; fetched actual
+`origin/demo_1-sorter-fix1`, commit `2ce0a56`, whose change fixes elongated brick
+yaw/short-axis grasp selection. Staged separately under Intel
+`artifacts/demo1-sorter-fix1-2ce0a56`. Executed its native added test:
+`pytest tests/test_block_inspector.py -k elongated_brick_grasp_aligns_across_short_axis -q`:
+1 passed, 17 deselected. No source change to that branch. Added the separately
+identified operator-colour wrapper to retain user label routing. Confirmed prior
+sorter had exited, reviewed fresh top RGB, and checked six healthy stationary
+joints before launching. Launched up to ten physical cycles with dashboard/HUD/
+camui reporting disabled; separate camui warning bridge remains read-only.
+Tmux socket `brickcell-fix1-run`, session `sort`, output `artifacts/fix1-colour-ten`.
+Verified active process and first selected brick brown -> good. This records
+launch, not ten completed sorts or calibrated anomaly performance.
