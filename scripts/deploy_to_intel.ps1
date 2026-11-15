@@ -15,8 +15,15 @@ scp `
     "$RepoRoot\src\brickcell\block_inspector\armd_bridge.py" `
     "$RepoRoot\src\brickcell\block_inspector\cogman.py" `
     "$RepoRoot\src\brickcell\block_inspector\cli.py" `
+    "$RepoRoot\src\brickcell\block_inspector\frax_ik.py" `
     "$RepoRoot\src\brickcell\block_inspector\hardware_cell.py" `
+    "$RepoRoot\src\brickcell\block_inspector\runtime_bus.py" `
+    "$RepoRoot\src\brickcell\block_inspector\runtime_nodes.py" `
     intel:/home/intel/brickcell-deploy/src/brickcell/block_inspector/
+
+scp -r `
+    "$RepoRoot\services\bowl_circle_tracker" `
+    intel:/home/intel/brickcell-deploy/services/
 
 scp -r `
     "$RepoRoot\src\brickcell\inspection" `
@@ -28,7 +35,7 @@ scp `
     intel:/home/intel/brickcell-deploy/configs/rgbd-viewer.json
 
 Write-Host "[2/4] Verifying remote syntax (inspection policy: $InspectionMode) ..." -ForegroundColor Cyan
-ssh intel "/home/intel/brickcell-deploy/.venv/bin/python -m py_compile /home/intel/brickcell-deploy/src/brickcell/block_inspector/armd_bridge.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cogman.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cli.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py"
+ssh intel "/home/intel/brickcell-deploy/.venv/bin/python -m py_compile /home/intel/brickcell-deploy/src/brickcell/block_inspector/armd_bridge.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cogman.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cli.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/frax_ik.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/runtime_bus.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/runtime_nodes.py /home/intel/brickcell-deploy/services/bowl_circle_tracker/bowl_circle_node.py"
 if ($LASTEXITCODE -ne 0) {
     throw "Remote syntax verification failed; deployment was not launched."
 }

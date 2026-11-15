@@ -69,7 +69,6 @@ from brickcell.block_inspector.runtime_nodes import (
     detect_bowl_bounding_circles_top_rgb,
 )
 from brickcell.block_inspector.twin import (
-    PLATE_DROP_SLOT_OFFSETS_XY,
     SO101InspectionTwin,
     SpawnedBlockInfo,
 )
@@ -2235,9 +2234,7 @@ class PhysicalSO101CellExecutor:
 
         # Pre-rank all geometric (brick, yaw, along-offset) candidates without IK first so we can
         # branch-and-bound IK solves and avoid running dozens of GlobalIKSolver calls at Home.
-        candidates: list[
-            tuple[float, PerceivedBrick, float, float, float, np.ndarray]
-        ] = []
+        candidates: list[tuple[float, PerceivedBrick, float, float, float, np.ndarray]] = []
         for b in source_bricks:
             T_wb = b.T_world_block
             p_b = T_wb[:3, 3]
@@ -2912,9 +2909,7 @@ class PhysicalSO101CellExecutor:
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
                 if local_attempt + 1 < max_local_attempts:
-                    self.status_banner = (
-                        f"PickBlock({brick.spec.part_id}): Missed — lifting slightly & retrying in-place"
-                    )
+                    self.status_banner = f"PickBlock({brick.spec.part_id}): Missed — lifting slightly & retrying in-place"
                     continue
                 self.hand_empty = True
                 self.ledger.reset_all()
@@ -2978,9 +2973,7 @@ class PhysicalSO101CellExecutor:
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
                 if local_attempt + 1 < max_local_attempts:
-                    self.status_banner = (
-                        f"PickBlock({brick.spec.part_id}): Slipped — lifting slightly & retrying in-place"
-                    )
+                    self.status_banner = f"PickBlock({brick.spec.part_id}): Slipped — lifting slightly & retrying in-place"
                     continue
                 self.hand_empty = True
                 self.ledger.reset_all()
@@ -3070,7 +3063,9 @@ class PhysicalSO101CellExecutor:
         q_scan_end = self._cached_plate_scan_bounds[1].copy()
 
         self.arm.holding_object = True
-        self.status_banner = "PresentAndSpinAtPlateCamera: Moving held brick directly to Side/Plate D415"
+        self.status_banner = (
+            "PresentAndSpinAtPlateCamera: Moving held brick directly to Side/Plate D415"
+        )
         self.arm.move_to_pose(
             q_scan_start,
             gripper_pct=self._active_close_pct,
@@ -3116,13 +3111,13 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 q_step,
                 gripper_pct=self._active_close_pct,
-                speed=230,
-                acc=36,
+                speed=460,
+                acc=54,
                 timeout_s=5.0,
                 include_gripper=False,
             )
             if not self.arm.dry_run:
-                time.sleep(0.05)
+                time.sleep(0.025)
 
             q_meas, g_meas = self.arm.current_q_and_grip(fresh=True)
             T_held = self.ik.fk_world_body3(q_meas) @ self._T_body3_block_held

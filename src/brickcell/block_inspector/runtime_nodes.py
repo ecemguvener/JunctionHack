@@ -496,7 +496,10 @@ def detect_bowl_bounding_circles_top_rgb(
     hsv = cv2.cvtColor(top_rgb, cv2.COLOR_RGB2HSV)
     role_masks = {
         "good": (
-            (hsv[:, :, 0] >= 40) & (hsv[:, :, 0] <= 84) & (hsv[:, :, 1] >= 50) & (hsv[:, :, 2] >= 55)
+            (hsv[:, :, 0] >= 40)
+            & (hsv[:, :, 0] <= 84)
+            & (hsv[:, :, 1] >= 50)
+            & (hsv[:, :, 2] >= 55)
         ),
         "defective": (
             ((hsv[:, :, 0] >= 145) | (hsv[:, :, 0] <= 10))
@@ -619,7 +622,10 @@ class BowlCircleTrackerNode:
             entry = self._latest_circles.get(role)
             if entry is None:
                 return None
-            if max_age_s is not None and (time.monotonic() - float(entry["monotonic_s"])) > max_age_s:
+            if (
+                max_age_s is not None
+                and (time.monotonic() - float(entry["monotonic_s"])) > max_age_s
+            ):
                 return None
             return np.asarray(entry["xy_world"], dtype=np.float64)
 

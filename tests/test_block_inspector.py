@@ -1718,5 +1718,3 @@ def test_bowl_circle_tracker_babyros_node() -> None:
     finally:
         node.close()
         bus.close()
-
-
