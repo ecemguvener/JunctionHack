@@ -10,10 +10,12 @@ Implements the full decoupled runtime graph over `InProcessRuntimeBus` or `BabyR
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
+import cv2
 import numpy as np
 
 from brickcell.block_inspector.camera_adapters import CamUiReporter, LiveInspectionHudServer
@@ -456,3 +458,215 @@ class CogManInspectorNode:
     def close(self) -> None:
         if self.hud is not None:
             self.hud.stop()
+
+
+def _ray_intersect_plane_z(
+    u: float,
+    v: float,
+    R_wc: np.ndarray,
+    p_wc: np.ndarray,
+    K: np.ndarray,
+    z_world: float = 0.008,
+) -> np.ndarray | None:
+    """Intersect image ray `(u, v)` with horizontal world plane `z = z_world`."""
+    fx, fy = float(K[0, 0]), float(K[1, 1])
+    cx, cy = float(K[0, 2]), float(K[1, 2])
+    if fx <= 1e-6 or fy <= 1e-6:
+        return None
+    ray_cam = np.array([(u - cx) / fx, (v - cy) / fy, 1.0], dtype=np.float64)
+    ray_w = R_wc @ ray_cam
+    if abs(float(ray_w[2])) < 1e-6:
+        return None
+    t = (float(z_world) - float(p_wc[2])) / float(ray_w[2])
+    if t <= 0.05:
+        return None
+    return p_wc + t * ray_w
+
+
+def detect_bowl_bounding_circles_top_rgb(
+    top_rgb: np.ndarray,
+    R_top: np.ndarray,
+    p_top: np.ndarray,
+    K_top: np.ndarray,
+    roles: tuple[str, ...] = ("good", "defective"),
+) -> dict[str, dict[str, Any]]:
+    """Detect green (`good`) and red/pink (`defective`) bowl bounding circles from Top RGB."""
+    if top_rgb.size == 0 or float(top_rgb.std()) < 4.0:
+        return {}
+    hsv = cv2.cvtColor(top_rgb, cv2.COLOR_RGB2HSV)
+    role_masks = {
+        "good": (
+            (hsv[:, :, 0] >= 40) & (hsv[:, :, 0] <= 84) & (hsv[:, :, 1] >= 50) & (hsv[:, :, 2] >= 55)
+        ),
+        "defective": (
+            ((hsv[:, :, 0] >= 145) | (hsv[:, :, 0] <= 10))
+            & (hsv[:, :, 1] >= 55)
+            & (hsv[:, :, 2] >= 80)
+        ),
+    }
+    kernel = np.ones((7, 7), np.uint8)
+    out: dict[str, dict[str, Any]] = {}
+    for role in roles:
+        pmask = role_masks.get(role)
+        if pmask is None:
+            continue
+        clean = cv2.morphologyEx(pmask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+        cnts, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best_area = 0.0
+        best_info: dict[str, Any] | None = None
+        for c in cnts:
+            area = float(cv2.contourArea(c))
+            if area < 1400.0:
+                continue
+            hull = cv2.convexHull(c)
+            (cu, cv_y), radius_px = cv2.minEnclosingCircle(hull)
+            if radius_px < 18.0:
+                continue
+            pw = _ray_intersect_plane_z(float(cu), float(cv_y), R_top, p_top, K_top, z_world=0.008)
+            if pw is None or not (0.06 <= pw[0] <= 0.46 and -0.28 <= pw[1] <= 0.28):
+                continue
+            if area > best_area:
+                best_area = area
+                best_info = {
+                    "xy_world": [float(pw[0]), float(pw[1])],
+                    "center_uv": [float(cu), float(cv_y)],
+                    "radius_px": float(radius_px),
+                    "area_px": float(area),
+                    "hull": hull,
+                }
+        if best_info is not None:
+            out[role] = best_info
+    return out
+
+
+class BowlCircleTrackerNode:
+    """Dedicated BabyROS node tracking green (`good`) & red/pink (`defective`) bowl circles in real time.
+
+    Subscribes to `so101/camera/realsense_1/frame` (and optionally polls a live RGB source on a
+    background thread) and publishes bounding-circle centers on `so101/perception/bowl_circles`.
+    Never issues robot commands.
+    """
+
+    def __init__(
+        self,
+        bus: Any,
+        R_top: np.ndarray,
+        p_top: np.ndarray,
+        K_top: np.ndarray,
+        topic_in: str = CANONICAL_TOPICS["realsense_1_frame"],
+        topic_out: str = CANONICAL_TOPICS["bowl_circles"],
+    ) -> None:
+        self.bus = bus
+        self.R_top = np.asarray(R_top, dtype=np.float64)
+        self.p_top = np.asarray(p_top, dtype=np.float64)
+        self.K_top = np.asarray(K_top, dtype=np.float64)
+        self.topic_in = topic_in
+        self.topic_out = topic_out
+        self._lock = threading.Lock()
+        self._latest_circles: dict[str, dict[str, Any]] = {}
+        self._latest_monotonic_s: float = 0.0
+        self.frames_processed: int = 0
+        self._stop_evt = threading.Event()
+        self._poll_thread: threading.Thread | None = None
+        self._unsub = self.bus.subscribe(self.topic_in, self._on_top_frame)
+
+    def _on_top_frame(self, msg: dict[str, Any]) -> None:
+        rgb = msg.get("rgb")
+        if rgb is None:
+            return
+        ts_arr = msg.get("timestamp_ns")
+        ts_ns = int(np.asarray(ts_arr).reshape(-1)[0]) if ts_arr is not None else None
+        self.process_rgb(np.asarray(rgb, dtype=np.uint8), timestamp_ns=ts_ns)
+
+    def process_rgb(
+        self, top_rgb: np.ndarray, timestamp_ns: int | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Detect bowl bounding circles from `top_rgb` and publish to `so101/perception/bowl_circles`."""
+        ts = int(timestamp_ns) if timestamp_ns is not None else time.time_ns()
+        circles = detect_bowl_bounding_circles_top_rgb(
+            top_rgb, self.R_top, self.p_top, self.K_top, roles=("good", "defective")
+        )
+        now_m = time.monotonic()
+        serializable: dict[str, Any] = {"timestamp_ns": np.array([ts], dtype=np.int64)}
+        stored: dict[str, dict[str, Any]] = {}
+        for role, info in circles.items():
+            entry = {
+                "xy_world": list(info["xy_world"]),
+                "center_uv": list(info["center_uv"]),
+                "radius_px": float(info["radius_px"]),
+                "area_px": float(info["area_px"]),
+                "monotonic_s": now_m,
+            }
+            stored[role] = entry
+            serializable[role] = {
+                "xy_world": np.asarray(info["xy_world"], dtype=np.float64),
+                "center_uv": np.asarray(info["center_uv"], dtype=np.float64),
+                "radius_px": np.array([float(info["radius_px"])], dtype=np.float64),
+            }
+        with self._lock:
+            for role, entry in stored.items():
+                self._latest_circles[role] = entry
+            if stored:
+                self._latest_monotonic_s = now_m
+            self.frames_processed += 1
+        if stored:
+            self.bus.publish(self.topic_out, serializable, transient_local=True)
+        return stored
+
+    def latest_world_xy(self, role: str, max_age_s: float | None = 2.0) -> np.ndarray | None:
+        """Return latest tracked `[x, y]` world center for `role`, or `None` if absent/stale."""
+        with self._lock:
+            entry = self._latest_circles.get(role)
+            if entry is None:
+                return None
+            if max_age_s is not None and (time.monotonic() - float(entry["monotonic_s"])) > max_age_s:
+                return None
+            return np.asarray(entry["xy_world"], dtype=np.float64)
+
+    def latest_circles(self, max_age_s: float | None = 2.0) -> dict[str, dict[str, Any]]:
+        """Return a snapshot copy of all fresh tracked bowl circles."""
+        now_m = time.monotonic()
+        with self._lock:
+            out: dict[str, dict[str, Any]] = {}
+            for role, entry in self._latest_circles.items():
+                if max_age_s is not None and (now_m - float(entry["monotonic_s"])) > max_age_s:
+                    continue
+                out[role] = dict(entry)
+            return out
+
+    def start_polling(self, fetch_rgb_fn: Callable[[], np.ndarray], hz: float = 12.0) -> None:
+        """Run real-time background bounding-circle updates at `hz` Hz."""
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            return
+        self._stop_evt.clear()
+        period_s = 1.0 / max(1.0, float(hz))
+
+        def _loop() -> None:
+            while not self._stop_evt.is_set():
+                t0 = time.monotonic()
+                try:
+                    rgb = fetch_rgb_fn()
+                    if rgb is not None and rgb.size > 0:
+                        self.process_rgb(rgb)
+                except Exception:
+                    pass
+                rem = period_s - (time.monotonic() - t0)
+                if rem > 0.0:
+                    self._stop_evt.wait(rem)
+
+        self._poll_thread = threading.Thread(
+            target=_loop, name="babyros-bowl-circle-tracker", daemon=True
+        )
+        self._poll_thread.start()
+
+    def stop(self) -> None:
+        self._stop_evt.set()
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=1.0)
+        self._poll_thread = None
+
+    def close(self) -> None:
+        self.stop()
+        if self._unsub is not None:
+            self._unsub()
+            self._unsub = None

@@ -76,7 +76,8 @@ def test_viewer_routes_arm_preview_and_full_resolution_crop(monkeypatch, tmp_pat
 
     main = module["main"]
     monkeypatch.setitem(main.__globals__, "ThreadingHTTPServer", Server)
-    monkeypatch.setattr(sys, "argv", ["viewer", "--config", str(config)])
+    events = tmp_path / "evidence/events.jsonl"
+    monkeypatch.setattr(sys, "argv", ["viewer", "--config", str(config), "--events", str(events)])
     main()
     handler = object.__new__(handlers[0])
     responses = []
@@ -118,6 +119,11 @@ def test_viewer_routes_arm_preview_and_full_resolution_crop(monkeypatch, tmp_pat
     payload = json.loads(responses[-1][1])
     assert payload["result"]["decision"] == "REINSPECT"
     assert payload["result"]["channels"] == {}
+    recorded = [json.loads(line) for line in events.read_text().splitlines()]
+    assert len(recorded) == 2
+    assert recorded[-1]["result"]["decision"] == "REINSPECT"
+    assert recorded[-1]["result"]["channels"] == {}
+    assert recorded[-1]["crop"] == [600, 300, 1200, 900]
     handler.path = "/"
     handler.do_GET()
     assert b"CAMERA_NAMES" not in responses[-1][1]

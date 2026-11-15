@@ -9,9 +9,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from so101_architecture.engine import SO101StudioEngine
+from so101_architecture.inspection import MAX_INSPECTION_BODY, inspection_evidence
 
 router = APIRouter(prefix="/api/so101", tags=["SO-101 Architecture"])
 
@@ -122,6 +123,26 @@ class SyncProjectRequest(BaseModel):
         description="Optional custom calibration dictionary to apply directly",
     )
     arm: str = Field(default="follower", description="Arm to apply custom_calibration to")
+
+
+@router.get("/inspection")
+async def get_inspection_evidence() -> dict[str, Any]:
+    return inspection_evidence(get_so101_engine()).snapshot()
+
+
+@router.post("/inspection")
+async def publish_inspection_evidence(request: Request) -> dict[str, Any]:
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > MAX_INSPECTION_BODY:
+            raise HTTPException(status_code=413, detail="Inspection request too large")
+    try:
+        import json
+
+        return inspection_evidence(get_so101_engine()).publish(json.loads(raw))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/state")
