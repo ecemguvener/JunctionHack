@@ -1337,9 +1337,10 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
     try:
         agent = CogManInspectionAgent(executor=exec_cell, ledger=exec_cell.ledger)
         rep = agent.run(instruction="clear source plate", mode="clear_source_plate")
-        assert rep.succeeded is True
-        assert exec_cell.sorted_counts == {"good": 0, "defective": 1}
-        assert exec_cell.batch_sorted_records[0]["sorted_pile"] == "defective"
+        # The uncalibrated Lab fallback cannot authorize either sort pile.
+        assert rep.succeeded is False
+        assert exec_cell.sorted_counts == {"good": 0, "defective": 0}
+        assert exec_cell.batch_sorted_records == []
 
         # Verify stale camera frame during scan aborts safely without sorting (`AGENTS.md`)
         exec_cell._cycles_completed = 0
@@ -1348,6 +1349,9 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
         assert exec_cell._skill_localize_next_cluster_block().succeeded
         assert exec_cell._skill_pick_block().succeeded
         mock_src.fail_stale = True
+        # This subcase tests transport failure before inference, so mock only
+        # model availability to get past the new two-camera preflight.
+        live_insp.has_detector_for_camera = lambda camera: camera in ("plate", "wrist")
         scan_out = exec_cell._skill_present_and_spin_at_plate_camera()
         assert not scan_out.succeeded and "stale_camera_frame" in scan_out.reason
         sort_out = exec_cell._skill_sort_block_to_pile("good")
@@ -1359,6 +1363,8 @@ def test_physical_cell_dark_mark_inspector_dashboard_and_executor(monkeypatch):
 
 def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
     """Verify multi-camera Anomalib wrapper, clamping-overload tolerance, and movable-plate 2D RGB."""
+    pytest.importorskip("jax")
+    pytest.importorskip("frax")
     import cv2
 
     from brickcell.block_inspector.armd_bridge import ArmdFollowerBridge, ArmFaultError
@@ -1475,12 +1481,13 @@ def test_anomalib_multicam_rgb_localization_and_movable_plates() -> None:
     try:
         assert anomalib_insp.has_anomalib_models is True
         assert anomalib_insp.inspector_mode == "anomalib_openvino_cpu"
-        assert anomalib_insp.configured_cameras() == ["plate", "top", "wrist"]
+        assert anomalib_insp.configured_cameras() == ["plate", "wrist"]
 
         r_top = anomalib_insp.evaluate_frame(
             clean_rgb, None, [100, 80, 260, 220], camera_name="top"
         )
-        assert r_top.valid_view and not r_top.flagged
+        assert not r_top.valid_view and not r_top.flagged
+        assert r_top.reason == "camera_excluded_from_mark_inspection"
 
         r_wrist = anomalib_insp.evaluate_frame(
             clean_rgb, None, [120, 90, 320, 250], camera_name="wrist"

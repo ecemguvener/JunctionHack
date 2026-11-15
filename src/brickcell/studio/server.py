@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from .engine import SO101StudioEngine
+from .inspection import MAX_INSPECTION_BODY, inspection_evidence
 
 _UI_EXT_PATH = (
     Path(__file__).resolve().parents[3]
@@ -31,6 +32,10 @@ def handle_studio_get(
 
     Returns `(status_code, content_type, body_bytes, extra_headers)` or `None` if not a studio route.
     """
+    if path == "/api/so101/inspection":
+        payload = json.dumps(inspection_evidence(engine).snapshot()).encode()
+        return 200, "application/json", payload, {"Cache-Control": "no-store"}
+
     qs = parse_qs(query_string)
     project_id = qs.get("project_id", [None])[0]
 
@@ -69,6 +74,12 @@ def handle_studio_post(
 
     Returns `(status_code, response_dict)` or `None` if not a studio route.
     """
+    if path == "/api/so101/inspection":
+        try:
+            return 200, inspection_evidence(engine).publish(body)
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+
     if path in ("/api/so101/sync-project", "/api/studio/sync-project"):
         custom_cal = body.get("custom_calibration")
         arm = str(body.get("arm", "follower"))
@@ -294,6 +305,9 @@ class StudioHTTPHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0"))
+        if not 0 <= length <= MAX_INSPECTION_BODY:
+            self.send_error(413, "Inspection request too large")
+            return
         raw = self.rfile.read(length) if length > 0 else b"{}"
         try:
             body = json.loads(raw.decode("utf-8") or "{}")

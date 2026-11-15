@@ -491,6 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_dep.add_argument("--show-viewer", action="store_true")
     p_dep.add_argument("--dark-mark-threshold", type=float, default=16.0)
     p_dep.add_argument(
+        "--inspection-mode",
+        choices=("patchcore", "lab-dark-mark"),
+        default="lab-dark-mark",
+        help="Default lab-dark-mark sorts using the plate-camera contrast rule without trained models; patchcore explicitly selects calibrated RGB models",
+    )
+    p_dep.add_argument(
         "--rgbd-viewer-config",
         default=str(REPO_ROOT / "configs" / "rgbd-viewer.json"),
         help="Multi-camera Anomalib PatchCore config (top, plate, wrist RGB/depth OpenVINO models)",
@@ -505,7 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_dep.add_argument(
         "--require-anomalib",
         action="store_true",
-        help="Require at least one real trained Anomalib OpenVINO model before deployment",
+        help="Require calibrated plate/wrist Anomalib models; incompatible with lab-dark-mark",
     )
     p_dep.add_argument(
         "--output-dir",
@@ -528,6 +534,7 @@ def build_parser() -> argparse.ArgumentParser:
             daemon_standby_s=a.standby_seconds,
             show_twin_viewer=a.show_viewer,
             dark_mark_threshold=a.dark_mark_threshold,
+            inspection_mode=a.inspection_mode,
             openvino_config_path=a.openvino_model,
             rgbd_viewer_config_path=a.rgbd_viewer_config,
             require_anomalib=a.require_anomalib,

@@ -1,5 +1,7 @@
 param(
     [int]$MaxCycles = 24,
+    [ValidateSet("lab-dark-mark", "patchcore")]
+    [string]$InspectionMode = "lab-dark-mark",
     [string]$OpenVinoModel = "",
     [switch]$DryRun,
     [switch]$SyncOnly
@@ -25,8 +27,11 @@ scp `
     "$RepoRoot\configs\rgbd-viewer.json" `
     intel:/home/intel/brickcell-deploy/configs/rgbd-viewer.json
 
-Write-Host "[2/4] Verifying remote syntax & checking for trained Anomalib OpenVINO models on intel ..." -ForegroundColor Cyan
-ssh intel "/home/intel/brickcell-deploy/.venv/bin/python -m py_compile /home/intel/brickcell-deploy/src/brickcell/block_inspector/armd_bridge.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cogman.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cli.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py && find /home/intel -maxdepth 5 -name 'model.xml' 2>/dev/null || true"
+Write-Host "[2/4] Verifying remote syntax (inspection policy: $InspectionMode) ..." -ForegroundColor Cyan
+ssh intel "/home/intel/brickcell-deploy/.venv/bin/python -m py_compile /home/intel/brickcell-deploy/src/brickcell/block_inspector/armd_bridge.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cogman.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/cli.py /home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py"
+if ($LASTEXITCODE -ne 0) {
+    throw "Remote syntax verification failed; deployment was not launched."
+}
 
 Write-Host "[3/4] Ensuring Station Twin Dashboard (:8096) is focused on the Intel bench screen ..." -ForegroundColor Cyan
 @'
@@ -47,7 +52,7 @@ if ($SyncOnly) {
     exit 0
 }
 
-$ExtraArgs = "--max-cycles $MaxCycles --rgbd-viewer-config /home/intel/brickcell-deploy/configs/rgbd-viewer.json"
+$ExtraArgs = "--max-cycles $MaxCycles --inspection-mode $InspectionMode --rgbd-viewer-config /home/intel/brickcell-deploy/configs/rgbd-viewer.json"
 if ($DryRun) {
     $ExtraArgs += " --dry-run"
 }

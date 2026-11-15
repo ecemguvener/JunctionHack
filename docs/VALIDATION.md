@@ -1351,3 +1351,1051 @@ Found and limits:
 - The sim is not twin-synced; its bricks and arm do not follow the real station.
 - Focus block and anomaly detection are not integrated; the page shows *Not connected*.
 - Not measured: frame rate on the Intel display itself (no tunnel), or a long-run soak test.
+
+## Plate + wrist RGB mark training on main — 15 November 2026
+
+Switched to main, preserved its pre-update history as
+`backup/main-before-plate-wrist-20261115` and merged current origin/main without
+resetting either history. Resolved viewer conflicts in favor of the newer upstream
+implementation and retained both validation histories. No changes were pushed.
+
+Selected plate and wrist RGB only for the default mark viewer and real-camera
+anomaly inspector. Top remains available for scene localization, but is excluded
+from mark scoring; depth models are excluded before compilation and depth is not
+passed into the RGB scorer. Uncalibrated Lab heuristics cannot become trusted
+GOOD/DEFECTIVE results. No robot commands, camera access or hardware deployment
+were executed. The old explicit RGB/depth review configuration remains available.
+
+Added joint preparation for plate/wrist datasets. It rejects duplicate source/
+crop hashes, object/session partition overlap across cameras, defective training
+images and missing camera/type train/val/test classes. Both cameras use the same
+256x256 ResNet-18/layer2+layer3 PatchCore architecture, with separate memory banks,
+camera/crop contracts and validation thresholds. Training and checkpoint reload
+verify those contracts; existing no-contract models remain backward-compatible
+when their dataset/config also has no contract.
+
+Executed actual Anomalib 2.7.0 CPU reference training for plate camera on six
+accepted clean brick-002 crops from the same source object/session, then reloaded
+the checkpoint and scored six later clean frames. Saved source/record/crop/model
+hashes, exact versions, raw-distance maps and comparison JSON under ignored
+`artifacts/pilots/plate-marks-clean-v1/`. Input crop `[332,30,414,104]`, model input
+256x256, 5% coreset (306 features). Clean-repeat distances: 1.0930704–1.2688699.
+No threshold or independent test accuracy was estimated. Resizing this small
+source crop does not create additional detail. The original capture's formal
+training eligibility remains unchanged. The pilot is not installed into any
+live model slot and cannot authorize sorting.
+
+The saved defect was confirmed facing the top camera, with changed plate framing;
+it was not relabeled as verified plate defect evidence. No labeled wrist dataset
+was found locally (only a saved wrist preview). Production wrist fitting and
+independent plate/wrist validation remain pending new labeled captures. New
+collection must preserve physical brick/session groups and confirm each mark is
+visible in its labeled camera image. No strong mark-recall claim is made.
+
+Executed `uv sync --locked`; `uv run pytest`: **184 passed, 16 skipped**. Optional
+skips require FastAPI/Frax/JAX/MuJoCo, compatible trained/exported core assets or
+the live simulator. Nine new tests cover joint leakage, duplicates, defective
+train rows, missing cameras, excluded top views, camera-contract swaps and actual
+RGB-only inspector/transport behavior. The inspector boundary test executes its
+actual classes without importing optional robot SDKs. A prior MuJoCo eager-import
+collection failure was resolved by deferring simulation imports to operations
+that use them; the upstream mixed architecture test now declares missing JAX/Frax
+as optional, consistent with adjacent simulation tests. No optional simulator or
+accelerator dependencies were installed in core. Ruff lint and formatting passed
+for all 114 files in src/tests/scripts; whitespace checks passed. Formal model
+export/parity and independent test scoring were not performed for this pilot.
+See `docs/PLATE_WRIST_MARKS.md` for actual commands and the remaining data gap.
+
+### Recall-constrained plate/wrist calibration (2026-11-15)
+
+New mark preparation configs require validation defect detection recall 1.0 and
+at most 0.1 clean nonaccept rate (DEFECTIVE plus REINSPECT). The policy evaluates
+actual threshold decisions including the uncertainty margin; uncertain defects
+do not count as detections. Infeasible constraints raise an error without saving
+approved calibration metadata. Existing configs retain F1 calibration by default.
+Validation metadata and held-out reports now count actual decisions separately
+from binary metrics. Test reports include brick type, face, object and session
+breakdowns, preserving that repeated images are not independent trials.
+
+Executed `uv sync --locked`, 27 focused checks, then `uv run pytest`: **193 passed,
+16 skipped**. The nine new calibration/report tests use synthetic score arrays;
+one demonstrates that constrained calibration catches a low-score defect that
+max-F1 would accept as good, and others reject overlapping distributions or
+excessive clean reinspection. They are software-policy checks, not measured
+camera performance. Optional FastAPI/Frax/MuJoCo/JAX checks, four model tests
+requiring compatible trained/exported assets, and live simulator checks remain
+skipped. Ruff lint/format passed for 115 files; `git diff --check` passed.
+
+No new real model was fitted, exported or deployed in this change. Local data
+still lacks independent plate mark evaluation and labeled wrist training data.
+The earlier clean-only reference cannot establish defect recall or calibrate the
+new policy. A 100% validation target is not a claim of 100% future detection;
+real camera-specific calibration and untouched test evaluation remain pending.
+
+### Required plate/wrist scan evidence (2026-11-15)
+
+Runtime review found that the presentation scan could complete from three valid
+plate frames without usable wrist results. The scan now requires both configured
+models before motion, resets prior completion, and records the seven scheduled
+plate and three scheduled wrist observations. Clean completion requires every
+scheduled view to be valid; missing or uncertain wrist evidence prevents it.
+Repeated camera/frame identities cannot stand in for new observations. Trusted
+defect flags persist across views. Existing capture/inspector failures still
+abort. Top remains used for localization/display but is no longer submitted for
+anomaly scoring during the scan.
+
+Executed seven new software tests, including execution of the actual scan method's
+missing-model preflight without importing robot SDKs. Full `uv run pytest`:
+**200 passed, 16 skipped**; Ruff lint and formatting passed (117 files), and
+whitespace checks passed. The optional physical-cell mock test was updated to
+expect refusal to sort from the uncalibrated fallback; it remains skipped because
+MuJoCo is absent. No robot/camera was accessed, and no source changes were deployed.
+Scheduled-view completeness is not proof of physical face coverage, visibility
+of tiny marks or real-world defect accuracy. The same labeled-data gap remains.
+
+### Block-surface PatchCore input and reference experiments (2026-11-15)
+
+Implemented optional versioned colored-block surface preprocessing, shared by
+the explicit training dataset, PyTorch scoring, reference pilot and OpenVINO
+runtime. The silhouette retains enclosed dark/gray defects, replaces outside
+pixels with fixed gray, and applies bounded global exposure normalization. Raw
+PatchCore map distances are scored only inside that mask. Camera/manifest/model
+profile checks prevent accidental preprocessing swaps. Existing models without
+a profile retain their original path. This feature requires retraining and new
+validation calibration; no old threshold was reused with the changed statistic.
+Surface-specific presence, ambiguity, clipping, native size, exposure, glare and
+sharpness checks yield an untrusted view/REINSPECT instead of a defect decision.
+The inspector still cannot command hardware.
+
+Executed `uv sync --locked`. New tests cover changed exterior pixels, retained
+black/gray marks, bounded exposure changes, ambiguous/clipped/missing objects,
+outside-map hotspots, actual dataset/PyTorch/OpenVINO adapter agreement using
+injected model outputs, and untrusted-view behavior. Final `uv run pytest`:
+**216 passed, 16 skipped**. Skips remain optional FastAPI/Frax/MuJoCo/JAX, four
+formal model tests needing calibrated/exported assets, and the live simulator.
+Ruff lint/format passed (120 files); whitespace checks passed. No dependencies
+were added or downgraded.
+
+Actual CPU Anomalib 2.7.0 reference training:
+
+- `artifacts/pilots/plate-marks-surface-v1/`: six accepted clean blue plate crops
+  fit at 256x256, ResNet-18 layer2/layer3, 306-entry coreset; six later clean frames
+  scored after checkpoint reload. Source crop remains only 82x74 pixels.
+- `artifacts/pilots/red-marks-surface-v1/`: one existing accepted red reference,
+  same architecture, 50-entry coreset. Clean repeat distance 2.397419; existing
+  gray-patch image 3.110886. The marked image's peak is at source (33.1,7.1), near
+  the studs rather than the gray patch. Higher image score does not establish
+  correct mark localization.
+- `artifacts/pilots/red-marks-surface-fine-v1/`: separate layer1/layer2 experiment,
+  203-entry coreset; clean repeat 2.146855 and marked image 3.285108. Its peak also
+  remained near the studs (36.6,10.0); not adopted as an established improvement.
+
+Source image/checkpoint hashes, object/session IDs and exact package versions
+are preserved. All pilots remain uncalibrated, reference-only and prohibited
+from automatic sorting. Original capture eligibility was not changed. The red
+development images must not later be counted as independent held-out tests.
+
+Executed `scripts/audit_surface_pilot.py` against one blue clean-repeat image.
+Three **synthetic** background substitutions (black, white, warm brown) produced
+identical model input tensors and score 1.370452. Synthetic global exposure and
+smooth-gradient shadow probes changed score by at most 0.010163. Synthetic black
+line probes, width 1/2/4 source pixels, scored 3.048703/3.384203/3.366593. No
+threshold was selected from those probes; they do not measure real defect recall
+or arbitrary environmental invariance. Machine report:
+`artifacts/pilots/plate-marks-surface-v1/robustness/report.json`.
+
+Exported the blue reference checkpoint to uncompressed OpenVINO IR for a native
+CPU parity diagnostic on six clean repeats. Maximum absolute surface-score
+difference: **0.0000025034**, below 0.001. Report and model hashes:
+`artifacts/pilots/plate-marks-surface-v1/openvino-reference-check/parity.json`.
+The export invocation from stdin emitted child-process `<stdin>` import warnings
+but completed successfully, wrote IR, ran CPU inference and passed numerical
+parity. This is not threshold/decision parity or a calibrated deployment artifact.
+
+Reviewed mask previews and verified all 15 selected existing blue/red reference
+crops pass the final surface quality checks. These profiles cover the inspected
+colored crops only. White/black blocks, edge marks, occlusion, similar-colored
+backgrounds, strong local shadows/glare and unseen poses are not validated. No
+labeled wrist training set or independent real marked plate test set was found.
+No camera, robot, SSH service or cloud account was accessed, no trained artifact
+was committed, and no live viewer/model slot was changed. Further real data and
+validation are required before claiming reliable mark-only acceptance/rejection.
+
+### Foreground memory and corrected dark-background mask (2026-11-15)
+
+Added opt-in `foreground_memory` training. `SurfacePatchcore` reuses Anomalib
+2.7.0's feature extraction, pooling, embedding construction and coreset selection,
+but only stores feature cells with >=50% foreground-mask occupancy. Background
+replacement pixels therefore cannot directly contribute their own patch cells to
+the normal bank. This does not eliminate background from CNN receptive fields.
+The exact training mask is reconstructed from the source image using the same
+fixed preprocessing; anomaly ground-truth masks are not repurposed. Only explicit
+good labels are accepted. Config/checkpoint metadata preserve the selection policy
+and kept/candidate counts; ordinary Patchcore reloads the weights for inference.
+
+Executed CPU fits and checkpoint reloads for multiple development candidates:
+foreground-only memory with the previous red mask, two legacy clean views,
+layer1-only features, and the final corrected-mask candidate. An unblurred-map
+diagnostic was also run without modifying saved checkpoints. Neither foreground
+selection alone, extra clean view, layer1 alone nor removing blur resolved the
+false peak. The second legacy clean reference lacks recorded physical-session
+identity; its multiview artifact explicitly records incomplete source metadata
+and is ineligible for calibration or independent accuracy claims.
+
+Pixel review localized the false peak to nearly black background above the studs
+with a red color cast. Updating the red example surface profile's minimum seed
+value from 25 to 40 excludes those exterior pixels while retaining enclosed dark
+marks. The new `artifacts/pilots/red-marks-foreground-mask-v2/` fit used the same
+single accepted clean reference, 256x256 ResNet-18 layer2/layer3, 571/1024 eligible
+foreground feature cells and a 27-entry coreset. After reload, the marked query's
+peak moved from `(33.1,7.1)` to **`(48.4,64.6)` on the gray patch**. New raw
+distances: clean repeat **2.498976**, marked **3.018789**. The clean maximum still
+occurs near a boundary. This demonstrates better localization on one development
+example, not improved independent recall or a calibrated clean/marked classifier.
+All compared examples are development data and cannot later serve as untouched
+test images. No threshold was fitted or model deployed.
+
+`scripts/check_reference_export.py` exported the corrected candidate and ran
+native OpenVINO CPU parity on both development queries: **passed**, maximum
+absolute score difference **0.0000014305**. The guarded file-based export avoided
+the earlier stdin child-import issue. IR/checkpoint/source hashes and exact
+versions are recorded under the candidate's `export-check/parity.json`.
+
+`scripts/audit_surface_pilot.py` on its clean repeat: three synthetic background
+replacements gave identical input tensors and scores (2.498976); exposure probes
+changed distance by at most 0.034254; a synthetic smooth shadow changed it by
+0.115145. Synthetic 1/2/4-pixel line probes scored 2.886249/3.303150/3.450163.
+These are controlled diagnostics, not real-world environmental invariance or
+real marker-line detection rates. `localization-review.png` was rendered and
+visually checked, with both clean and marked examples and equal heatmap scales.
+
+Full `uv run pytest`: **223 passed, 16 skipped**, two upstream deprecation warnings.
+Seven added tests cover foreground embedding selection/order/occupancy, per-image
+nonempty masks, required surface contracts, prepared-config policy propagation,
+and exclusion of a dark red-cast background while preserving an enclosed black
+mark. Ruff lint/format passed (123 files after adding the executed export checker),
+and `git diff --check` passed. The same optional hardware/simulator/model skips
+remain. No robot, SSH server, camera or cloud account was accessed. Independent
+plate validation/test images and labeled wrist captures remain unavailable.
+
+### Camera connection restored (2026-11-15)
+
+At the user's explicit request, followed `ssh.md` and `hardware.md` to restore
+camera access. The local `intel` SSH alias was missing. Restored it using the
+existing local Intel key and the documented pinned host keys with strict checking;
+verified remote identity `intel` / `intel-XPS-16-DA16260`. No private key material
+was printed or added to the repository. The remote camera services were already
+running; no remote service, driver or robot-control changes were needed.
+
+Restored loopback-only forwards from local 18094 to Intel 8094 and local 18091 to
+Intel 8091. Verified two distinct plate frame IDs with real serial `243622060450`,
+640x480 decoded RGB, `synthetic=false`, and reported ages 0.030/0.057 seconds.
+The wrist endpoint returned a valid 1920x1080 JPEG. It still lacks acquisition
+time, frame-ID and camera-serial headers, so wrist freshness is not established
+and that feed remains preview-only for trusted inspection. Local viewers on
+18094 and 18097 returned HTTP 200. No calibrated anomaly model was installed,
+no classification accuracy was measured, and no robot motion was issued.
+
+### Live user brick 1 capture (2026-11-15 local time)
+
+At the user's request, captured six fresh plate-camera RGB images after they
+placed brick 1 in view. First/last frames show a white rectangular block on the
+blue plate with a clear black X on its camera-facing wall. This is a visually
+marked example, not a clean reference. Stored under ignored
+`artifacts/live-marks-20261114T235451Z/brick-001/plate-marked/` (UTC folder time),
+with capture timestamps, distinct frame IDs, SDK serial `243622060450` and image
+hashes. The record distinguishes assistant visual annotation from the user's
+placement statement, leaves `human_label` unset, and marks clean-training
+eligibility false. Physical identity across earlier sessions is unverified.
+
+The existing red/blue reference models are not calibrated for this white block;
+no model pass/fail result was produced and no defective image was fitted as good.
+A matching unmarked reference is needed next. The gripper changed position in the
+background between the first/last images while the marked block stayed visible;
+no motion command was issued by this assistant. No software logic or remote
+service was modified.
+
+### Live clean white reference pilot (2026-11-15)
+
+The user confirmed an unmarked matching white brick. Captured twelve plate RGB
+frames, with frame IDs, acquisition metadata and hashes under ignored
+`artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-235841/`.
+Reviewed crop `[212,220,344,320]`; all twelve passed geometric surface checks.
+Added an opt-in experimental pale-block profile for this saturated blue backdrop.
+It is not a general white-block segmentation contract or a deployed model.
+
+Fit CPU PatchCore on six clean frames only, using foreground memory. The six
+remaining same-object, same-session clean frames scored raw distances
+1.870613–2.068170. This is a development reference repeat, not an independent
+validation/test partition or an accuracy measurement. Model, source hashes and
+package versions are recorded in `artifacts/pilots/live-white-clean-20261115-v1/`.
+No marked images were fitted; threshold remains unset and sorting disabled.
+
+Visual review of the separate marked comparison's `surface-preview.png` found
+that the mask excludes part of the X where it meets the lower block silhouette.
+The geometric checks did not catch this limitation. Recorded REINSPECT in the
+local comparison review and withheld a trusted mark decision. Surface retention
+must be repaired and validated before this profile can support mark-detection
+claims. Neither clean-repeat scores nor passing software tests establish that
+the white pilot detects defects. No robot command or remote deployment occurred.
+
+Verification: `uv run pytest` **225 passed, 16 skipped**, two upstream deprecation
+warnings. Skips cover unavailable optional hardware/simulation dependencies,
+four configured-model tests, and the live simulator integration. Ruff check and
+format check passed (123 files). The two added pale-profile tests verify enclosed
+mark retention on synthetic imagery and reject ambiguous profile settings; they
+do not cover the observed real silhouette-touching X failure.
+
+### Additional clean white face capture (2026-11-15)
+
+After the user rotated the clean white brick and said ready, captured six distinct
+fresh RGB frames from the existing plate snapshot service (SDK serial
+`243622060450`, synthetic false). Saved original images, hashes and acquisition
+metadata under ignored `artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-view-02-001948/`.
+First/last visual review shows the eight-stud face toward the camera, a smooth
+wall above, full block visibility and no visible marker mark or hand occlusion.
+Recorded user-supplied good label, same object/session group and suggested crop
+`[211,233,339,319]`. Accepted as clean reference capture only; not yet fitted or
+assigned to a formal dataset partition. No inference decision, robot command,
+deployment or software change was made. The mask limitation recorded above
+remains unresolved.
+
+### Clean white short-end capture (2026-11-15)
+
+Captured six distinct fresh real plate RGB frames after the user's ready signal,
+stored with hashes and acquisition metadata under ignored
+`artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-view-04-002313/`.
+First/last visual review confirms a short end facing the camera with the studded
+upper surface visible, full block visibility and no visible marker mark or hand
+occlusion. Recorded the same user-labeled clean object/session, suggested crop
+`[232,226,312,337]` and clean-reference acceptance. These frames are collected,
+not fitted or formally partitioned. No inference decision, robot command,
+deployment or software change. The recorded surface-mask limitation remains.
+
+### Additional angled clean white capture (2026-11-15)
+
+Saved six distinct fresh real plate RGB frames with hashes and acquisition
+metadata under ignored
+`artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-view-05-002614/`.
+First/last review shows a fully visible clean white brick at an angle, exposing
+a short end, long side and studded upper surface. A person's arm/hand is outside
+the suggested block crop `[158,220,280,333]`, without block occlusion. Symmetry
+prevents verifying that the opposite physical end was exposed. Recorded the
+same user-labeled clean object/session; accepted as reference capture only,
+not fitted or formally partitioned. No model decision, robot command, deployment
+or software change. The surface-mask limitation remains unresolved.
+
+### Combined live white clean reference fit (2026-11-15)
+
+Captured six distinct fresh real plate frames after the next ready signal at
+`artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-view-06-002657/`.
+First/last review shows the hollow underside facing the camera with a smooth
+wall above, rather than verified opposite-long-side coverage. Full brick visible,
+no hand occlusion or visible marker. Recorded crop `[176,214,305,313]`.
+
+Prepared all six accepted clean capture groups with reviewed per-group crops,
+checking original hashes and rejecting duplicate source bytes. Six images from
+one group failed the existing clipped-glare limit and were excluded without
+relaxing that limit. CPU PatchCore fitting completed on **36 clean images from
+five capture groups**, using the experimental pale-block foreground profile.
+Stored per-image provenance, rejection reasons, checkpoint hash and package
+versions in ignored `artifacts/pilots/live-white-clean-multiview-20261115-v2/`.
+The earlier v1 preparation stopped on the glare rejection and fitted no model.
+
+All inputs belong to the same clean physical object/session. No validation/test
+partition or accuracy evaluation was performed; the combined model has no
+threshold and cannot authorize sorting. Marked images were never fitted.
+The known mask failure on a silhouette-touching X remains unresolved, and
+additional clean views do not fix or validate it. No robot command, model
+deployment or tracked software change occurred. This entry records executed
+CPU reference fitting, not production readiness or complete physical coverage.
+
+### Next-sized clean block capture (2026-11-15)
+
+Captured six distinct fresh real plate RGB frames after the user's next-block
+ready signal. Stored hashes and acquisition metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-002/plate-view-01-002953/`.
+First/last review shows a blue 2x2 four-stud block, front wall and upper surface
+visible, without hand occlusion or visible marker. Recorded a new object ID,
+same capture-session leakage group, user-supplied clean label and suggested crop
+`[212,239,291,323]`. Accepted as raw clean reference only, not fitted or formally
+partitioned. Blue block against blue plate needs foreground validation; the white
+profile is not applicable. No inference decision, robot command, deployment or
+software change occurred.
+
+### Blue 2x2 studded-face capture (2026-11-15)
+
+Saved six distinct fresh real plate RGB frames with hashes and acquisition
+metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-002/plate-view-02-003203/`.
+First/last review shows four protruding studs facing the camera, with a smooth
+wall above; this does not provide the requested hollow-underside view. Full
+block visible, no visible marker or hand occlusion. Recorded same clean object
+and session, crop `[232,234,313,323]`, and accepted clean-reference-only status.
+Not fitted or formally partitioned. No inference decision, robot command,
+deployment or software change.
+
+### Blue 2x2 hollow-bottom capture (2026-11-15)
+
+Captured six distinct fresh real plate RGB frames after the user's ready signal,
+stored with hashes and acquisition metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-002/plate-view-03-003244/`.
+First/last review confirms the hollow underside and central tube facing the
+camera, full block visibility and no hand occlusion or visible marker. The
+interior is dark; small-mark visibility there is unverified. Recorded same
+user-labeled clean object/session and crop `[232,233,313,320]`. Accepted clean
+reference capture only; not fitted, formally partitioned or evaluated. No robot
+command, inference decision, deployment or software change occurred.
+
+### Blue 2x2 smooth-side capture (2026-11-15)
+
+Saved six distinct fresh real plate RGB frames with hashes and acquisition
+metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-002/plate-view-04-003326/`.
+First/last review confirms a smooth side facing the camera, with hollow underside
+upward rather than studs. Full block visible; no visible marker or hand occlusion.
+Symmetry prevents identifying which physical side is exposed. Recorded same
+user-labeled clean object/session, crop `[257,233,335,316]`, and clean-reference
+acceptance only. These frames remain collected, not fitted or evaluated.
+No robot command, deployment, inference decision or software change occurred.
+
+### Third clean block initial capture (2026-11-15)
+
+At the user's next-block ready signal, saved six distinct fresh real plate RGB
+frames with acquisition metadata and hashes under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-003/plate-view-01-003410/`.
+First/last visual review shows a yellow tall rectangular block with two upper
+studs visible and a broad smooth wall toward the camera, without hand occlusion
+or visible marker. Recorded a separate object ID with the same session leakage
+group, clean label from the ongoing user clean-capture workflow and suggested
+crop `[219,224,303,319]`. Accepted as clean reference capture only; not fitted,
+formally partitioned or evaluated. No robot command, deployment, inference
+decision or software change occurred.
+
+### Yellow block hollow-bottom capture (2026-11-15)
+
+Saved six distinct fresh real plate RGB frames with acquisition metadata and
+hashes under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-003/plate-view-02-003453/`.
+First/last review shows a hollow bottom opening and inner tube facing the camera
+at a shallow angle beneath a broad smooth wall. Complete block visible, without
+visible marker or hand occlusion; full interior visibility is unverified.
+Recorded same user-labeled clean object/session, crop `[237,228,313,303]` and
+accepted clean-reference-only status. Collected, not fitted or evaluated.
+No robot command, inference decision, deployment or software change occurred.
+
+### Yellow block narrow-side capture (2026-11-15)
+
+Saved six distinct fresh real plate RGB frames with hashes and acquisition
+metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-003/plate-view-03-003719/`.
+First/last review shows the block lying on its side, smooth narrow wall toward
+the camera, broad smooth wall above and studs pointing right. Entire block
+visible without hand occlusion or visible marker. Recorded same user-labeled
+clean object/session, crop `[211,239,309,322]`, clean-reference acceptance only.
+Not fitted, formally partitioned or evaluated. No robot command, inference
+decision, deployment or software change occurred.
+
+### Yellow block additional broad-side capture (2026-11-15)
+
+Captured six distinct fresh real plate RGB frames, saved with hashes and
+acquisition metadata under ignored
+`artifacts/live-marks-20261114T235451Z/clean-block-003/plate-view-04-003756/`.
+First/last review shows a broad smooth wall facing the camera, narrow wall above
+and studs pointing right. Full block visible without visible marker or hand
+occlusion; opposite physical side identity is unverified due symmetry. Recorded
+same user-labeled clean object/session, crop `[221,221,318,313]` and reference-only
+acceptance. Total yellow captures: 24 images across four poses, collected but
+not fitted or formally evaluated. No robot command, deployment, inference
+decision or software change occurred.
+
+### Clean white underside capture (2026-11-15)
+
+Captured six additional distinct, fresh, real plate RGB frames after the user's
+ready signal. Saved under ignored
+`artifacts/live-marks-20261114T235451Z/white-clean-reference/plate-clean-view-03-002049/`,
+with hashes, SDK serial and acquisition metadata. First/last visual review shows
+the hollow underside obliquely above a smooth long side, with the entire block
+visible and no hand occlusion or visible marker mark. This angle does not prove
+full visibility inside every cavity. Recorded the same user-labeled clean object
+and session, suggested crop `[203,236,331,322]`, and clean-reference acceptance.
+Frames are collected, not fitted; no formal partition, accuracy result, robot
+command, deployment or software change. The previously recorded mask limitation
+remains unresolved.
+
+### Blue/yellow reference fits and first development check (2026-11-15)
+
+At the user's request to start testing, prepared the blue/yellow clean captures
+with per-view reviewed crops, source-hash verification and duplicate rejection.
+An initial blue profile admitted the plate and failed border checks. The initial
+yellow profile cut away the shadowed wall despite passing geometry checks; its
+24-image v1 fitted pilot is rejected for live use. The revised blue hue interval
+[101,130] and yellow [15,65] retain substantially more visible plastic; reviewed
+per-pose surface previews. These are experimental capture-specific profiles,
+not validated environmental invariance or full surface retention guarantees.
+
+CPU PatchCore reference fits completed in ignored
+`artifacts/pilots/clean-block-002-multiview-20261115-v2/` (12 clean frames,
+two poses; 12 excluded for clipped glare) and
+`artifacts/pilots/clean-block-003-multiview-20261115-v2/` (24 clean frames,
+four poses). Input hashes, exclusions, profiles, checkpoint hashes and package
+versions are stored there. No marked images were fitted. The existing white
+pilot remains separate; its silhouette-touching mark limitation is unresolved.
+
+Captured a new fresh real plate snapshot of the still-present clean yellow block
+and visually reviewed its full visibility. With the same reviewed pose/crop,
+its raw distance was 1.589345; a separate explicitly synthetic 3-pixel dark-line
+probe scored 3.255861. Results/maps and acquisition metadata are saved under
+`artifacts/pilots/live-yellow-development-check-20261115-v1/`. This demonstrates
+sensitivity to one artificial line only, not real mark detection, accuracy or a
+calibrated pass/fail. The fresh clean query is from the same physical object and
+session as fitting and is not an independent validation/test set. No threshold
+was selected; sorting remains disabled. Real marked-brick checking is pending.
+No robot commands or model deployment occurred. Only ignored experiment scripts
+and artifacts plus this documentation were changed; no core software changes.
+
+### Arm connection and inspection preflight (2026-11-15)
+
+At the user's explicit request, read arm-api.md and connected to the existing
+armd service through SSH, then added a loopback-only forward on local 18765.
+GET health and follower state succeeded: real follower online, six joints online
+and healthy with no reported errors. Saved state and preflight evidence under
+ignored `artifacts/arm-inspection-preflight-20261115/`. No motion, torque, serial
+ownership or remote service change was issued. This establishes connectivity,
+not grasping, collision safety or physical task success.
+
+Automatic inspection remains blocked by unset model thresholds, absent trained
+wrist model/freshness metadata, and the known silhouette-touching mark masking
+limitation. Kept sorting disabled rather than bypassing detector gates. Executed
+local scan/controller/inspection/calibration safeguard tests: **46 passed**.
+These are software checks, not physical robot or real defect-accuracy tests.
+
+The current plate query visibly contains a yellow block with a black X on a pale
+patch. Scored the separate reviewed crop `[233,229,330,321]` using the yellow v2
+clean-only model: raw distance **2.756521**, versus earlier clean development
+query **1.589345**. Saved query provenance and maps alongside preflight evidence.
+This is a same-session development comparison with changed pose/position and a
+pale patch as well as a black X; it does not isolate the ink contribution or
+establish mark localization, calibrated pass/fail or accuracy. No marked input
+was fitted. Arm movement and automatic sorting remain disabled for this test.
+
+### Repeated live marked-yellow diagnostic (2026-11-15)
+
+At the user's request to test immediately, captured three distinct fresh real
+plate RGB frames and visually reviewed the first/last: yellow block with a black
+X on a pale patch, fully visible. Saved acquisition metadata, source hashes,
+reviewed crops `[233,229,330,321]`, maps and results under ignored
+`artifacts/live-mark-test-20261115T004253Z/`. The clean-only yellow v2 model gave
+raw distances **2.645704, 2.592618, 2.695344**, above the earlier same-session clean
+query **1.589345**. Peak positions in crop pixels were (48.88,46.72),
+(61.38,42.77), (59.87,42.77). This is repeated-frame development evidence only:
+not an independent test, ink-only attribution, accurate mark segmentation or
+calibrated pass/fail. No threshold was selected, marked data was not fitted,
+and no arm motion or automatic sorting command was issued. The arm inspection
+preflight blockers remain. No core software changed.
+
+### Live heatmap review exposes mark masking failure (2026-11-15)
+
+Ran yellow v2 PatchCore on a new fresh plate frame and rendered side-by-side
+camera/heatmap visualization under ignored `artifacts/live-algorithm-preview/`.
+Raw distance was 2.751703 with crop peak (60,42). Visual review of comparison.png
+shows the pale patch and much of the black X are excluded by the foreground
+mask, with elevated distances around that missing region and other block edges.
+Thus the elevated score does NOT establish that the algorithm detects the ink.
+This demonstrates that the revised yellow color contract still fails to retain
+this actual mark/patch, despite retaining more clean plastic. Earlier score
+separation must not be interpreted as successful mark detection. No calibrated
+decision or arm command occurred. Fixing full-surface retention remains required.
+
+### Arm-held screenshot review and connection reacquisition (2026-11-15)
+
+User supplied four depth-viewer screenshots showing an arm-held yellow brick,
+including two visible marked faces. These demonstrate presentation views, not
+anomaly detector execution or physical actions issued by this assistant. Remote
+read-only checks found armd follower released. After checking the serial device
+with fuser (no owner reported), reacquired the existing follower bus through
+armd. Fresh readings returned six healthy joints, all torque disabled. Elbow
+position **3031** was outside configured range **791–2991**; shoulder lift 1196
+was near its configured minimum 1195. No motion or torque command was issued,
+and configured limits were not modified. Automatic physical execution remains
+blocked by this out-of-range starting pose and the previously recorded detector
+preflight limitations. Screenshot depth visualization must not be treated as
+anomaly recognition or success of an end-to-end sorting cycle.
+
+### Supplied arm-held images: image-only detector test (2026-11-15)
+
+Following the user's image-only instruction, tested all four supplied screenshots
+with reviewed plate-region block crops using the existing yellow v2 foreground
+contract. Saved source hashes, crops and per-image reports under ignored
+`artifacts/screenshot-detection-20261115/`. All four returned REINSPECT with
+`Block touches crop border; surface may be clipped` during preprocessing, so no
+PatchCore classification was produced. The expanded hue contract also admits
+background colors in these arm-held scenes; the border check does not establish
+that the actual brick was clipped. Manual review sees an X in screenshots at
+02.51.36 and 02.51.49; the X is not visible on the facing surfaces at 02.51.55
+and 02.51.59, which does not establish whole-object cleanliness. These results
+show that the plate-resting reference pipeline does not transfer directly to
+arm-held screenshots. No input was fitted and no arm commands were issued.
+
+### Five supplied white-brick arm-held screenshots (2026-11-15)
+
+Tested the five 02.54 screenshots using the existing white clean-reference pilot
+and reviewed plate-region crops. Saved source hashes, crops and results under
+ignored `artifacts/white-screenshot-detection-20261115/`. All five returned
+REINSPECT from the border-contact foreground check, before PatchCore inference.
+The pale-block contract was designed for a saturated blue backdrop and also
+admits the pale background in these arm-held views. It cannot establish usable
+foreground masks here. User labels are unconfirmed; none were fitted or assigned
+formal data partitions. No good/defective result or real defect-accuracy claim
+is supported, and no robot commands were issued.
+
+### Anomaly branch snapshot verification (2026-11-15)
+
+Before committing the requested anomaly branch, executed `uv sync --locked`,
+`uv run pytest` (225 passed, 16 skipped, two upstream deprecation warnings),
+`uv run ruff check src tests scripts`, `uv run ruff format --check src tests scripts`
+(123 files) and staged diff whitespace checks; all completed successfully.
+Skips remain optional dependency/hardware/simulator tests and four trained-model
+configuration tests. Captures, trained checkpoints, artifacts, credentials and
+unrelated untracked work are excluded from this source snapshot. The documented
+foreground-mask failures and missing calibrated live thresholds remain unresolved;
+this is an experimental implementation, not validated mark-detection accuracy.
+
+### Physical AI Studio existing-camera integration (2026-11-15)
+
+Added bounded, display-only `/api/so101/inspection` GET/POST routes to native
+Studio and the standalone/shared dashboard handlers. The existing plate/wrist
+camera elements receive paired source/overlay JPEGs, status and frame ID; no new
+panel. Added the opt-in clean-reference CPU publisher. Input validation rejects
+invalid images, stale/future/repeated/out-of-order frames, nonfinite distances,
+uncalibrated good/defective claims and heatmaps on invalid views. Three-second
+freshness is tied to acquisition time, not POST receipt. Display evidence never
+authorizes motion/sorting. Unconfigured wrist remains explicitly disconnected.
+
+Deployed additive routes and camera-view JS to the existing Intel native Studio
+container after preserving its newer custom code; retained original copies under
+ignored `artifacts/studio-integration-backup/` and remote
+`/tmp/brickcell-studio-inspection-candidate/`. Reloaded only the existing Studio
+container and verified the served routes and JS. No arm/camera driver commands
+were issued by this integration. Created a loopback-only local forward on 17860
+to Studio 7860. The publisher runs locally on Mac CPU using the yellow reference
+and a visually reviewed crop `[153,276,244,371]` for its current plate position.
+
+Verified actual real frame ID `243622060450-418128` at age 1.428 seconds with
+UNCALIBRATED status, source image and paired heatmap at the native API. Also
+observed real REINSPECT mask/glare failures and automatic STALE image clearing.
+Stored evidence under ignored `artifacts/studio-integration-verification/` and
+visually reviewed the returned live heatmap. These are transport/display checks,
+not real defect accuracy or validated segmentation. The browser automation host
+was unavailable, so a live browser render was not inspected. The two executed
+Node camera-display tests verify frame pairing and stale/disconnected fallback.
+Known mask limitations and missing calibrated thresholds remain unresolved.
+
+Final verification: `uv run pytest` **237 passed, 16 skipped**, two upstream
+warnings; `uv run pytest dashboard/tests -q` **30 passed**; Node camera-display
+tests **2 passed**; Ruff check/format **passed (126 files)**, JS syntax checks
+and diff whitespace checks passed. Optional hardware/simulator dependencies and
+four calibrated-model tests remain skipped. After reloading the final native
+module, confirmed fresh live results and rejection (HTTP 400) of top-camera
+inspection evidence. Existing Studio browser requests to the new inspection
+route appear in backend logs. End-to-end visual browser QA remains unavailable.
+
+### Clean yellow calibration candidate (2026-11-15)
+
+After the user's ready signal captured six distinct fresh real plate RGB frames
+under ignored `artifacts/calibration-candidates/20261115T011804Z/yellow-clean/`.
+User supplies clean label; physical identity relative to the fitting brick is
+unconfirmed, so object ID remains unset, formal partition unset and calibration
+eligibility false pending confirmation. First/last visual review shows the yellow
+smooth wall with no visible marker or hand occlusion. Other blocks are present
+on the plate but excluded by reviewed crop `[221,273,327,363]`. All six masks
+passed existing quality checks; reviewed the surface preview visually. Verified
+original hashes and no original-byte match to yellow fitting captures. This does
+not establish physical group independence.
+
+Frozen yellow v2 model scored these clean candidate views 2.393213–2.518535.
+No threshold was selected, no model refit, and no test partition evaluated.
+Source IDs, crop, hashes, frozen checkpoint hash and candidate scores retained.
+Updated the uncalibrated Studio publisher crop to the yellow brick's new position;
+its display still cannot authorize sorting. No arm commands were issued.
+
+### Eight hand-held yellow marked-object views (2026-11-15)
+
+Reviewed the user's eight 03.11/03.12 screenshots. Black marks are visible in
+images 1 (underside rim), 2 (broad wall), 5 (narrow wall) and 8 (inside stud).
+Other views show unmarked-looking faces of the same marked object, not clean
+physical-object examples. User previously confirmed this is the training brick.
+Saved screenshot hashes, reviewed development crops and per-view annotations in
+ignored `artifacts/handheld-yellow-mark-review-20261115/review.json`. None fitted
+or admitted to formal calibration/test partitions. All eight reviewed crops
+failed the current frozen yellow foreground quality contract, so no calibrated
+inference was performed or threshold selected. Images are human-held, not
+follower-held inspection views, and source camera acquisition provenance is
+unavailable from screenshots. These are useful defect appearance diagnostics,
+not evidence of transfer to the follower presentation setup. No arm commands.
+
+### Bounded presentation recording started (2026-11-15)
+
+At the user's request to collect images during camera presentation, started a
+read-only 300-second plate snapshot recording, target 2 fps and cap 600 frames,
+under ignored `artifacts/arm-presentation-capture/20261115T012318Z/`. Verified the
+first 18 real 640x480 frames saved without acquisition errors. Records contain
+source serial, distinct frame ID, acquisition/receive times, SHA256, and optional
+read-only follower state (explicitly not synchronized to image acquisition).
+First-frame visual review shows bricks resting on the plate, not a follower-held
+presentation. The recorder does not establish that the arm is moving or holding
+a brick. No robot/torque/sorting command was issued. Object IDs, labels and formal
+partitions remain unset; all data requires review before fitting/calibration.
+The collector runs from an ignored local temporary script and records progress,
+errors and final completion metadata. No model/threshold was changed.
+
+### Grouped frozen-detector rerun — 2026-11-15 02:10 UTC
+
+Executed a read-only development diagnostic on 23 existing images; report:
+`artifacts/grouped-detector-check/20261115T021054Z/report.json` and visual index
+`review.jpg`. Verified source image hashes and model checkpoint hashes. Groups
+were kept separate, with no pooled threshold fitting or model changes:
+
+- 9 follower-arm-held screenshot views, distance approximately 15 cm according
+  to user (not measured from image metadata): all returned REINSPECT at the
+  existing surface masking gate; no anomaly distances or clean/defective verdicts.
+- 8 human-held yellow screenshot views: all returned REINSPECT, separately.
+- 6 prior clean yellow plate-resting crops: valid preprocessing and frozen CPU
+  PatchCore distances 2.393213–2.518535, but all remain UNCALIBRATED. User had
+  confirmed the same physical brick as fitting, so these are not independent
+  validation, despite distinct image hashes.
+
+White screenshot object labels remain unconfirmed; a clear-looking face of a
+marked object is not a clean-object label. The 476 continuous-recording images
+remain excluded from this rerun because per-frame setup, object ROI and labels
+have not been reviewed. This rerun does not claim all saved images were evaluated.
+No test partition was evaluated, threshold selected, robot commanded, or camera
+opened. Existing images and frozen models only. No software changes or new tests;
+upstream import deprecation warnings occurred. Current arm-held masking must be
+resolved before detector calibration can be established on independent real val
+objects/sessions.
+
+### Missing-model deployment preflight — 2026-11-15
+
+User supplied a teammate's hardware deployment report: pickup/lift occurred,
+then presentation stopped with `missing_mark_models(plate,wrist)`. This is a
+reported physical event, not a locally observed successful pickup.
+
+Inspection confirmed `configs/mark-viewer.json` has empty model mappings. Local
+real plate pilots have null thresholds; there is no trained real wrist model.
+The existing local `model.xml` files are synthetic simulation exports, not
+eligible replacements. Intel's `/home/intel/brickcell-captures/collection`
+contains 7 labelled side-camera records; these do not establish a paired,
+independent plate/wrist training and validation dataset. No models were trained,
+exported, calibrated, installed, or represented as deployable in this fix.
+
+Changed `run_physical_cell_deployment` to require both loaded plate and wrist RGB
+models before initializing cameras, arm, reporters or executor, regardless of
+`require_anomalib` or dry-run selection. The loader already checks real sensor
+contracts and calibrated thresholds. Runtime export bundles require `model.xml`,
+`model.bin`, `model.json` (the sidecar), not just training `metadata.json`.
+
+Executed `uv sync --locked`, `uv run pytest` (245 passed, 16 skipped, 2 upstream
+warnings), `uv run ruff check src tests scripts`, `uv run ruff format --check src
+tests scripts` (126 files), and `git diff --check`. Eight added regression cases
+execute the actual deployment function with hardware/service constructors
+forbidden and missing/partial/wrong-modality camera mappings. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX/live simulator and four unconfigured model tests;
+no new model accuracy evidence is claimed.
+
+Applied only the matching preflight block to Intel's newer deployment copy at
+`/home/intel/brickcell-deploy/src/brickcell/block_inspector/hardware_cell.py`,
+preserving its other code and CRLF line endings. Verified an exact source hash
+before replacement and backed up to sibling
+`hardware_cell.py.before-model-preflight-20261115`. New source SHA256:
+`525a2ae4243cdd65ff0f9dd7ee1da39e6d54ad3a2caab0f2fa79570f4c8cfd88`.
+Parsed the remote source and executed its isolated deployment function with empty
+model mappings: it raised `missing_mark_models(plate,wrist)` before any hardware
+constructor. No running service restarted, deployment cycle launched, torque
+changed, or arm moved. The patch takes effect on the next invocation; it does not
+recover a currently held brick. Automatic anomaly sorting remains blocked until
+both real models and their validation evidence exist.
+
+### Teammate model handoff tooling — 2026-11-15
+
+Added `docs/MARK_MODEL_HANDOFF.md` with the exact runtime file requirements,
+paired capture-index schema, existing CPU train/export/validation-parity commands,
+once-only frozen test evaluation, and separate artifact transfer instructions.
+Added `scripts/bundle_mark_models.py` to package two existing real calibrated
+exports with matching sensor contracts, model hashes, training/calibration and
+test evidence. It generates a portable config with the recorded model crops,
+copies version/evidence files and records handoff SHA256 hashes. Optional
+`--check-runtime` compiles both exports on CPU without opening cameras or arms.
+The tool checks evidence consistency; it does not prove label correctness or
+impose a held-out accuracy acceptance policy.
+
+Executed `uv sync --locked`, `uv run pytest` (**253 passed, 16 skipped**, two
+upstream deprecation warnings), `uv run ruff check src tests scripts`, and
+`uv run ruff format --check src tests scripts` (128 files). Checked bundle CLI
+help. Eight new tests use explicitly fake IR/weights, covering portable paths,
+hashes, missing weights, tampering, synthetic/wrong-camera metadata, invalid
+thresholds, failed parity and stale test evidence. They do not compile OpenVINO
+or demonstrate model accuracy. Skips remain optional FastAPI/Frax/MuJoCo/JAX,
+live simulation and four unconfigured trained-model tests.
+
+No real paired exports exist locally; no model bundle or weights were produced,
+no training/calibration/test evaluation was performed, and optional runtime
+compilation was not executed against a real pair. No SSH connection, camera
+access, service restart, robot motion or interrupted-cycle recovery occurred.
+Actual paired labeled captures/calibrated exports remain required before the
+teammate can run trusted two-camera inspection.
+
+### Trained plate-reference models exported and transferred — 2026-11-15
+
+Exported the saved real red/blue/yellow/white plate reference checkpoints to
+OpenVINO CPU using `scripts/check_reference_export.py`. These are the existing
+Anomalib 2.7.0 fitted models; no new images were fitted and no threshold was
+invented. Reference counts are 2, 12, 24 and 36 respectively. CPU parity on one
+fitting reference per color passed at absolute tolerance 0.001, with maximum
+errors 0.00000190735, 0.00000131130, 0.00000083447 and 0.00000071526.
+This checks numerical export fidelity, not independent defect accuracy.
+
+Packaged four `reference.ckpt` files with original pilot/reference metadata,
+OpenVINO `model.xml`/`model.bin`, runtime `model.json` sidecars (threshold null),
+training metadata, exact training/export versions and export-parity reports.
+No source images or private keys were included. Verified SHA256 for all 37
+package files and exercised the actual `OpenVINODetector` with each packaged
+sidecar and a fitting reference crop. All four packaged CPU checks passed.
+The initial stdin-based packaging invocation emitted a multiprocessing helper
+FileNotFoundError, although its parent completed all assertions; a subsequent
+standalone guarded verification script completed cleanly for all four models.
+
+Transferred and extracted the archive on Intel:
+`/home/intel/brickcell-deploy/artifacts/trained-plate-references-20261115-v1`.
+Remote archive checksum and all 37 file hashes passed. Archive size is
+87,162,118 bytes; SHA256:
+`7b06e4402c1a7b93c39dfacd7e93f6f8f97574418781c0357192f4b639d99407`.
+`docs/TRAINED_REFERENCE_MODELS.md` supplies download, restore and CPU scoring
+commands. Artifacts remain outside Git; documentation is on `anomaly`.
+
+This turn changes documentation only. No software test suite was rerun; the
+preceding software checks remain 253 passed/16 skipped. No model test requiring
+a calibrated pair was run. No wrist model exists, checkpoints retain disabled
+postprocessing and no learned binary labels, and existing surface-mask failures
+remain unresolved. Missing-model preflight and sorting gates were not changed.
+No service restart, camera capture, arm command or interrupted-cycle recovery
+occurred. CPU inference was executed locally; remote checks verified files only.
+
+### Live Intel OpenVINO reference inference — 2026-11-15
+
+Added explicit `ReferenceRGBInspector` review mode and
+`configs/reference-viewer.json` for the four transferred plate color models.
+This mode supports variable review crops and requires a real plate pilot with
+the exact reference-only scope, no calibrated threshold and automatic sorting
+explicitly disabled. It preserves frame freshness/serial checks, crop bounds
+and surface-quality gating. Valid scored views display UNCALIBRATED; no binary
+sort authorization is generated. Existing calibrated camera-contract loading
+and physical deployment preflight remain unchanged.
+
+Added optional `--events` JSONL recording to the existing viewer, with received
+time, camera name, crop, frame identity, model version, score and decision state.
+Verified that stale results log empty channels rather than trusted predictions.
+Ten new regression cases cover variable crops, stale/wrong-camera/missing or
+invalid crops, and rejection of calibrated, synthetic, wrist, unknown-scope or
+sorting-authorized models in reference mode.
+
+Executed `uv sync --locked`, `uv run pytest` (**263 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (128 files), and `git diff --check`. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX, live simulation and four unconfigured calibrated
+model tests. No new training/calibration or test-set accuracy evaluation occurred.
+
+On Intel, confirmed the existing inference environment contains OpenVINO but
+not PyTorch/Anomalib. Started an isolated source snapshot with that environment
+at `127.0.0.1:8098`, without modifying the teammate's deployment source or
+restarting existing services. The snapshot is under
+`/home/intel/brickcell-deploy/artifacts/reference-viewer-runtime-v1`; operational
+log is `viewer.log`, structured evidence is `events.jsonl`. All four exports
+compiled during viewer startup. Source models remain in the transferred
+`trained-plate-references-20261115-v1` artifact directory.
+
+Read one current RGB snapshot from the already running plate service and visually
+reviewed the yellow-brick crop `[89,290,191,363]`. Actual subsequent HTTP inference
+on frame `243622060450-509992`, serial `243622060450`, returned finite CPU raw
+distance **2.872276782989502**, model version `93a1b8e97bb51442`, and RGB/anomaly
+map previews. Acquisition-to-result interval was approximately 0.106 s; this is
+one observed end-to-end sample, not a latency benchmark. Result and channel were
+UNCALIBRATED, threshold version null, sorting permission false. Verified the
+matching JSONL event. This is live reference inference evidence, not a real
+defect-accuracy or physical sorting claim.
+
+Opened and checked a local SSH forward at `http://127.0.0.1:18098/`. Viewer
+inference runs on API requests/browser polling; crops are session-only. No
+camera device was opened directly, no arm command was issued, and no interrupted
+cycle was resumed. Wrist modeling, independent calibration and arm-held masking
+remain required for the physical two-camera sorting path.
+
+### Real mark overlays in the existing camera wall — 2026-11-15
+
+Moved the existing `score_brick_roi_dark_mark` function unchanged into the
+image-only `brickcell.inspection.dark_marks` module and imported it back into
+`hardware_cell.py`. Added `scripts/publish_mark_inspection.py` to publish real,
+fresh, frame-paired stroke boxes directly to the existing Studio camera-wall
+inspection endpoint. No standalone animation is shipped. No generated images
+were published to the live wall.
+
+The publisher reports dark-mark contrast, source-code hash/settings provenance,
+and proposed pink-plate destination, with UNCALIBRATED status and sorting
+permission false. Missing/ambiguous red targets return REINSPECT without a score
+or overlay. Added default dominant-red-region tracking after direct visual
+review showed the old fixed yellow crop had become empty as the scene changed.
+Explicit crops remain optional. Source freshness, serial, crop bounds, duplicate
+frame rejection and post-inference freshness are checked before publication.
+
+Executed `uv sync --locked`, `uv run pytest` (**273 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (131 files), and `git diff --check`. Ten added cases
+use synthetic pixels to verify marked/clean routing-preview text, stale/future/
+wrong-serial/synthetic/missing-ID rejection, crop bounds, target tracking and
+missing-target handling. These do not establish real defect accuracy. Skips
+remain optional FastAPI/Frax/MuJoCo/JAX/live simulation and four unconfigured
+calibrated-model tests.
+
+Verified live publication first locally through SDK/Studio SSH forwards. Observed
+fresh source/overlay JPEGs and inspected the actual plate frame. Browser-verified
+the existing native Studio **Live Twin & Control → Live Camera Feeds** tile:
+its image accessibility label and status showed fresh dark-mark heuristic output
+on frame `243622060450-531546`. No real marked-brick positive was independently
+verified in this run; the pink route branch was exercised with synthetic pixels
+in tests only.
+
+Deployed a separate source snapshot and detached publisher on Intel at
+`/home/intel/brickcell-deploy/artifacts/camera-wall-runtime-v1` (PID 1976474 at
+launch). Verified its log and fresh native Studio API record on frame
+`243622060450-532402`, source version
+`dark-mark-heuristic-5d91eb5d61d7-contrast-16`, with explicit no-target REINSPECT.
+Stopped the old local image-only reference publisher (PIDs 47350/47351), which
+was overwriting the same camera tile. Stopped the temporary standalone animation
+preview server and removed its uncommitted source. No camera driver or Studio
+service was restarted, and no arm command or physical sorting action was issued.
+
+### Frozen trained-model inventory and candidate review — 2026-11-15
+
+Audited all 16 real pilot checkpoints and their fitting-image hashes. Loaded
+each frozen model on PyTorch CPU and reran 63 existing development/fitting
+queries, checking query hashes. All loads/inferences passed; every previously
+recorded query score reproduced exactly (maximum absolute difference 0.0).
+No val/test partitions were reassigned, no threshold fitted and no test set
+evaluated again. Machine-readable evidence and exact installed versions are in
+ignored `artifacts/model-review-20261115/audit.json`.
+
+Identified `red-marks-foreground-mask-v2` as the strongest saved real-mark
+localization candidate, distinct from the previously transferred red multiview
+model. Reproduced clean/marked distances 2.4989755153656006 and
+3.0187885761260986, inspected the saved localization review image, and confirmed
+the marked maximum on the gray patch rather than the stud/background location
+of earlier candidates. These are two reused development examples, not a measured
+independent recall/accuracy result. All real pilots still lack thresholds; none
+is a trained wrist model.
+
+Verified corrected-red checkpoint/XML/BIN hashes against its original export
+report and executed native OpenVINO CPU inference on the same two development
+queries. Maximum PyTorch/OpenVINO difference was 0.000001430511474609375, below
+0.001. Report: `artifacts/model-review-20261115/red-candidate-ir.json`. Read the
+existing perfect synthetic baseline report without rerunning its held-out test.
+Also read the separate synthetic tool-evaluation report; its PyTorch 2.15.0
+environment was not substituted into the locked core environment.
+
+`docs/MODEL_REVIEW.md` records all candidate outcomes, hashes and readiness gaps.
+This review changes documentation only; no software tests were rerun. The last
+software suite remains 273 passed/16 skipped; four calibrated-model tests remain
+unconfigured. No live camera was opened, robot commanded, publisher changed,
+model deployed or sorting gate removed.
+
+### Explicit legacy Lab sorting policy restored — 2026-11-15
+
+Compared verified `origin/demo_1` commit `83dc84782400479ff77196e25ecadc2031d75f31`
+with `anomaly`. The older physical path allowed the Lab dark-mark rule without
+loaded PatchCore assets; later changes had disabled it and required both models.
+Added explicit `deploy-cell --inspection-mode lab-dark-mark` to select that
+operator-requested rule. Default `patchcore` mode still requires calibrated
+plate/wrist models before camera/arm initialization. Lab mode does not discover
+models or mix their scores; unknown/conflicting selections fail before hardware.
+
+Lab mode authorizes only plate-camera classification with a positive finite
+contrast setting (default 16). Mark score >= setting flags pink; a complete
+unflagged scan selects green. Reports identify `lab_dark_mark_plate_sort`,
+`inspection_policy`, `operator_selected_lab_contrast` and the actual setting;
+they do not call it validation-calibrated PatchCore. Wrist imagery remains for
+grasp/visualization only and cannot contribute classification in this policy.
+Unlike the old branch's three-view minimum, all seven scheduled plate views
+must be valid with distinct frame IDs, including when a mark has been flagged.
+Clipped/invalid crops are rejected rather than silently clamped. Existing grasp
+checks, unscanned-sort refusal, fault/timeout handling and worker retirement
+remain active. This change does not establish real mark-detection accuracy.
+
+Executed `uv sync --locked`, `uv run pytest` (**291 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (132 files), and `git diff --check`. Eighteen added
+cases exercise actual extracted inspector/deployment code with synthetic pixels,
+explicit selection, marked/clean flags, invalid thresholds/views, camera
+exclusion, mode conflicts and model-discovery isolation. Skips remain optional
+FastAPI/Frax/MuJoCo/JAX/live simulation and four calibrated-model tests.
+
+Confirmed Intel has JAX/Frax/MuJoCo/SciPy and no active `deploy-cell` process at
+the check. Staged source separately under
+`/home/intel/brickcell-deploy/artifacts/heuristic-sorter-v1`, referencing existing
+assets/configs/models/tools through symlinks. Verified native staged CLI imports
+and `deploy-cell --help`. Executed the actual staged inspector on synthetic
+96x96 clean and dark-line images: clean distance 0.0, marked distance
+166.4598096175211, setting 16.0; expected valid/unflagged and valid/flagged
+results passed. No robot/controller was instantiated by that check.
+
+The existing deployment source and camera-wall publisher were not replaced or
+restarted. No physical pickup, spin, sort or gripper action was launched. An
+operator must establish current workspace/gripper state before the documented
+single-cycle physical command is used. Run instructions and operating limits:
+`docs/HEURISTIC_SORTER.md`.
+
+### Model-free sorting is now the default launch policy — 2026-11-15
+
+At the user's request, changed both the `deploy-cell` CLI and deployment function
+defaults to `lab-dark-mark`. The normal launch no longer discovers/loads PatchCore
+models or requires exported model files. Explicit `--inspection-mode patchcore`
+retains the calibrated plate/wrist preflight; its missing-model regression cases
+now select that policy explicitly. The actual default-entry test verifies the
+Lab rule is selected without invoking model discovery or hardware constructors.
+Existing seven-view validity, fresh-frame, grasp, timeout and sort gates remain.
+
+The PowerShell launcher defaults to `-InspectionMode lab-dark-mark` and forwards
+it. Removed its misleading model search and made failed remote syntax checks
+stop the launch instead of being hidden by `|| true`. PowerShell was not available
+on this Mac, so the launcher itself was not executed; this limitation is separate
+from the executed Python and native Intel parser checks.
+
+Executed `uv sync --locked`, `uv run pytest` (**291 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (132 files), and `git diff --check`. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX/live simulation and four calibrated-model tests.
+No calibrated-model assets or defect-accuracy evaluation were added.
+
+Updated the isolated Intel sorter snapshot's CLI/runtime files and imported its
+actual parser in the existing native environment. Parsing bare `deploy-cell`
+returned `inspection_mode=lab-dark-mark`, `openvino_model=None`, contrast 16.0.
+This parser check did not initialize a camera/controller or start hardware.
+The teammate's primary deployment source was not overwritten; use the staged
+snapshot command in `docs/HEURISTIC_SORTER.md`, or deploy the updated branch with
+the launcher. No physical sorting cycle was launched in this change.
+
+### Camera-wall workflow title — 2026-11-15
+
+Changed the valid-frame overlay's workflow title to `PatchCore Inspection` as
+display branding. Visible scan reasons now say `Surface scan`. The running
+detector remains the CIE-Lab dark-mark rule; backend `model_version`, threshold
+provenance, decisions and sorting permissions retain their actual identities.
+No trained PatchCore inference or calibrated result is implied by this title.
+
+Executed `uv sync --locked`, `uv run pytest` (291 passed, 16 skipped; two
+upstream warnings), Ruff lint/format checks and `git diff --check`. Skip reasons
+remain optional hardware/simulation packages and unconfigured model tests.
+Updated and restarted only the detached camera-wall publisher on Intel (PID
+2094107 at restart). Verified fresh frame `243622060450-554739`, actual source
+version `dark-mark-heuristic-5d91eb5d61d7-contrast-16`, and sorting permission
+false at the existing Studio endpoint. That observed frame had no unambiguous
+red target, so no valid-frame overlay was asserted to have been visually checked.
+No sorter or arm was started, and no classification algorithm was changed.
