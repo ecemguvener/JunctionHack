@@ -3297,7 +3297,7 @@ def run_physical_cell_deployment(
     rgbd_viewer_config_path: str | Path | None = None,
     require_anomalib: bool = False,
     output_dir: str | Path | None = None,
-    inspection_mode: str = "patchcore",
+    inspection_mode: str = "lab-dark-mark",
 ) -> dict[str, Any]:
     """Run the full physical SO-101 3-plate inspection deployment on `intel`."""
     out_root = (

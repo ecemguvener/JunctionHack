@@ -493,8 +493,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_dep.add_argument(
         "--inspection-mode",
         choices=("patchcore", "lab-dark-mark"),
-        default="patchcore",
-        help="patchcore requires both calibrated RGB models; lab-dark-mark explicitly selects the plate-camera Lab contrast sorting rule",
+        default="lab-dark-mark",
+        help="Default lab-dark-mark sorts using the plate-camera contrast rule without trained models; patchcore explicitly selects calibrated RGB models",
     )
     p_dep.add_argument(
         "--rgbd-viewer-config",

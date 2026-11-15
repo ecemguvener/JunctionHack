@@ -130,4 +130,9 @@ def test_deployment_rejects_missing_models_before_opening_hardware(
     }
     exec(compile(module, "<actual-deployment-entry>", "exec"), namespace)
     with pytest.raises(ValueError, match=rf"missing_mark_models\({missing}\)"):
-        namespace[method.name](output_dir=tmp_path, dry_run=dry_run, require_anomalib=False)
+        namespace[method.name](
+            output_dir=tmp_path,
+            dry_run=dry_run,
+            require_anomalib=False,
+            inspection_mode="patchcore",
+        )

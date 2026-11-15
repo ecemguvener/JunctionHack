@@ -2351,3 +2351,33 @@ restarted. No physical pickup, spin, sort or gripper action was launched. An
 operator must establish current workspace/gripper state before the documented
 single-cycle physical command is used. Run instructions and operating limits:
 `docs/HEURISTIC_SORTER.md`.
+
+### Model-free sorting is now the default launch policy — 2026-11-15
+
+At the user's request, changed both the `deploy-cell` CLI and deployment function
+defaults to `lab-dark-mark`. The normal launch no longer discovers/loads PatchCore
+models or requires exported model files. Explicit `--inspection-mode patchcore`
+retains the calibrated plate/wrist preflight; its missing-model regression cases
+now select that policy explicitly. The actual default-entry test verifies the
+Lab rule is selected without invoking model discovery or hardware constructors.
+Existing seven-view validity, fresh-frame, grasp, timeout and sort gates remain.
+
+The PowerShell launcher defaults to `-InspectionMode lab-dark-mark` and forwards
+it. Removed its misleading model search and made failed remote syntax checks
+stop the launch instead of being hidden by `|| true`. PowerShell was not available
+on this Mac, so the launcher itself was not executed; this limitation is separate
+from the executed Python and native Intel parser checks.
+
+Executed `uv sync --locked`, `uv run pytest` (**291 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (132 files), and `git diff --check`. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX/live simulation and four calibrated-model tests.
+No calibrated-model assets or defect-accuracy evaluation were added.
+
+Updated the isolated Intel sorter snapshot's CLI/runtime files and imported its
+actual parser in the existing native environment. Parsing bare `deploy-cell`
+returned `inspection_mode=lab-dark-mark`, `openvino_model=None`, contrast 16.0.
+This parser check did not initialize a camera/controller or start hardware.
+The teammate's primary deployment source was not overwritten; use the staged
+snapshot command in `docs/HEURISTIC_SORTER.md`, or deploy the updated branch with
+the launcher. No physical sorting cycle was launched in this change.

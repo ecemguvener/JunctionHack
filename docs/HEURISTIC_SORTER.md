@@ -1,10 +1,10 @@
-# Opt-in dark-mark sorter
+# Default dark-mark sorter
 
-`deploy-cell --inspection-mode lab-dark-mark` selects the CIE-Lab contrast rule
-used by `origin/demo_1`, without requiring trained PatchCore exports. The default
-remains `patchcore`, requiring calibrated real plate and wrist models.
+`deploy-cell` defaults to the CIE-Lab contrast rule used by `origin/demo_1`,
+without requiring trained PatchCore exports or model files. The explicit
+`--inspection-mode patchcore` option requires calibrated real plate and wrist models.
 
-In the explicit Lab mode, a valid plate-camera view with dark-mark score at or
+In the default Lab mode, a valid plate-camera view with dark-mark score at or
 above `--dark-mark-threshold` (default **16**) flags the held brick for the pink
 plate. A complete scan without a flag selects green. Scores are Lab contrast
 distances, not probabilities; 16 is an operator-selected heuristic setting, not
@@ -24,7 +24,7 @@ active physical sorter, run one cycle from an updated Intel checkout:
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m brickcell.block_inspector.cli deploy-cell \
-  --inspection-mode lab-dark-mark --dark-mark-threshold 16 \
+  --dark-mark-threshold 16 \
   --max-cycles 1 --hud-port 0 \
   --output-dir artifacts/heuristic-sort-run
 ```
@@ -44,7 +44,7 @@ that snapshot, use this one-cycle command from `/home/intel/brickcell-deploy`:
 ```sh
 PYTHONPATH=/home/intel/brickcell-deploy/artifacts/heuristic-sorter-v1/src \
   .venv/bin/python -m brickcell.block_inspector.cli deploy-cell \
-  --inspection-mode lab-dark-mark --dark-mark-threshold 16 \
+  --dark-mark-threshold 16 \
   --max-cycles 1 --hud-port 0 \
   --output-dir artifacts/heuristic-sort-run
 ```
@@ -56,3 +56,9 @@ The existing source function excludes plate/gripper colors and uses narrow
 stroke geometry; it has not been validated for every brick color, defect width,
 surface, lighting condition or hidden face. This is the legacy operating rule,
 not an established all-defect detector.
+
+The PowerShell deployment launcher also defaults to `-InspectionMode lab-dark-mark`
+and passes it to `deploy-cell`. Using `-OpenVinoModel` requires selecting
+`-InspectionMode patchcore` too. It no longer searches for exported models in the
+default path. The standalone camera-wall publisher remains display-only; actual
+arm sorting is performed by `deploy-cell`.

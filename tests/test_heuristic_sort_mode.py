@@ -120,7 +120,9 @@ def deployment_function(inspector):
     return namespace[method.name]
 
 
-def test_lab_deployment_selects_rule_without_discovering_models_or_opening_hardware(tmp_path):
+def test_default_deployment_selects_lab_rule_without_discovering_models_or_opening_hardware(
+    tmp_path,
+):
     class ReachedInspector(Exception):
         pass
 
@@ -132,7 +134,7 @@ def test_lab_deployment_selects_rule_without_discovering_models_or_opening_hardw
         raise ReachedInspector
 
     with pytest.raises(ReachedInspector):
-        deployment_function(inspector)(inspection_mode="lab-dark-mark", output_dir=tmp_path)
+        deployment_function(inspector)(output_dir=tmp_path)
 
 
 @pytest.mark.parametrize(
