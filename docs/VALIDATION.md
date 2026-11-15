@@ -2399,3 +2399,121 @@ version `dark-mark-heuristic-5d91eb5d61d7-contrast-16`, and sorting permission
 false at the existing Studio endpoint. That observed frame had no unambiguous
 red target, so no valid-frame overlay was asserted to have been visually checked.
 No sorter or arm was started, and no classification algorithm was changed.
+
+### Jack clean arm-held dataset located and audited — 2026-11-15
+
+Fetched newly published `origin/jack-anomaly-data-positive` (commit `0a6b9d3`),
+an independent data-only branch with no merge base with anomaly. Imported a
+snapshot under ignored `artifacts/imported-datasets/jack-anomaly-data-positive`;
+no data branch merge or image commit was performed. Source README explicitly
+labels positive as clean, not defective. Verified all 570 RGB JPEGs decode,
+computed SHA256 hashes (zero exact duplicates), and checked referenced depth
+files and plate SDK serial `243622060450`: no errors in these checks.
+
+Counts: white 180 (6 grips), red 120 (4), yellow 180 (6), lavender 90 (3):
+19 grips with 30 images each. Reviewed a contact sheet of the midpoint frame of
+every grip, showing follower-held bricks and changing face presentations. This
+is 570 newly identified source frames, not the earlier 9 uploaded screenshots.
+Source contains wrist-roll/gripper telemetry and camera frame metadata. Wrist
+rotation does not imply wrist-camera imagery: all runs specify plate camera.
+Distance of approximately 15 cm was not independently measured in this audit.
+
+Source README reports one physical brick per type from one session; its suggestion
+to split by grip alone is insufficient for independent validation under project
+object/session leakage rules. Keep all grips of each physical object together,
+and do not report independent val/test performance from this single session.
+No defective examples are present. This is a clean reference candidate dataset,
+not a completed calibration set. No training, threshold selection, test evaluation
+or hardware action occurred. Audit and visual index are saved as `audit.json`
+and `capture-overview.jpg` in the imported directory. No software changes/tests.
+
+### Exact demo_1 branch connection check on Intel — 2026-11-15
+
+At user's request fetched origin and connected through `ssh intel`. Exact requested
+`origin/demo_1` commit `83dc84782400479ff77196e25ecadc2031d75f31` differs from
+`origin/demo_1-sorter` (`32e74de`). Staged a git archive of demo_1 separately at
+`/home/intel/brickcell-deploy/artifacts/demo1-83dc847`, preserving the existing
+shared deployment source and running services. Used existing deployment Python
+environment; no packages installed or camera devices opened directly. The armd
+read-only state check reported all six follower joints online, healthy,
+stationary, position mode, and within reported position limits.
+
+Verified remote deploy-cell CLI help/import, then executed exact demo_1 with
+`--dry-run --max-cycles 1 --hud-port 0 --dashboard-url= --camui-url=` in a dedicated
+tmux session with a 180-second outer deadline. First shell launch failed before
+application startup because its log directory did not exist; created the output
+directory and retried. Completed in 9.492 seconds, `physical_cell_dry_run`,
+`succeeded=true`, `termination_reason=parked_at_rest`,
+`inspector_mode=lab_dark_mark_fallback`, `anomalib_cameras=[]`. Reported
+`sorted_counts.defective=1` and `dry_run=true` describe a dry-run action only;
+this is not physical pickup/drop success or validated defect accuracy. Remote
+report copied to `artifacts/demo1-connection-check/remote-dry-run-report.json`.
+
+No physical cycle or training was launched. Exact demo_1 is not integrated with
+the newly located 570-frame clean PatchCore dataset: reference training/export,
+preprocessing and decision-threshold work remain. No software changes/tests in
+this connection check. Existing camera services and capture app left running.
+
+### User-authorized physical one-cycle sorter runs — 2026-11-15
+
+Staged exact `origin/demo_1-sorter` (`32e74de`) at Intel
+`/home/intel/brickcell-deploy/artifacts/demo1-sorter-32e74de`, separate from shared
+source. Confirmed no active deploy-cell process, healthy stationary follower,
+and reviewed fresh top RGB before launching. Used existing armd/camera services,
+no direct camera device ownership or package changes.
+
+First physical one-cycle run used `--inspection-mode lab-dark-mark --max-cycles 1`
+with dashboard/camui URLs empty. The controller reported seven valid plate scan
+frames, then `succeeded=true`, `parked_at_rest`, 235.070 seconds, one white
+`duplo_2x4_3011` flagged and sorted to defective. Report stored remotely under
+`artifacts/physical-sort-once`. No clean-versus-marked ground truth was established;
+this is not evidence of correct classification. Final placement was not visually
+confirmed before user interrupted; do not conflate reported completion with
+physical drop verification.
+
+User requested rerun with a cube and no dashboard. Fresh top-camera view showed
+only red and pale cubes on blue source plate, long white/yellow bricks elsewhere,
+no arm controller active and empty gripper. Launched one cycle with
+`--inspection-mode lab-dark-mark --max-cycles 1 --hud-port 0 --dashboard-url=
+--camui-url=`. Camera observations confirmed the red cube lifted in the gripper.
+Controller reported `physical_cell_live_execution`, `lab_dark_mark_plate_sort`,
+`anomalib_cameras=[]`, one `duplo_2x2_3437` flagged and sorted to defective,
+`succeeded=true`, `parked_at_rest`, 161.934 seconds. Copied report locally to
+`artifacts/demo1-cube-sort/report.json`. Final top-camera image reviewed separately
+for placement. No PatchCore accuracy claim: heuristic threshold 16 is an operator
+setting and the red brick's actual clean/marked status was not confirmed.
+No software implementation changes/tests in these hardware runs.
+
+### Operator-provided colour sorting policy — 2026-11-15
+
+User labelled red/lime/white/yellow as marked (pink) and purple/brown as clean
+(green), then explicitly requested deployment and ten cycles without dashboard.
+Added `scripts/operator_colour_sort.py`, a standalone wrapper for the tested
+`demo_1-sorter` runtime. This is explicitly `operator_colour_labels_not_anomaly_detection`:
+colour labels authorize the demo routing, not PatchCore or heuristic mark scores.
+RGB comes from the existing localized brick sample. Unsupported/dark/boundary
+colours abort rather than default to a class. Colour exceptions during localization
+raise so the planner cannot proceed to pickup with a missing label. Existing grasp,
+servo, stale-frame, seven-view scan and drop guards remain; failed scans are not
+overridden. Destination mismatch refuses a sort. Reports annotate decision source,
+operator colour and mapping and remove misleading mark distances from sorted rows.
+
+Software verification: `uv run pytest`: 304 passed, 16 skipped, 2 upstream warnings;
+`uv run ruff check src tests scripts`, `uv run ruff format --check src tests scripts`
+(134 files) passed. Tests cover six colour labels, pastel purple versus blue,
+unsupported/invalid RGB, refusal to override scan failure, destination mismatch,
+and labelled result provenance. Initial tests exposed a lime hue boundary and
+blue/purple confusion; corrected before physical launch. The first remote dry run
+rejected a pale sample, with no physical motion. Second dry run identified lime
+(mean RGB approximately 174.7,208.5,165.1), but aborted at repeated scan frame ID;
+that safety guard was retained, not bypassed. No complete dry-run sort is claimed.
+
+Copied wrapper to Intel's isolated `artifacts/demo1-sorter-32e74de/scripts/` and
+started a user-authorized physical run in tmux socket `brickcell-colour-ten`,
+session `sort`, `--max-cycles 10`, output `artifacts/operator-colour-ten`, log
+`artifacts/operator-colour-ten.log`. HUD/dashboard/camui are disabled by wrapper.
+Verified process active and first selected colour lime -> defective. This records
+launch only, not ten successful sorts. Blue source plate had fewer than ten
+visible bricks; empty-source and safety conditions may end the run early. Colour
+classification and correct final plate placement still require physical review;
+this is not measured anomaly-detection accuracy.
