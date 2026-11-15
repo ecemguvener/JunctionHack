@@ -2273,3 +2273,36 @@ Stopped the old local image-only reference publisher (PIDs 47350/47351), which
 was overwriting the same camera tile. Stopped the temporary standalone animation
 preview server and removed its uncommitted source. No camera driver or Studio
 service was restarted, and no arm command or physical sorting action was issued.
+
+### Frozen trained-model inventory and candidate review — 2026-11-15
+
+Audited all 16 real pilot checkpoints and their fitting-image hashes. Loaded
+each frozen model on PyTorch CPU and reran 63 existing development/fitting
+queries, checking query hashes. All loads/inferences passed; every previously
+recorded query score reproduced exactly (maximum absolute difference 0.0).
+No val/test partitions were reassigned, no threshold fitted and no test set
+evaluated again. Machine-readable evidence and exact installed versions are in
+ignored `artifacts/model-review-20261115/audit.json`.
+
+Identified `red-marks-foreground-mask-v2` as the strongest saved real-mark
+localization candidate, distinct from the previously transferred red multiview
+model. Reproduced clean/marked distances 2.4989755153656006 and
+3.0187885761260986, inspected the saved localization review image, and confirmed
+the marked maximum on the gray patch rather than the stud/background location
+of earlier candidates. These are two reused development examples, not a measured
+independent recall/accuracy result. All real pilots still lack thresholds; none
+is a trained wrist model.
+
+Verified corrected-red checkpoint/XML/BIN hashes against its original export
+report and executed native OpenVINO CPU inference on the same two development
+queries. Maximum PyTorch/OpenVINO difference was 0.000001430511474609375, below
+0.001. Report: `artifacts/model-review-20261115/red-candidate-ir.json`. Read the
+existing perfect synthetic baseline report without rerunning its held-out test.
+Also read the separate synthetic tool-evaluation report; its PyTorch 2.15.0
+environment was not substituted into the locked core environment.
+
+`docs/MODEL_REVIEW.md` records all candidate outcomes, hashes and readiness gaps.
+This review changes documentation only; no software tests were rerun. The last
+software suite remains 273 passed/16 skipped; four calibrated-model tests remain
+unconfigured. No live camera was opened, robot commanded, publisher changed,
+model deployed or sorting gate removed.
