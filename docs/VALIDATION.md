@@ -2144,3 +2144,39 @@ compilation was not executed against a real pair. No SSH connection, camera
 access, service restart, robot motion or interrupted-cycle recovery occurred.
 Actual paired labeled captures/calibrated exports remain required before the
 teammate can run trusted two-camera inspection.
+
+### Trained plate-reference models exported and transferred — 2026-11-15
+
+Exported the saved real red/blue/yellow/white plate reference checkpoints to
+OpenVINO CPU using `scripts/check_reference_export.py`. These are the existing
+Anomalib 2.7.0 fitted models; no new images were fitted and no threshold was
+invented. Reference counts are 2, 12, 24 and 36 respectively. CPU parity on one
+fitting reference per color passed at absolute tolerance 0.001, with maximum
+errors 0.00000190735, 0.00000131130, 0.00000083447 and 0.00000071526.
+This checks numerical export fidelity, not independent defect accuracy.
+
+Packaged four `reference.ckpt` files with original pilot/reference metadata,
+OpenVINO `model.xml`/`model.bin`, runtime `model.json` sidecars (threshold null),
+training metadata, exact training/export versions and export-parity reports.
+No source images or private keys were included. Verified SHA256 for all 37
+package files and exercised the actual `OpenVINODetector` with each packaged
+sidecar and a fitting reference crop. All four packaged CPU checks passed.
+The initial stdin-based packaging invocation emitted a multiprocessing helper
+FileNotFoundError, although its parent completed all assertions; a subsequent
+standalone guarded verification script completed cleanly for all four models.
+
+Transferred and extracted the archive on Intel:
+`/home/intel/brickcell-deploy/artifacts/trained-plate-references-20261115-v1`.
+Remote archive checksum and all 37 file hashes passed. Archive size is
+87,162,118 bytes; SHA256:
+`7b06e4402c1a7b93c39dfacd7e93f6f8f97574418781c0357192f4b639d99407`.
+`docs/TRAINED_REFERENCE_MODELS.md` supplies download, restore and CPU scoring
+commands. Artifacts remain outside Git; documentation is on `anomaly`.
+
+This turn changes documentation only. No software test suite was rerun; the
+preceding software checks remain 253 passed/16 skipped. No model test requiring
+a calibrated pair was run. No wrist model exists, checkpoints retain disabled
+postprocessing and no learned binary labels, and existing surface-mask failures
+remain unresolved. Missing-model preflight and sorting gates were not changed.
+No service restart, camera capture, arm command or interrupted-cycle recovery
+occurred. CPU inference was executed locally; remote checks verified files only.
