@@ -2605,3 +2605,126 @@ camui reporting disabled; separate camui warning bridge remains read-only.
 Tmux socket `brickcell-fix1-run`, session `sort`, output `artifacts/fix1-colour-ten`.
 Verified active process and first selected brick brown -> good. This records
 launch, not ten completed sorts or calibrated anomaly performance.
+
+
+### Earlier 650 captures gathered and trained as clean references on Intel — 2026-11-15
+
+Recovered the old task's image count and gathered exactly 650 original RGB
+images: 96 guided captures, 6 calibration candidates, 476 presentation frames,
+and 72 earlier captures. Depth images and generated crops/heatmaps are excluded
+from that count. Verified all recorded original hashes and decoded every image.
+Copied originals and unchanged source records into ignored
+`artifacts/patchcore-combined-earlier650-v1/raw/` and `records/`, and transferred
+them to Intel. `inventory.json` preserves source paths, labels, camera/frame IDs,
+object/session IDs, dimensions, SHA256 and inclusion/exclusion reasons. Archive
+SHA256 matched on both hosts:
+`f6b07feedc9b357ad62a7b9379cd121ff1809f3fe88b27b5caee6e370ad330bd`.
+
+114 earlier images have human label good plus baseline acceptance: 102 plate,
+12 top. Retained and excluded 536: 476 unlabeled recording frames, 30 marked
+images, 24 rejected empty scenes, 6 reserved calibration candidates with physical
+identity pending. No source labels or formal-training eligibility were changed.
+Accepted reference-only captures are fitted only as uncalibrated pilots, as in
+earlier reference experiments. No unlabeled image was inferred good, and no
+marked views of a training object were treated as independent test examples.
+
+Executed detached training on Intel CPU (`intel-XPS-16-DA16260`), project
+`/home/intel/brickcell-training/jack-clean-20261115-v1`, run directory
+`artifacts/patchcore-combined-earlier650-v1`. Ran `uv sync --locked`, keeping
+Python 3.12.16, Anomalib 2.7.0, Torch 2.10.0+cpu, torchvision 0.25.0+cpu.
+Used offline cached pretrained ResNet18, layer2/layer3, 128x128 full-frame RGB,
+coreset 0.05, three neighbors, seed 42, four threads. All 1,220 earlier plus Jack
+hashes are unique. Camera-specific good/train-only manifests preserve object
+and session IDs. No val/test partitions were fabricated.
+
+- top: 12 clean references (12 earlier + 0 Jack); fit/save/reload/inference 0.56 s; memory bank [153, 384]. Checkpoint SHA256 `c3ae37e2ba1416c5d6002bd4dd0cc1dd3564c4687aaed7e2bfe60cf0551cd556`; manifest SHA256 `fce83422d983d3ce9c133b4a3f54a6c6ef301322f2cb345fa0709ace1bbda641`.
+- plate: 672 clean references (102 earlier + 570 Jack); fit/save/reload/inference 319.94 s; memory bank [8601, 384]. Checkpoint SHA256 `56b53458210588bd20bbd86e5ae0c3fe8d9853d183bb6f3600b26ff746ae4ba9`; manifest SHA256 `c8e23ae64b4435c9c72de6e4e737dcded534df11976d02b135ca8f084043b03b`.
+
+Both checkpoints were reloaded on Intel CPU and yielded finite raw PatchCore
+distances on a fitting-image smoke check. Copied results/checkpoints back to
+local `artifacts/patchcore-combined-earlier650-v1/intel-result/` and reverified
+checkpoint SHA256. Retained exact packages, config, provenance, manifests,
+all-input audit, training script hash, logs and summary. Jack-only output is
+preserved separately.
+
+Limits: earlier references are plate-resting while Jack's are arm-held; this
+full-frame reference fit does not establish small-mark accuracy or runtime
+transfer. Thresholds remain null, automatic sorting false. No calibration,
+independent test evaluation, OpenVINO export/parity or GPU/NPU benchmark ran.
+No runtime deployment, service change or robot/camera command occurred. No core
+source changed; pytest/model suites and repository lint were not rerun for this
+artifact-only task. Both retained artifact scripts passed Ruff lint and format
+checks. Actual image/hash validation, fitting and checkpoint reload/inference
+checks were executed; they are not independent accuracy evidence.
+
+
+### Calibration readiness audit for combined plate/top models — 2026-11-15
+
+At the user's calibration request, audited the two frozen combined-dataset
+reference checkpoints on Intel CPU. Verified checkpoint hashes, training
+manifests, and all earlier source-image hashes. Matched candidate object IDs,
+capture-session IDs and image hashes against each camera's fitting manifest;
+checked confirmed labels, physical identity, rejected empty scenes and original
+calibration eligibility. No independent eligible validation images remain in
+the saved 650-image inventory for either frozen model.
+
+Top: the 12 marked views share `brick-002` and
+`brick-002-controlled-depth-20261114-a` with the 12 fitting references. Plate:
+12 human-labeled marked views overlap both training object/session; six visually
+marked guided views lack confirmed human labels and overlap a training session.
+Six reserved good candidates have null physical object IDs and calibration
+eligibility false. The 476 presentation frames remain unlabeled; rejected empty
+scenes and fitting references are also ineligible. Jack contains clean-only
+training data from a fitting session, not additional validation.
+
+Ran diagnostic inference on the excluded candidates only: 24 plate images
+(18 marked views plus six reserved clean candidates) and 12 top marked views.
+These raw distances were explicitly saved as excluded-candidate diagnostics,
+not validation metrics or calibration evidence. Did not select a threshold or
+claim calibrated performance. Both model hashes, null thresholds, and sorting
+permission false are preserved. No training, runtime deployment, camera capture,
+robot command or service change occurred.
+
+Reports, exact packages, audit script/hash, per-candidate exclusion reasons,
+diagnostic scores and an empty validation intake template are retained remotely
+under `/home/intel/brickcell-training/jack-clean-20261115-v1/artifacts/patchcore-calibration-audit-v1`
+and locally under `artifacts/patchcore-calibration-audit-v1/intel-result/patchcore-calibration-audit-v1/`.
+The missing input is a confirmed good-and-defective `val` collection for each
+camera with physical object and session identities disjoint from training,
+unique hashes, matching serial/preprocessing and valid visible-brick views.
+An independent test set must remain untouched until the threshold is frozen.
+User clarification about another saved collection versus new capture is pending.
+No core software changed; pytest/model suites and repository lint were not rerun
+for this artifact-only audit. Artifact script Ruff lint/format passed; actual
+hash/group audit and Intel diagnostic inference ran as described above.
+
+
+### Actual brick colour annotations — 2026-11-15
+
+At user request created separate colour annotations for the 1,220-image earlier
+and Jack collections under ignored `artifacts/brick-colour-labels-v1/`, in JSON
+and CSV. Used capture object identity, original Jack colour labels and sampled
+visual review contact sheet. Assigned 720 target colour labels: white 228, blue
+72, yellow 210, red 120, lavender 90. Did not force single-target colours onto
+476 recording frames with unspecified targets/multiple bricks or 24 rejected
+empty-scene captures. Those 500 entries retain explicit review/exclusion states.
+Contact-sheet review is sampled, not exhaustive per-frame annotation.
+Source object/session identities, clean/marked labels and partitions are unchanged.
+Colour annotations do not calibrate anomaly thresholds or establish independent
+validation. No model training, runtime deployment or hardware commands occurred.
+No core software changes or software tests; JSON/CSV row counts were verified.
+
+
+### Training/colour-labelling branch verification — 2026-11-15
+
+Preserved the executed experiment scripts and training/colour-summary notes
+in `docs/experiments/patchcore-labelling/` for the `labelling-for-patchcore`
+branch. Images, per-image dataset annotations, checkpoints and run artifacts
+remain Git-ignored. Unrelated dirty sorter changes are excluded from this branch.
+In the isolated branch checkout, `uv run --locked pytest` passed: 321 passed,
+16 skipped. Skips require optional FastAPI/Frax/JAX/MuJoCo, configured trained
+core exports or a live simulator. `uv run --locked ruff check src tests scripts`
+and `uv run --locked ruff format --check src tests scripts` passed, as did
+additional lint/format checks of the experiment snapshots. `git diff --check`
+passed. No new calibration, deployment or hardware execution occurred in this
+source-preservation step.

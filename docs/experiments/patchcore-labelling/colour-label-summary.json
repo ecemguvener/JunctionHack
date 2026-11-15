@@ -1,0 +1,16 @@
+{
+  "scope": "Actual target brick colour; separate from defect labels and dataset partitions",
+  "source_inventory_sha256": "1e76ece05d9768f5f957ab7bb6d811a5875359261c125442deab466d9e522e99",
+  "colour_counts": {
+    "white": 228,
+    "blue": 72,
+    "yellow": 210,
+    "red": 120,
+    "lavender": 90
+  },
+  "unassigned_counts": {
+    "rejected_empty_scene": 24,
+    "target_unspecified_requires_object_annotation": 476
+  },
+  "limitations": "Colour is not a defect label or independent calibration evidence. Recording frames require object localization to label individual bricks; sampled overview is not exhaustive per-frame annotation."
+}
