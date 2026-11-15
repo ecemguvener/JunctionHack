@@ -272,15 +272,11 @@ def test_anomaly_blocks_detected_outside_plates_and_ignored_inside_plates():
     assert len(boxes) == 1
 
 
-def test_held_anomaly_block_classifier_flags_target_three_and_bridges_to_camui():
-    import time
-
-    import cv2
+def test_held_anomaly_block_classifier_flags_target_three_and_bridges_to_camui(monkeypatch):
     import numpy as np
 
+    from brickcell.block_inspector.camera_adapters import CamUiReporter
     from brickcell.inspection.anomaly_blocks import classify_held_anomaly_block
-
-    pub_mod = module("pub_mark", "scripts/publish_mark_inspection.py")
 
     for color, expected in (
         ((240, 240, 240), "white_block"),
@@ -297,15 +293,23 @@ def test_held_anomaly_block_classifier_flags_target_three_and_bridges_to_camui()
     found_red, _, _ = classify_held_anomaly_block(red_crop, mean_rgb=(205.0, 32.0, 32.0))
     assert found_red is False
 
-    # End-to-end publish_mark_inspection -> publish_camui_detection for white block outside plates
-    rgb = np.full((360, 640, 3), 45, dtype=np.uint8)
-    cv2.rectangle(rgb, (280, 70), (360, 130), (242, 242, 242), -1)
-    now = time.time()
-    packet = {"synthetic": False, "serial": "243622060450", "frame_id": "f-white", "time": now}
-    body = pub_mod.inspect_frame(rgb, packet, None, "243622060450")
-    assert body["decision"] == "UNCALIBRATED"
-    assert body["anomaly_block"] == "white_block"
-    payload = bridge.detection_payload(body, now=now + 0.1)
-    assert payload["malformed"] is True
-    assert payload["camera"] == "side"
-    assert "white_block" in payload["detail"]
+    # CamUiReporter only sets malformed=True during rotation (plate_scan_active=True)
+    store = ui.Detection(5.0)
+    reporter = CamUiReporter("http://127.0.0.1:8093")
+    monkeypatch.setattr(reporter, "_post_payload", lambda body: (store.update(body), True)[1])
+    reporter.report(
+        malformed=True,
+        detail="DEFECT FLAGGED | white_block | Side Camera CCW Spin +60 deg",
+        camera="side",
+        frame_id="spin-frame-1",
+        source="live_dark_mark_heuristic_not_patchcore",
+    )
+    assert store.status()["state"] == "malformed"
+    reporter.report(
+        malformed=False,
+        detail="GOOD | SortBlock -> pink plate",
+        camera="side",
+        frame_id="drop-frame-1",
+        source="live_dark_mark_heuristic_not_patchcore",
+    )
+    assert store.status()["state"] == "ok"

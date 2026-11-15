@@ -2266,7 +2266,7 @@ class PhysicalSO101CellExecutor:
             malformed: bool | None = None
             detail = f"UNTRUSTED ({self.anomaly_untrusted_error}) | {model_label}"[:200]
         else:
-            malformed = bool(self.anomaly_flagged)
+            malformed = bool(self.anomaly_flagged and self.plate_scan_active)
             if self.max_plate_anomaly_distance is not None:
                 verdict = "DEFECT FLAGGED" if malformed else "GOOD"
                 detail = (
