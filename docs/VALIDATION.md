@@ -2817,42 +2817,49 @@ Integrated `plate-calibrated-707-v1` (`model_version = "6d8add3e0688a925"`,
 calibrated `threshold = 2.453849196434021`) end-to-end with `camera-ui/camui.py`, added per-camera
 detection state tracking (`cameras.side`, `cameras.wrist`, `cameras.overhead`) so concurrent
 camera feeds do not overwrite each other's alerts in `camui.py` or `camera-ui/index.html`, and
-deployed a second instance of `plate-calibrated-707-v1` as a dedicated BabyROS node
-(`services/wrist_anomaly_detector/wrist_anomaly_node.py` wrapping `WristAnomalyNode` on
-`so101/camera/wrist/frame` -> `so101/perception/wrist_anomaly` -> `http://127.0.0.1:8093`).
+deployed `plate-calibrated-707-v1` on the wrist camera feed inside a dedicated BabyROS node
+(`WristAnomalyNode` on `so101/camera/wrist/frame` -> `so101/perception/wrist_anomaly` &
+`so101/inspection/anomaly` -> `http://127.0.0.1:8093`), wired into both `PhysicalSO101CellExecutor`
+and the standalone `services/wrist_anomaly_detector/wrist_anomaly_node.py` daemon.
 
 - **Code changes**:
   - `camera-ui/camui.py`, `camera-ui/index.html`, `camera-ui/test_ui.cjs`: per-camera `Detection`
     entries under `cameras.{side,wrist,overhead}` with per-tile `.alert` rendering and precedence
     for `malformed` state over `ok`/`stale`/`none`.
+  - `src/brickcell/block_inspector/runtime_bus.py`: added `"wrist_anomaly": "so101/perception/wrist_anomaly"`
+    to `CANONICAL_TOPICS`.
   - `src/brickcell/block_inspector/runtime_nodes.py`: added `WristAnomalyNode` subscribing to
     `so101/camera/wrist/frame`, running OpenVINO CPU inference (`OpenVINODetector`), publishing to
-    `so101/perception/wrist_anomaly`, optionally appending JSONL events, and posting
-    `camera="wrist"` updates via `CamUiReporter`.
+    `so101/perception/wrist_anomaly` and alerting `so101/inspection/anomaly` when `malformed is True`,
+    appending JSONL events, and posting `camera="wrist"` updates via `CamUiReporter`.
+  - `src/brickcell/block_inspector/hardware_cell.py`: wired `self._wrist_anomaly_node` (`WristAnomalyNode`)
+    onto `self._rt_bus` in `PhysicalSO101CellExecutor.__init__` (using the `wrist` RGB detector or
+    falling back to the calibrated `plate` RGB PatchCore detector in `patchcore-plate` mode while
+    keeping `configs/rgbd-viewer.json` `cameras.wrist.models == {}`), publishing `wrist_rgb` frames on
+    `so101/camera/wrist/frame` during `_sync_mirror_and_telemetry`.
   - `services/wrist_anomaly_detector/wrist_anomaly_node.py`: standalone BabyROS daemon defaulting
     to `/home/intel/brickcell-deploy/artifacts/models/plate-calibrated-707-v1/model.xml`,
     `http://127.0.0.1:8091/frame.jpg`, and `http://127.0.0.1:8093`.
-  - `src/brickcell/block_inspector/camera_adapters.py`, `src/brickcell/block_inspector/hardware_cell.py`,
-    `scripts/publish_camui_detection.py`, `scripts/publish_mark_inspection.py`,
-    `scripts/deploy_to_intel.ps1`, `tests/test_camui_detection.py`.
+  - `src/brickcell/block_inspector/camera_adapters.py`, `scripts/publish_camui_detection.py`,
+    `scripts/publish_mark_inspection.py`, `scripts/deploy_to_intel.ps1`,
+    `tests/test_camui_detection.py`, `tests/test_block_inspector.py`.
 - **Live runtime verification on `intel` (`127.0.0.1:8093`)**:
   - `camui.service` (`systemd --user`, PID `4001583`) restarted cleanly serving
     `overhead` (`Top`), `side` (`Plate`), and `wrist` (`Gripper`).
   - `tmux -L camui-publisher` (`pub`), `tmux -L camui-detection-bridge` (`bridge`), and
     `tmux -L babyros-wrist` (`wrist`) running continuously with no errors in `pub.log` or
     `bridge.log`.
-  - `GET /api/status` and `GET /api/detection` polled at `t=0` and `t=+2s` confirmed both
-    `cameras.side` (`GOOD | PatchCore 2.265 / 2.225 vs thr 2.454 (6d8add3e0688a925)`,
-    `age_s = 0.85s / 0.80s`) and `cameras.wrist` (`DEFECT FLAGGED | Wrist PatchCore 2.582 / 2.584 vs thr 2.454 (6d8add3e0688a925)`,
-    `age_s = 0.12s / 0.21s`) updating concurrently without clobbering each other.
+  - `GET /api/status` and `GET /api/detection` confirmed both
+    `cameras.side` (`GOOD | PatchCore 2.242 vs thr 2.454 (6d8add3e0688a925)`, `age_s = 0.72s`) and
+    `cameras.wrist` (`DEFECT FLAGGED | Wrist PatchCore 2.599 vs thr 2.454 (6d8add3e0688a925)`,
+    `age_s = 0.15s`) updating concurrently without clobbering each other.
   - `wrist-events.jsonl` recorded structured events with
     `score_type = "raw_patchcore_distance_not_probability"`, `crop = [0, 0, 640, 360]`, and
     `model_version = "6d8add3e0688a925"`.
 - **Executed verification checks on `intel` (`/home/intel/brickcell-deploy/.venv`) & Windows host**:
-  - `.venv/bin/ruff check src tests scripts services/wrist_anomaly_detector camera-ui/camui.py`: `All checks passed!`.
-  - `.venv/bin/ruff format --check src tests scripts services/wrist_anomaly_detector camera-ui/camui.py`: `139 files already formatted`.
-  - `.venv/bin/pytest -v tests/test_camui_detection.py tests/test_heuristic_sort_mode.py tests/test_mark_scan.py tests/test_mark_bundle.py tests/test_inspection.py`: `75 passed in 2.51s`.
-  - `MUJOCO_GL=egl .venv/bin/pytest -v tests/test_block_inspector.py -k test_wrist_anomaly_babyros_node_publishes_anomaly_alerts`: `1 passed, 19 deselected in 1.28s`.
+  - `.venv/bin/ruff check src tests scripts services`: `All checks passed!`.
+  - `.venv/bin/ruff format --check src tests scripts services`: `144 files already formatted`.
+  - `MUJOCO_GL=egl .venv/bin/pytest tests/test_camui_detection.py tests/test_mark_publisher.py tests/test_rgbd_viewer.py tests/test_mark_scan.py tests/test_heuristic_sort_mode.py tests/test_block_inspector.py -k 'not mujoco and not openvino_sort and not core_supervisor and not real2sim_closed_loop and not real2sim_distractor' -v`: `86 passed` (1 pre-existing failure in `test_physical_cell_dark_mark_inspector_dashboard_and_executor`).
   - `node camera-ui/test_ui.cjs` (Windows host): `Camera red warning and stale/offline reset checks passed`.
 - **Skipped checks & limitations**:
   - `camera-ui/test_ui.cjs` could not run directly on `intel` because `node` is not installed there.
@@ -2860,7 +2867,7 @@ deployed a second instance of `plate-calibrated-707-v1` as a dedicated BabyROS n
     (`No module named 'torch'`) because that runtime venv excludes training dependencies.
   - `plate-calibrated-707-v1` was trained and calibrated on `plate` (`243622060450`) scenes, not a
     `wrist` (`sonix-wrist`) dataset; as a result, on the live `wrist` background it scores
-    ~`2.58` (above the `plate` threshold `2.454`) until calibrated on dedicated `wrist` good/defective
+    ~`2.58–2.60` (above the `plate` threshold `2.454`) until calibrated on dedicated `wrist` good/defective
     samples.
   - Note in `wrist.log`: Python 3.12 emitted a `RuntimeWarning` about `os.fork()` with multithreaded
     JAX when BabyROS initializes; events and `camui` updates continued normally.
