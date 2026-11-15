@@ -1205,6 +1205,73 @@ def _sonix_cam_pose_and_intrinsics(
     return T_wc[:3, :3], T_wc[:3, 3], K
 
 
+def triangulate_wrist_two_view_xyz(
+    q_pose_a: np.ndarray,
+    uv_a: tuple[float, float],
+    q_pose_b: np.ndarray,
+    uv_b: tuple[float, float],
+    w_w: int,
+    h_w: int,
+    ik: SO101FraxIK,
+    wrist_cam: Any | None = None,
+    use_sonix_intrinsics: bool = True,
+) -> tuple[np.ndarray, float] | None:
+    """Triangulate 3D world point from two wrist RGB views separated by arm motion parallax.
+
+    Because the wrist camera has no depth sensor, descending/shifting between two known joint
+    states `q_pose_a` and `q_pose_b` turns the encoder-calibrated camera offset into a synthetic
+    stereo baseline. Returns `(p_world_xyz, ray_miss_distance_m)` or `None` if ill-conditioned.
+    """
+
+    def _ray(q_pose: np.ndarray, uv: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
+        T_wb3 = ik.fk_world_body3(q_pose)
+        if use_sonix_intrinsics or wrist_cam is None:
+            R_wc, p_wc, K = _sonix_cam_pose_and_intrinsics(T_wb3, w_w, h_w)
+        else:
+            T_wc = wrist_cam.world_transform(T_wb3)
+            R_wc, p_wc = T_wc[:3, :3], T_wc[:3, 3]
+            K = wrist_cam.K.copy()
+            K[0, :] *= float(w_w) / float(wrist_cam.width)
+            K[1, :] *= float(h_w) / float(wrist_cam.height)
+        ray_cam = np.array(
+            [
+                (float(uv[0]) - float(K[0, 2])) / max(float(K[0, 0]), 1e-6),
+                (float(uv[1]) - float(K[1, 2])) / max(float(K[1, 1]), 1e-6),
+                1.0,
+            ],
+            dtype=np.float64,
+        )
+        d_w = R_wc @ ray_cam
+        d_w /= max(float(np.linalg.norm(d_w)), 1e-9)
+        return p_wc, d_w
+
+    p_a, d_a = _ray(q_pose_a, uv_a)
+    p_b, d_b = _ray(q_pose_b, uv_b)
+    baseline = p_b - p_a
+    if float(np.linalg.norm(baseline)) < 0.014:
+        return None
+    sin_theta = float(np.linalg.norm(np.cross(d_a, d_b)))
+    if sin_theta < 0.045:
+        return None
+
+    dot = float(np.dot(d_a, d_b))
+    denom = max(1e-6, 1.0 - dot * dot)
+    c_a = float(np.dot(baseline, d_a))
+    c_b = float(np.dot(baseline, d_b))
+    s = (c_a - dot * c_b) / denom
+    t = (dot * c_a - c_b) / denom
+    if not (0.020 <= s <= 0.360 and 0.020 <= t <= 0.360):
+        return None
+
+    q_a = p_a + s * d_a
+    q_b = p_b + t * d_b
+    ray_sep = float(np.linalg.norm(q_a - q_b))
+    p_mid = 0.5 * (q_a + q_b)
+    if ray_sep > 0.015 or not (0.008 <= float(p_mid[2]) <= 0.068):
+        return None
+    return p_mid, ray_sep
+
+
 def servo_grasp_with_jaw_corridor(
     wrist_rgb: np.ndarray,
     q_pose: np.ndarray,
@@ -1214,6 +1281,7 @@ def servo_grasp_with_jaw_corridor(
     wrist_cam: Any | None = None,
     max_step_m: float = 0.032,
     gain: float = 0.90,
+    z_brick_world: float = 0.018,
 ) -> tuple[np.ndarray, float, list[int] | None, bool, dict[str, Any]]:
     """Closed-loop Inner-Jaw Corridor Visual Servoing (`IBVS + calibrated Sonix ray-plane`).
 
@@ -1242,9 +1310,9 @@ def servo_grasp_with_jaw_corridor(
         K_scaled[0, :] *= sx
         K_scaled[1, :] *= sy
 
-    # Project point on brick mid-plane (`z = 0.018 m`) directly beneath the live TCP:
+    # Project point on brick mid/top plane (`z_brick_world`) directly beneath the live TCP:
     p_under_tcp = np.array(
-        [float(T_tcp_cur[0, 3]), float(T_tcp_cur[1, 3]), 0.018], dtype=np.float64
+        [float(T_tcp_cur[0, 3]), float(T_tcp_cur[1, 3]), float(z_brick_world)], dtype=np.float64
     )
     pc_u = R_wc.T @ (p_under_tcp - p_wc)
     if float(pc_u[2]) > 0.02:
@@ -1358,8 +1426,9 @@ def servo_grasp_with_jaw_corridor(
 
     rect = cv2.minAreaRect(best_cnt)
     (bu, bv), (rw, rh), _ = rect
-    p_brick_w = _ray_intersect_z_plane(bu, bv, R_wc, p_wc, K_scaled, z_world=0.018)
-    p_jaw_w = _ray_intersect_z_plane(u_tgt, v_tgt, R_wc, p_wc, K_scaled, z_world=0.018)
+    z_plane = float(z_brick_world)
+    p_brick_w = _ray_intersect_z_plane(bu, bv, R_wc, p_wc, K_scaled, z_world=z_plane)
+    p_jaw_w = _ray_intersect_z_plane(u_tgt, v_tgt, R_wc, p_wc, K_scaled, z_world=z_plane)
     p_refined = p_tcp_nominal.copy()
     yaw_refined = float(jaw_yaw_nominal)
     d_xy_norm = 0.0
@@ -1375,10 +1444,12 @@ def servo_grasp_with_jaw_corridor(
     # Align gripper jaw closing axis across the brick's graspable faces in world XY
     box_pts = cv2.boxPoints(rect)
     cw_pts = [
-        _ray_intersect_z_plane(float(pu), float(pv), R_wc, p_wc, K_scaled, z_world=0.018)
+        _ray_intersect_z_plane(float(pu), float(pv), R_wc, p_wc, K_scaled, z_world=z_plane)
         for pu, pv in box_pts
     ]
     yaw_err_rad = 0.0
+    short_m_est: float | None = None
+    long_m_est: float | None = None
     if all(p is not None for p in cw_pts):
         cw_arr = [p[:2] for p in cw_pts if p is not None]
         e01 = cw_arr[1] - cw_arr[0]
@@ -1387,7 +1458,9 @@ def servo_grasp_with_jaw_corridor(
         l12 = float(np.linalg.norm(e12))
         short_vec = e12 if l01 >= l12 else e01
         long_vec = e01 if l01 >= l12 else e12
-        aspect = max(l01, l12) / max(min(l01, l12), 1e-4)
+        short_m_est = min(l01, l12)
+        long_m_est = max(l01, l12)
+        aspect = long_m_est / max(short_m_est, 1e-4)
 
         base_short_yaw = math.atan2(float(short_vec[1]), float(short_vec[0]))
         if aspect >= 1.18:
@@ -1399,7 +1472,7 @@ def servo_grasp_with_jaw_corridor(
             cand_axes = [base_short_yaw, math.atan2(float(long_vec[1]), float(long_vec[0]))]
 
         other_w = [
-            _ray_intersect_z_plane(ou, ov, R_wc, p_wc, K_scaled, z_world=0.018)
+            _ray_intersect_z_plane(ou, ov, R_wc, p_wc, K_scaled, z_world=z_plane)
             for ou, ov in other_centers_uv
         ]
         best_yaw_cost = 1e9
@@ -1422,23 +1495,39 @@ def servo_grasp_with_jaw_corridor(
                     yaw_refined = float(cand_y)
                     yaw_err_rad = ang_diff
 
-    # Direct Inner-Jaw Straddle Check in pixel space!
+    # Direct Inner-Jaw Straddle Check projected along the detected jaw closing axis (`jaw_axis_angle_rad`)
+    res_scale = max(0.5, float(w_w) / 640.0)
     du_px = abs(float(bu) - u_tgt)
     dv_px = abs(float(bv) - v_tgt)
     short_px = min(float(rw), float(rh))
     if jaw_obs is not None:
-        fits_gap = (float(bu) - 0.5 * short_px) >= (jaw_obs.u_left_pad + 3.5) and (
-            float(bu) + 0.5 * short_px
-        ) <= (jaw_obs.u_right_pad - 3.5)
+        j_axis = np.array(
+            [math.cos(jaw_obs.jaw_axis_angle_rad), math.sin(jaw_obs.jaw_axis_angle_rad)],
+            dtype=np.float64,
+        )
+        s_left = float(np.dot([jaw_obs.u_left_pad, jaw_obs.v_tip], j_axis))
+        s_right = float(np.dot([jaw_obs.u_right_pad, jaw_obs.v_tip], j_axis))
+        if s_right < s_left:
+            s_left, s_right = s_right, s_left
+        s_box = [float(np.dot(pt, j_axis)) for pt in box_pts]
+        pad_margin_px = 3.2 * res_scale
+        fits_gap = (min(s_box) >= s_left + pad_margin_px) and (
+            max(s_box) <= s_right - pad_margin_px
+        )
+        # On a close hover or partial axis view, fallback only if unrotated box isn't aligned yet
+        if not fits_gap and abs(jaw_obs.jaw_axis_angle_rad) < 0.15:
+            fits_gap = (float(bu) - 0.5 * short_px) >= (jaw_obs.u_left_pad + pad_margin_px) and (
+                float(bu) + 0.5 * short_px
+            ) <= (jaw_obs.u_right_pad - pad_margin_px)
     else:
-        fits_gap = du_px <= 6.0
+        fits_gap = du_px <= (6.0 * res_scale)
 
     straddle_ok = bool(
         fits_gap
-        and du_px <= max(5.0, 0.075 * (jaw_obs.gap_px if jaw_obs else 70.0))
-        and dv_px <= 6.5
-        and yaw_err_rad <= math.radians(7.0)
-        and d_xy_norm <= 0.0035
+        and du_px <= max(5.0 * res_scale, 0.075 * (jaw_obs.gap_px if jaw_obs else 70.0 * res_scale))
+        and dv_px <= (6.5 * res_scale)
+        and yaw_err_rad <= math.radians(6.5)
+        and d_xy_norm <= 0.0030
     )
     info = {
         "status": "ok",
@@ -1451,6 +1540,11 @@ def servo_grasp_with_jaw_corridor(
         "fits_gap": fits_gap,
         "short_px": round(short_px, 1),
         "long_px": round(max(float(rw), float(rh)), 1),
+        "short_m": round(short_m_est, 4) if short_m_est is not None else None,
+        "long_m": round(long_m_est, 4) if long_m_est is not None else None,
+        "brick_uv": (float(bu), float(bv)),
+        "z_brick_world": round(z_plane, 4),
+        "used_jaw_obs": jaw_obs is not None,
     }
     return p_refined, yaw_refined, crop_box, straddle_ok, info
 
@@ -2375,9 +2469,10 @@ class PhysicalSO101CellExecutor:
             if b.block_id not in seed_q_by_brick or sol.feasible:
                 seed_q_by_brick[b.block_id] = sol.q_grasp.copy()
 
+            err_pen = 400.0 * pos_err + (6.0 if pos_err > 0.005 else 0.0)
             score = (
                 (20.0 if sol.feasible else 0.0)
-                - 400.0 * pos_err
+                - err_pen
                 - 0.08 * abs(88.0 - pitch_used)
                 + heur_score
             )
@@ -2404,8 +2499,16 @@ class PhysicalSO101CellExecutor:
         eff_box = self.inspector.resolve_crop_for_camera(snap.camera_name, crop_box)
         if eff_box is None:
             return None
+        eval_rgb = snap.rgb
+        if (
+            snap.camera_name == "wrist"
+            and eval_rgb.shape[:2] != (360, 640)
+            and self.inspector.camera_crops.get("wrist") is not None
+        ):
+            # Configured wrist anomaly crop in mark-viewer.json targets 640x360.
+            eval_rgb = cv2.resize(eval_rgb, (640, 360), interpolation=cv2.INTER_AREA)
         res = self.inspector.evaluate_frame(
-            snap.rgb,
+            eval_rgb,
             snap.depth_m,
             eff_box,
             expected_z_m=expected_z_m,
@@ -2425,6 +2528,123 @@ class PhysicalSO101CellExecutor:
                     f"{res.raw_anomaly_distance:.3f}>={res.threshold_value:.3f}"
                 )
         return res
+
+    def _fetch_settled_wrist_snapshot(
+        self,
+        min_capture_ts: float | None = None,
+        resize_hw: tuple[int, int] | None = (540, 960),
+    ) -> LiveCameraSnapshot:
+        """Fetch a high-res wrist snapshot guaranteed to be captured after `min_capture_ts`."""
+        def _grab() -> LiveCameraSnapshot:
+            try:
+                return self.frame_source.fetch_wrist_snapshot(resize_hw=resize_hw)
+            except TypeError:
+                return self.frame_source.fetch_wrist_snapshot()
+
+        snap = _grab()
+        if (
+            self.arm.dry_run
+            or min_capture_ts is None
+            or not snap.intrinsics.get("has_capture_headers", False)
+        ):
+            return snap
+        for _ in range(3):
+            if float(snap.timestamp_s) >= float(min_capture_ts) - 0.010:
+                return snap
+            time.sleep(0.05)
+            snap = _grab()
+        return snap
+
+    def _relocalize_missed_brick_from_top_rgb(
+        self, p_tcp: np.ndarray, jaw_yaw: float
+    ) -> tuple[np.ndarray, float] | None:
+        """Re-center onto the nearest source brick via Top-RGB if a missed plunge nudged it."""
+        if self.arm.dry_run:
+            return None
+        try:
+            top_snap = self.frame_source.fetch_d415_snapshot("top")
+        except Exception:
+            return None
+        R_top, p_top, K_top = self.real_cams["top"]
+        _, rgb_bricks = localize_plates_and_bricks_top_rgb(top_snap.rgb, R_top, p_top, K_top)
+        if not rgb_bricks:
+            return None
+        nearest_b = min(
+            rgb_bricks,
+            key=lambda cand: float(np.linalg.norm(cand.T_world_block[:2, 3] - p_tcp[:2])),
+        )
+        dist = float(np.linalg.norm(nearest_b.T_world_block[:2, 3] - p_tcp[:2]))
+        if dist > 0.065:
+            return None
+        p_new = p_tcp.copy()
+        p_new[0] = float(nearest_b.T_world_block[0, 3])
+        p_new[1] = float(nearest_b.T_world_block[1, 3])
+        # Keep yaw aligned along nearest brick's short grasp axis
+        R_wb = nearest_b.T_world_block[:3, :3]
+        short_idx = 0 if nearest_b.spec.dims_m[0] <= nearest_b.spec.dims_m[1] else 1
+        y0 = math.atan2(float(R_wb[1, short_idx]), float(R_wb[0, short_idx]))
+        yaw_cands = [y0, y0 + math.pi]
+        if max(nearest_b.spec.dims_m[:2]) / max(min(nearest_b.spec.dims_m[:2]), 1e-4) < 1.18:
+            y1 = math.atan2(float(R_wb[1, 1 - short_idx]), float(R_wb[0, 1 - short_idx]))
+            yaw_cands.extend([y1, y1 + math.pi])
+        best_yaw = min(
+            yaw_cands,
+            key=lambda yc: abs((yc - jaw_yaw + math.pi) % (2 * math.pi) - math.pi),
+        )
+        return p_new, float(best_yaw)
+
+    def _recover_and_relocalize_to_pregrasp(
+        self,
+        brick: PerceivedBrick,
+        p_tcp: np.ndarray,
+        jaw_yaw: float,
+        grasp_sol: GraspIKSolution,
+        pre_sol: GraspIKSolution,
+        steep_pitches: tuple[float, ...],
+        should_retry: bool,
+    ) -> tuple[np.ndarray, float, GraspIKSolution, GraspIKSolution, float]:
+        """Release, lift to `pre_sol`, and re-center from Top-RGB when a pick misses or slips."""
+        self.arm.clear_gripper_overload_for_release()
+        self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
+        self._active_open_pct = min(0.32, self._active_open_pct + 0.03)
+        self.arm.move_to_pose(
+            pre_sol.q_grasp,
+            gripper_pct=self._active_open_pct,
+            speed=720,
+            acc=54,
+            timeout_s=3.2,
+            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+        )
+        if should_retry:
+            reloc = self._relocalize_missed_brick_from_top_rgb(p_tcp, jaw_yaw)
+            if reloc is not None:
+                p_tcp, jaw_yaw = reloc
+                grasp_sol, _ = solve_adaptive_grasp_pose(
+                    self.ik,
+                    p_tcp,
+                    jaw_yaw_world=jaw_yaw,
+                    q_posture=grasp_sol.q_grasp,
+                    pitches_deg=steep_pitches,
+                    local_seed_only=True,
+                )
+                pre_sol, _ = solve_adaptive_grasp_pose(
+                    self.ik,
+                    np.array([p_tcp[0], p_tcp[1], float(p_tcp[2]) + 0.075], dtype=np.float64),
+                    jaw_yaw_world=jaw_yaw,
+                    q_posture=pre_sol.q_grasp,
+                    pitches_deg=steep_pitches,
+                    local_seed_only=True,
+                )
+                self._active_grasp_sol = grasp_sol
+                self.arm.move_to_pose(
+                    pre_sol.q_grasp,
+                    gripper_pct=self._active_open_pct,
+                    speed=680,
+                    acc=52,
+                    include_gripper=False,
+                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                )
+        return p_tcp, jaw_yaw, grasp_sol, pre_sol, time.time()
 
     def _skill_localize_next_cluster_block(self) -> SkillOutcome:
         """Retract to observation home, localize plates & bricks via 2D Top-RGB, & sync Real2Sim."""
@@ -2674,8 +2894,12 @@ class PhysicalSO101CellExecutor:
         brick = self._active_brick
         grasp_sol = self._active_grasp_sol
         p_tcp = grasp_sol.p_tcp_world.copy()
+        base_z_grasp = float(p_tcp[2])
+        z_nom_top = 0.006 + float(brick.spec.dims_m[2])
+        z_brick_est = 0.024 if float(brick.spec.dims_m[2]) > 0.032 else 0.018
         jaw_yaw = float(grasp_sol.jaw_yaw_world)
         steep_pitches = (88.0, 84.0, 78.0, 70.0, 60.0)
+        wrist_servo_hw: tuple[int, int] | None = None if self.arm.dry_run else (540, 960)
 
         pre_sol, _ = solve_adaptive_grasp_pose(
             self.ik,
@@ -2696,20 +2920,25 @@ class PhysicalSO101CellExecutor:
             acc=58,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
+        settle_ts = time.time()
         if not self.arm.dry_run:
-            time.sleep(0.04)
+            time.sleep(0.05)
 
         max_local_attempts = 1 if self.arm.dry_run else 3
         q_clamped = grasp_sol.q_grasp.copy()
         g_contact = self._active_close_pct
+        tri_z_applied = False
         for local_attempt in range(max_local_attempts):
             pass1_straddle_ok = False
             pass1_saw_brick = True
+            tri_obs_a: tuple[np.ndarray, tuple[float, float], int, int] | None = None
 
-            # Pass 1 (High Pre-Grasp ~9.6 cm): Align jaw yaw + coarse XY relative to inner jaw surfaces
+            # Pass 1 (High Pre-Grasp ~9.6 cm): Align jaw yaw + coarse XY + adapt pregrasp width
             try:
                 q_pre_meas, g_pre_meas = self.arm.current_q_and_grip(fresh=True)
-                wrist_pre_snap = self.frame_source.fetch_wrist_snapshot()
+                wrist_pre_snap = self._fetch_settled_wrist_snapshot(
+                    settle_ts, resize_hw=wrist_servo_hw
+                )
                 p_refined, yaw_refined, wrist_crop, pass1_straddle_ok, servo_info = (
                     servo_grasp_with_jaw_corridor(
                         wrist_pre_snap.rgb,
@@ -2720,6 +2949,7 @@ class PhysicalSO101CellExecutor:
                         wrist_cam=self.rig.wrist,
                         max_step_m=0.036,
                         gain=0.92,
+                        z_brick_world=z_brick_est,
                     )
                 )
                 if local_attempt == 0:
@@ -2735,6 +2965,21 @@ class PhysicalSO101CellExecutor:
 
                 pass1_saw_brick = servo_info.get("status") == "ok"
                 if not self.arm.dry_run and pass1_saw_brick:
+                    h_w1, w_w1 = wrist_pre_snap.rgb.shape[:2]
+                    uv1 = servo_info.get("brick_uv")
+                    if uv1 is not None:
+                        tri_obs_a = (q_pre_meas.copy(), (float(uv1[0]), float(uv1[1])), w_w1, h_w1)
+                    short_m = servo_info.get("short_m")
+                    if short_m is not None and local_attempt == 0:
+                        target_open = (
+                            PHYSICAL_NARROW_PREGRASP_PCT
+                            if float(short_m) <= 0.022
+                            else PHYSICAL_WIDE_PREGRASP_PCT
+                        )
+                        self._active_open_pct = max(self._active_open_pct, target_open) if (
+                            float(short_m) > 0.022
+                        ) else min(self._active_open_pct, target_open + 0.015)
+
                     dyaw_p1 = abs((yaw_refined - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
                     dxy_p1 = float(np.linalg.norm(p_refined[:2] - p_tcp[:2]))
                     p_tcp = p_refined
@@ -2771,17 +3016,18 @@ class PhysicalSO101CellExecutor:
                             include_gripper=False,
                             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                         )
-                        time.sleep(0.04)
+                        settle_ts = time.time()
+                        time.sleep(0.05)
                 self._sync_mirror_and_telemetry(
                     q_pre_meas, g_pre_meas, wrist_rgb=wrist_pre_snap.rgb
                 )
             except StaleCameraFrameError:
                 pass
 
-            # Pass 2 (Low-Hover Straddle Loop at z = z_grasp + 27 mm ≈ 48 mm, just above brick studs!):
+            # Pass 2 (Low-Hover Straddle Loop + 2-View Motion-Parallax Height Estimation):
             # Skip if Pass 1 already verified inner-jaw straddle alignment.
             if not self.arm.dry_run and not pass1_straddle_ok:
-                z_low = float(p_tcp[2]) + 0.027
+                z_low = max(float(p_tcp[2]) + 0.027, z_brick_est + 0.022)
                 low_sol, _ = solve_adaptive_grasp_pose(
                     self.ik,
                     np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
@@ -2798,16 +3044,20 @@ class PhysicalSO101CellExecutor:
                     gripper_pct=self._active_open_pct,
                     speed=240,
                     acc=34,
+                    tolerance_ticks=12,
                     include_gripper=False,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
-                time.sleep(0.04)
+                settle_ts = time.time()
+                time.sleep(0.06)
 
                 trimmed_xy_yaw = False
-                for trim_iter in range(2):
+                for trim_iter in range(3):
                     try:
                         q_low_meas, _ = self.arm.current_q_and_grip(fresh=True)
-                        wrist_low_snap = self.frame_source.fetch_wrist_snapshot()
+                        wrist_low_snap = self._fetch_settled_wrist_snapshot(
+                            settle_ts, resize_hw=wrist_servo_hw
+                        )
                         p_trim, yaw_trim, _, straddle_ok, low_info = servo_grasp_with_jaw_corridor(
                             wrist_low_snap.rgb,
                             q_pose=q_low_meas,
@@ -2817,7 +3067,50 @@ class PhysicalSO101CellExecutor:
                             wrist_cam=self.rig.wrist,
                             max_step_m=0.020,
                             gain=0.85,
+                            z_brick_world=z_brick_est,
                         )
+                        if (
+                            not tri_z_applied
+                            and tri_obs_a is not None
+                            and low_info.get("status") == "ok"
+                            and low_info.get("brick_uv") is not None
+                        ):
+                            h_w2, w_w2 = wrist_low_snap.rgb.shape[:2]
+                            if (w_w2, h_w2) == (tri_obs_a[2], tri_obs_a[3]):
+                                uv2 = low_info["brick_uv"]
+                                tri_res = triangulate_wrist_two_view_xyz(
+                                    tri_obs_a[0],
+                                    tri_obs_a[1],
+                                    q_low_meas,
+                                    (float(uv2[0]), float(uv2[1])),
+                                    w_w2,
+                                    h_w2,
+                                    self.ik,
+                                    wrist_cam=self.rig.wrist,
+                                    use_sonix_intrinsics=bool(low_info.get("used_jaw_obs", True)),
+                                )
+                                if tri_res is not None:
+                                    z_tri = float(tri_res[0][2])
+                                    z_new = float(np.clip(z_tri, 0.014, 0.056))
+                                    dz_rim = float(np.clip(z_tri - z_nom_top, -0.003, 0.016))
+                                    p_tcp[2] = float(np.clip(base_z_grasp + dz_rim, 0.019, 0.038))
+                                    tri_z_applied = True
+                                    if abs(z_new - z_brick_est) >= 0.004:
+                                        z_brick_est = z_new
+                                        p_trim, yaw_trim, _, straddle_ok, low_info = (
+                                            servo_grasp_with_jaw_corridor(
+                                                wrist_low_snap.rgb,
+                                                q_pose=q_low_meas,
+                                                p_tcp_nominal=p_tcp,
+                                                jaw_yaw_nominal=jaw_yaw,
+                                                ik=self.ik,
+                                                wrist_cam=self.rig.wrist,
+                                                max_step_m=0.020,
+                                                gain=0.85,
+                                                z_brick_world=z_brick_est,
+                                            )
+                                        )
+
                         if low_info.get("status") != "ok" or straddle_ok:
                             self._sync_mirror_and_telemetry(
                                 q_low_meas, self._active_open_pct, wrist_rgb=wrist_low_snap.rgb
@@ -2826,12 +3119,19 @@ class PhysicalSO101CellExecutor:
 
                         d_trim = float(np.linalg.norm(p_trim[:2] - p_tcp[:2]))
                         dyaw_trim = abs((yaw_trim - jaw_yaw + math.pi) % (2 * math.pi) - math.pi)
-                        if d_trim < 0.0022 and dyaw_trim < math.radians(4.5):
+                        if d_trim < 0.0018 and dyaw_trim < math.radians(3.5):
+                            self._sync_mirror_and_telemetry(
+                                q_low_meas, self._active_open_pct, wrist_rgb=wrist_low_snap.rgb
+                            )
                             break
 
                         p_tcp = p_trim
                         jaw_yaw = yaw_trim
                         trimmed_xy_yaw = True
+                        if trim_iter >= 2:
+                            break
+
+                        z_low = max(float(p_tcp[2]) + 0.027, z_brick_est + 0.022)
                         low_sol, _ = solve_adaptive_grasp_pose(
                             self.ik,
                             np.array([p_tcp[0], p_tcp[1], z_low], dtype=np.float64),
@@ -2843,23 +3143,25 @@ class PhysicalSO101CellExecutor:
                         jaw_yaw = float(low_sol.jaw_yaw_world)
                         self.status_banner = (
                             f"PickBlock({brick.spec.part_id}): Jaw-corridor trim #{trim_iter + 1} "
-                            f"(dxy={d_trim * 1000:.1f}mm, gap={low_info.get('jaw_gap_px')}px)"
+                            f"(dxy={d_trim * 1000:.1f}mm, z={z_brick_est * 1000:.0f}mm)"
                         )
                         self.arm.move_to_pose(
                             low_sol.q_grasp,
                             gripper_pct=self._active_open_pct,
                             speed=210,
                             acc=32,
+                            tolerance_ticks=10,
                             include_gripper=False,
                             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(
                                 q, g, wrist_rgb=wrist_low_snap.rgb
                             ),
                         )
-                        time.sleep(0.04)
+                        settle_ts = time.time()
+                        time.sleep(0.06)
                     except StaleCameraFrameError:
                         break
 
-                if trimmed_xy_yaw:
+                if trimmed_xy_yaw or tri_z_applied:
                     grasp_sol, _ = solve_adaptive_grasp_pose(
                         self.ik,
                         p_tcp,
@@ -2885,6 +3187,7 @@ class PhysicalSO101CellExecutor:
                 gripper_pct=self._active_open_pct,
                 speed=220,
                 acc=34,
+                tolerance_ticks=10,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             # Mark `holding_object = True` BEFORE clamping so gripper holding torque is never relaxed!
@@ -2899,17 +3202,16 @@ class PhysicalSO101CellExecutor:
                 float(g_contact) <= PHYSICAL_EMPTY_JAW_MAX_PCT
                 or float(g_contact) >= (self._active_open_pct - 0.022)
             ):
-                # Jaws closed empty or stopped early — lift to pre_sol and retry in-place once before homing!
-                self.arm.clear_gripper_overload_for_release()
-                self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
-                self._active_open_pct = min(0.32, self._active_open_pct + 0.03)
-                self.arm.move_to_pose(
-                    pre_sol.q_grasp,
-                    gripper_pct=self._active_open_pct,
-                    speed=720,
-                    acc=54,
-                    timeout_s=3.2,
-                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                p_tcp, jaw_yaw, grasp_sol, pre_sol, settle_ts = (
+                    self._recover_and_relocalize_to_pregrasp(
+                        brick,
+                        p_tcp,
+                        jaw_yaw,
+                        grasp_sol,
+                        pre_sol,
+                        steep_pitches,
+                        should_retry=(local_attempt + 1 < max_local_attempts),
+                    )
                 )
                 if local_attempt + 1 < max_local_attempts:
                     self.status_banner = (
@@ -2966,16 +3268,16 @@ class PhysicalSO101CellExecutor:
                 float(g_lifted) <= PHYSICAL_EMPTY_JAW_MAX_PCT
                 or float(g_lifted) < (float(g_contact) - 0.042)
             ):
-                self.arm.clear_gripper_overload_for_release()
-                self._recent_missed_xys.append(brick.T_world_block[:2, 3].copy())
-                self._active_open_pct = min(0.32, self._active_open_pct + 0.03)
-                self.arm.move_to_pose(
-                    pre_sol.q_grasp,
-                    gripper_pct=self._active_open_pct,
-                    speed=720,
-                    acc=54,
-                    timeout_s=2.8,
-                    on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+                p_tcp, jaw_yaw, grasp_sol, pre_sol, settle_ts = (
+                    self._recover_and_relocalize_to_pregrasp(
+                        brick,
+                        p_tcp,
+                        jaw_yaw,
+                        grasp_sol,
+                        pre_sol,
+                        steep_pitches,
+                        should_retry=(local_attempt + 1 < max_local_attempts),
+                    )
                 )
                 if local_attempt + 1 < max_local_attempts:
                     self.status_banner = (

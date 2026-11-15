@@ -1720,3 +1720,43 @@ def test_bowl_circle_tracker_babyros_node() -> None:
         bus.close()
 
 
+def test_wrist_two_view_parallax_triangulation() -> None:
+    """Verify monocular wrist RGB motion parallax recovers true 3D brick height Z."""
+    from brickcell.block_inspector.frax_ik import SO101FraxIK
+    from brickcell.block_inspector.hardware_cell import (
+        _sonix_cam_pose_and_intrinsics,
+        triangulate_wrist_two_view_xyz,
+    )
+
+    ik = SO101FraxIK()
+    p_pre = np.array([0.275, -0.020, 0.115], dtype=np.float64)
+    p_low = np.array([0.275, -0.020, 0.062], dtype=np.float64)
+    sol_pre = ik.solve_grasp_pose(p_pre, jaw_yaw_world=0.1, pitch_down_deg=86.0)
+    sol_low = ik.solve_grasp_pose(
+        p_low, jaw_yaw_world=0.1, pitch_down_deg=86.0, q_posture=sol_pre.q_grasp
+    )
+
+    # Simulate tall brick top center (e.g. 1x2x2 at 44 mm) projected into both 960x540 wrist views
+    p_true = np.array([0.279, -0.017, 0.044], dtype=np.float64)
+    w_w, h_w = 960, 540
+
+    def _proj(q: np.ndarray) -> tuple[float, float]:
+        R_wc, p_wc, K = _sonix_cam_pose_and_intrinsics(ik.fk_world_body3(q), w_w, h_w)
+        pc = R_wc.T @ (p_true - p_wc)
+        assert pc[2] > 0.015
+        return float(K[0, 0] * (pc[0] / pc[2]) + K[0, 2]), float(
+            K[1, 1] * (pc[1] / pc[2]) + K[1, 2]
+        )
+
+    uv_pre = _proj(sol_pre.q_grasp)
+    uv_low = _proj(sol_low.q_grasp)
+    tri = triangulate_wrist_two_view_xyz(
+        sol_pre.q_grasp, uv_pre, sol_low.q_grasp, uv_low, w_w, h_w, ik, use_sonix_intrinsics=True
+    )
+    assert tri is not None
+    p_est, ray_sep = tri
+    assert ray_sep < 0.001
+    assert np.linalg.norm(p_est - p_true) < 0.002
+
+
+
