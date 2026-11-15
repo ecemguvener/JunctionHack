@@ -2851,7 +2851,8 @@ deployed a second instance of `plate-calibrated-707-v1` as a dedicated BabyROS n
 - **Executed verification checks on `intel` (`/home/intel/brickcell-deploy/.venv`) & Windows host**:
   - `.venv/bin/ruff check src tests scripts services/wrist_anomaly_detector camera-ui/camui.py`: `All checks passed!`.
   - `.venv/bin/ruff format --check src tests scripts services/wrist_anomaly_detector camera-ui/camui.py`: `139 files already formatted`.
-  - `.venv/bin/pytest -v tests/test_camui_detection.py tests/test_heuristic_sort_mode.py tests/test_mark_scan.py tests/test_mark_bundle.py tests/test_inspection.py`: `75 passed in 2.92s`.
+  - `.venv/bin/pytest -v tests/test_camui_detection.py tests/test_heuristic_sort_mode.py tests/test_mark_scan.py tests/test_mark_bundle.py tests/test_inspection.py`: `75 passed in 2.51s`.
+  - `MUJOCO_GL=egl .venv/bin/pytest -v tests/test_block_inspector.py -k test_wrist_anomaly_babyros_node_publishes_anomaly_alerts`: `1 passed, 19 deselected in 1.28s`.
   - `node camera-ui/test_ui.cjs` (Windows host): `Camera red warning and stale/offline reset checks passed`.
 - **Skipped checks & limitations**:
   - `camera-ui/test_ui.cjs` could not run directly on `intel` because `node` is not installed there.
