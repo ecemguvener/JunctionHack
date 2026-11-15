@@ -63,9 +63,14 @@ from brickcell.block_inspector.real2sim import (
     project_world_obb_to_image_box,
     real_intel_camera_poses_world,
 )
-from brickcell.block_inspector.runtime_bus import InProcessRuntimeBus
+from brickcell.block_inspector.runtime_bus import (
+    CANONICAL_TOPICS,
+    InProcessRuntimeBus,
+    pack_rgbd_frame_nddc,
+)
 from brickcell.block_inspector.runtime_nodes import (
     BowlCircleTrackerNode,
+    WristAnomalyNode,
     detect_bowl_bounding_circles_top_rgb,
 )
 from brickcell.block_inspector.twin import (
@@ -549,6 +554,24 @@ class RealCameraAnomalyInspector:
         if norm in self.camera_detectors:
             return self.camera_detectors[norm]
         return {}
+
+    def active_threshold_for_camera(self, camera_name: str = "plate") -> float:
+        rgb_det = self._detectors_for_camera(camera_name).get("rgb")
+        thr = getattr(rgb_det, "threshold", None) if rgb_det is not None else None
+        if thr is not None and hasattr(thr, "value"):
+            return float(thr.value)
+        return float(self.dark_mark_threshold)
+
+    def model_version_for_camera(self, camera_name: str = "plate") -> str | None:
+        rgb_det = self._detectors_for_camera(camera_name).get("rgb")
+        ver = getattr(rgb_det, "model_version", None) if rgb_det is not None else None
+        return str(ver) if ver else None
+
+    def camui_source_tag(self, camera_name: str = "plate") -> str:
+        ver = self.model_version_for_camera(camera_name)
+        if ver:
+            return f"patchcore_openvino_{ver}"
+        return self.inspector_mode
 
     def close(self) -> None:
         if self._executor is not None:
@@ -2087,26 +2110,86 @@ class PhysicalSO101CellExecutor:
         self._recent_missed_xys: list[np.ndarray] = []
         self._cached_plate_scan_bounds: tuple[np.ndarray, np.ndarray] | None = None
         self._cached_drop_pose_by_pile: dict[str, tuple[np.ndarray, float]] = {}
+        self._last_plate_frame_id: str | None = None
+        self._last_plate_eval_res: FrameInspectionResult | None = None
 
         # Dedicated real-time BabyROS node tracking green (`good`) & red/pink (`defective`) bowl circles
         self._rt_bus = InProcessRuntimeBus()
         R_top, p_top, K_top = self.real_cams["top"]
         self._bowl_circle_node = BowlCircleTrackerNode(self._rt_bus, R_top, p_top, K_top)
+        wrist_det = self.inspector._detectors_for_camera("wrist").get(
+            "rgb"
+        ) or self.inspector._detectors_for_camera("plate").get("rgb")
+        self._wrist_anomaly_node: WristAnomalyNode | None = (
+            WristAnomalyNode(
+                bus=self._rt_bus,
+                detector=wrist_det,
+                camui=self.camui,
+                crop_box=self.inspector.camera_crops.get("wrist"),
+            )
+            if (
+                wrist_det is not None
+                and getattr(wrist_det, "threshold", None) is not None
+                and hasattr(wrist_det, "model_version")
+                and hasattr(wrist_det, "metadata")
+            )
+            else None
+        )
         if not self.arm.dry_run:
             self._bowl_circle_node.start_polling(
                 lambda: self.frame_source.fetch_d415_snapshot("top").rgb,
                 hz=12.0,
             )
+            if self._wrist_anomaly_node is not None:
+                self._wrist_anomaly_node.start_polling(
+                    lambda: self.frame_source.fetch_wrist_snapshot().rgb,
+                    hz=4.0,
+                )
+        if self.camui is not None:
+            self.camui.start_keepalive(period_s=1.8)
+            self._report_camui_status()
 
     def close(self) -> None:
+        if self._wrist_anomaly_node is not None:
+            self._wrist_anomaly_node.close()
         self._bowl_circle_node.close()
         self._rt_bus.close()
         if self.dashboard is not None:
             self.dashboard.clear_focus()
             self.dashboard.clear_anomalies()
             self.dashboard.stop_keepalive()
+        if self.camui is not None:
+            self.camui.stop_keepalive()
         self.inspector.close()
         self.twin.close()
+
+    def _report_camui_status(self) -> None:
+        if self.camui is None:
+            return
+        thr = self.inspector.active_threshold_for_camera("plate")
+        ver = self.inspector.model_version_for_camera("plate")
+        source_tag = self.inspector.camui_source_tag("plate")
+        model_label = f"PatchCore {ver}" if ver else self.inspector.inspector_mode
+        if self.anomaly_untrusted_error is not None:
+            malformed: bool | None = None
+            detail = f"UNTRUSTED ({self.anomaly_untrusted_error}) | {model_label}"[:200]
+        else:
+            malformed = bool(self.anomaly_flagged)
+            if self.max_plate_anomaly_distance is not None:
+                verdict = "DEFECT FLAGGED" if malformed else "GOOD"
+                detail = (
+                    f"{verdict} | {model_label} raw_dist={self.max_plate_anomaly_distance:.3f} "
+                    f"vs thr {thr:.3f} | {self.status_banner}"
+                )[:200]
+            else:
+                detail = f"CONNECTED | {model_label} (thr {thr:.3f}) | {self.status_banner}"[:200]
+        self.camui.report(
+            malformed=malformed,
+            detail=detail,
+            camera="side",
+            frame_id=self._last_plate_frame_id,
+            source=source_tag,
+        )
 
     def _sync_mirror_and_telemetry(
         self,
@@ -2122,11 +2205,12 @@ class PhysicalSO101CellExecutor:
             grip_pct = g_cur if grip_pct is None else grip_pct
 
         self.twin.set_arm_state_direct(q_rad, grip_pct, sync_viewer=True)
-        if self.camui is not None:
-            malformed = (
-                True if self.anomaly_flagged else (False if self.plate_scan_completed else None)
+        if wrist_rgb is not None and self._wrist_anomaly_node is not None:
+            self._rt_bus.publish(
+                CANONICAL_TOPICS["wrist_frame"],
+                pack_rgbd_frame_nddc(wrist_rgb, time.time_ns()),
             )
-            self.camui.report(malformed=malformed, detail=self.status_banner)
+        self._report_camui_status()
 
         if self.hud is not None:
             frames_map: dict[str, np.ndarray] = {}
@@ -2159,7 +2243,7 @@ class PhysicalSO101CellExecutor:
                         else "raw_anomaly_distance_not_probability"
                     ),
                     "max_plate_anomaly_distance": self.max_plate_anomaly_distance,
-                    "anomaly_threshold": self.inspector.dark_mark_threshold,
+                    "anomaly_threshold": self.inspector.active_threshold_for_camera("plate"),
                     "anomaly_flagged": self.anomaly_flagged,
                     "anomaly_messages": list(self.anomaly_messages),
                     "sorted_pile": self.sorted_pile,
@@ -2409,6 +2493,9 @@ class PhysicalSO101CellExecutor:
             z_band_m=z_band_m,
             camera_name=snap.camera_name,
         )
+        if snap.camera_name in ("plate", "side"):
+            self._last_plate_frame_id = snap.frame_id
+            self._last_plate_eval_res = res
         if res.valid_view:
             self.max_plate_anomaly_distance = (
                 res.raw_anomaly_distance
@@ -2616,6 +2703,9 @@ class PhysicalSO101CellExecutor:
                         return SkillOutcome(False, reason=self.anomaly_untrusted_error)
                     continue
 
+                if is_target:
+                    self._last_plate_frame_id = plate_snap.frame_id
+                    self._last_plate_eval_res = cand_res
                 if is_target and cand_res.valid_view:
                     self.max_plate_anomaly_distance = (
                         cand_res.raw_anomaly_distance

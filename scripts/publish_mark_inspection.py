@@ -73,9 +73,29 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0, detector=None):
         if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h) or min(x1 - x0, y1 - y0) < 20:
             raise ValueError("Select an in-frame brick crop of at least 20x20")
         roi = rgb[y0:y1, x0:x1]
-        prediction = detector.predict(roi)
-        score = float(prediction.score)
+        from brickcell.inspection.block_surface import SurfaceViewError
+
         thr_val = float(detector.threshold.value)
+        try:
+            prediction = detector.predict(roi)
+        except SurfaceViewError as exc:
+            return dict(
+                camera="plate",
+                serial=serial,
+                frame_id=packet["frame_id"],
+                captured_at=packet["time"],
+                synthetic=False,
+                model_version=detector.model_version,
+                threshold_version=detector.threshold.version,
+                threshold=thr_val,
+                decision="REINSPECT",
+                reason=f"Calibrated PatchCore waiting for red brick surface ({exc})",
+                raw_distance=None,
+                image_jpeg=jpeg(rgb),
+                overlay_jpeg=None,
+                automatic_sorting_allowed=False,
+            )
+        score = float(prediction.score)
         decision = str(detector.threshold.decide(score))
         found = decision == "DEFECTIVE"
         overlay = rgb.copy()

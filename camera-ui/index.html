@@ -138,8 +138,13 @@ const TEXT = {
 
 function showDetection(d) {
   const state = d ? d.state : 'offline';
+  const perCam = d && d.cameras ? d.cameras : null;
   for (const [name, t] of Object.entries(tiles)) {
-    t.tile.classList.toggle('alert', state === 'malformed' && name === (d.camera || 'side'));
+    const camState = perCam && perCam[name] ? perCam[name].state : null;
+    const isAlert = camState
+      ? camState === 'malformed'
+      : (state === 'malformed' && name === (d.camera || 'side'));
+    t.tile.classList.toggle('alert', isAlert);
   }
   const [title, sub] = TEXT[state] || TEXT.none;
   const el = document.getElementById('status');

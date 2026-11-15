@@ -110,3 +110,135 @@ def test_calibrated_patchcore_event_bridges_to_camui():
     assert good["malformed"] is False
     assert good["source"] == "patchcore_openvino_6d8add3e0688a925"
     assert "GOOD" in good["detail"]
+
+
+def test_camui_reporter_posts_patchcore_source_and_frame_to_detection_store(monkeypatch):
+    from brickcell.block_inspector.camera_adapters import CamUiReporter
+
+    store = ui.Detection(5.0)
+    reporter = CamUiReporter("http://127.0.0.1:8093")
+
+    def fake_post(body: dict) -> bool:
+        store.update(body)
+        return True
+
+    monkeypatch.setattr(reporter, "_post_payload", fake_post)
+    ok = reporter.report(
+        malformed=False,
+        detail="GOOD | PatchCore 6d8add3e0688a925 raw_dist=1.820 vs thr 2.454",
+        camera="side",
+        frame_id="243622060450-1001",
+        source="patchcore_openvino_6d8add3e0688a925",
+    )
+    assert ok is True
+    status = store.status()
+    assert status["state"] == "ok"
+    assert status["camera"] == "side"
+    assert status["frame_id"] == "243622060450-1001"
+    assert status["source"] == "patchcore_openvino_6d8add3e0688a925"
+    assert "PatchCore 6d8add3e0688a925" in status["detail"]
+
+
+def test_camui_tracks_side_and_wrist_independently():
+    store = ui.Detection(5.0)
+    store.update(
+        {
+            "malformed": True,
+            "detail": "DEFECT FLAGGED | PatchCore 2.610",
+            "camera": "side",
+            "frame_id": "243622060450-1",
+            "source": "patchcore_openvino_6d8add3e0688a925",
+        }
+    )
+    store.update(
+        {
+            "malformed": False,
+            "detail": "GOOD | Wrist PatchCore 1.920",
+            "camera": "wrist",
+            "frame_id": "sonix-wrist-1",
+            "source": "patchcore_openvino_6d8add3e0688a925",
+        }
+    )
+    status = store.status()
+    assert status["state"] == "malformed"
+    assert status["camera"] == "side"
+    assert status["cameras"]["side"]["state"] == "malformed"
+    assert status["cameras"]["wrist"]["state"] == "ok"
+
+
+def test_wrist_event_bridges_to_camui():
+    payload = bridge.detection_payload(
+        event(
+            camera="wrist",
+            serial="sonix-wrist",
+            decision="DEFECTIVE",
+            model_version="6d8add3e0688a925",
+            threshold_version="4128199aec09eedb",
+            raw_distance=2.71,
+            threshold=2.4538,
+        ),
+        now=101,
+    )
+    assert payload["camera"] == "wrist"
+    assert payload["malformed"] is True
+    assert payload["source"] == "patchcore_openvino_6d8add3e0688a925"
+    assert "Wrist PatchCore" in payload["detail"]
+
+
+def test_wrist_anomaly_babyros_node_integrates_with_camui(monkeypatch):
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from brickcell.block_inspector.camera_adapters import CamUiReporter
+    from brickcell.block_inspector.runtime_bus import (
+        CANONICAL_TOPICS,
+        InProcessRuntimeBus,
+        pack_rgbd_frame_nddc,
+    )
+    from brickcell.block_inspector.runtime_nodes import WristAnomalyNode
+
+    store = ui.Detection(5.0)
+    reporter = CamUiReporter("http://127.0.0.1:8093")
+    monkeypatch.setattr(reporter, "_post_payload", lambda body: (store.update(body), True)[1])
+    reporter.report(
+        malformed=False,
+        detail="GOOD | Plate PatchCore 2.100",
+        camera="side",
+        frame_id="243622060450-10",
+        source="patchcore_openvino_6d8add3e0688a925",
+    )
+
+    scores = iter([2.71, 2.12])
+    detector = SimpleNamespace(
+        model_version="6d8add3e0688a925",
+        metadata={"synthetic": False},
+        threshold=SimpleNamespace(
+            value=2.453849196434021,
+            version="4128199aec09eedb",
+            decide=lambda sc: "DEFECTIVE" if sc >= 2.453849196434021 else "GOOD",
+        ),
+        predict=lambda roi: SimpleNamespace(score=next(scores), latency_ms=18.5, anomaly_map=None),
+    )
+    bus = InProcessRuntimeBus()
+    published = []
+    bus.subscribe(CANONICAL_TOPICS["wrist_anomaly"], published.append)
+    node = WristAnomalyNode(bus=bus, detector=detector, camui=reporter)
+
+    rgb = np.full((64, 64, 3), 180, dtype=np.uint8)
+    bus.publish(CANONICAL_TOPICS["wrist_frame"], pack_rgbd_frame_nddc(rgb, 1_000))
+    status1 = store.status()
+    assert len(published) == 1
+    assert published[0]["decision"] == "DEFECTIVE"
+    assert status1["state"] == "malformed"
+    assert status1["cameras"]["side"]["state"] == "ok"
+    assert status1["cameras"]["wrist"]["state"] == "malformed"
+
+    bus.publish(CANONICAL_TOPICS["wrist_frame"], pack_rgbd_frame_nddc(rgb, 2_000))
+    status2 = store.status()
+    assert published[1]["decision"] == "GOOD"
+    assert status2["state"] == "ok"
+    assert status2["cameras"]["wrist"]["state"] == "ok"
+    assert status2["cameras"]["side"]["state"] == "ok"
+    node.close()
+    bus.close()

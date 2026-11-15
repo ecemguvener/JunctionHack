@@ -10,6 +10,7 @@ Implements the full decoupled runtime graph over `InProcessRuntimeBus` or `BabyR
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -662,6 +663,241 @@ class BowlCircleTrackerNode:
 
         self._poll_thread = threading.Thread(
             target=_loop, name="babyros-bowl-circle-tracker", daemon=True
+        )
+        self._poll_thread.start()
+
+    def stop(self) -> None:
+        self._stop_evt.set()
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=1.0)
+        self._poll_thread = None
+
+    def close(self) -> None:
+        self.stop()
+        if self._unsub is not None:
+            self._unsub()
+            self._unsub = None
+
+
+class WristAnomalyNode:
+    """Dedicated BabyROS node running calibrated OpenVINO PatchCore on the wrist camera stream.
+
+    Subscribes to `so101/camera/wrist/frame`, runs OpenVINO CPU inference using `detector`,
+    publishes structured detections on `so101/inspection/wrist_anomaly`, and forwards fresh
+    results (`camera="wrist"`) to `camui.py` (`/api/detection`). Never issues robot commands.
+    """
+
+    def __init__(
+        self,
+        bus: Any,
+        detector: OpenVINODetector,
+        camui: CamUiReporter | None = None,
+        topic_in: str = CANONICAL_TOPICS["wrist_frame"],
+        topic_out: str = CANONICAL_TOPICS["wrist_anomaly"],
+        crop_box: list[int] | None = None,
+        serial: str = "sonix-wrist",
+        events_path: Path | None = None,
+    ) -> None:
+        if detector.threshold is None:
+            raise ValueError("WristAnomalyNode requires a calibrated OpenVINODetector threshold")
+        self.bus = bus
+        self.detector = detector
+        self.camui = camui
+        self.topic_in = topic_in
+        self.topic_out = topic_out
+        self.crop_box = list(crop_box) if crop_box is not None else None
+        self.serial = serial
+        self.events_path = Path(events_path) if events_path is not None else None
+        self._lock = threading.Lock()
+        self.frames_processed: int = 0
+        self.alerts_published: int = 0
+        self.last_result: dict[str, Any] | None = None
+        self._stop_evt = threading.Event()
+        self._poll_thread: threading.Thread | None = None
+        self._unsub = self.bus.subscribe(self.topic_in, self._on_wrist_frame)
+
+    def _on_wrist_frame(self, msg: dict[str, Any]) -> None:
+        rgb = msg.get("rgb")
+        if rgb is None:
+            return
+        ts_arr = msg.get("timestamp_ns")
+        ts_ns = int(np.asarray(ts_arr).reshape(-1)[0]) if ts_arr is not None else None
+        raw_fid = msg.get("frame_id")
+        frame_id = str(raw_fid) if isinstance(raw_fid, str) and raw_fid else None
+        crop_arr = msg.get("crop_box")
+        crop_override = (
+            [int(v) for v in np.asarray(crop_arr).reshape(-1)[:4]] if crop_arr is not None else None
+        )
+        self.process_rgb(
+            np.asarray(rgb, dtype=np.uint8),
+            timestamp_ns=ts_ns,
+            frame_id=frame_id,
+            crop_box=crop_override,
+        )
+
+    def process_rgb(
+        self,
+        rgb: np.ndarray,
+        timestamp_ns: int | None = None,
+        frame_id: str | None = None,
+        crop_box: list[int] | None = None,
+    ) -> dict[str, Any] | None:
+        from brickcell.inspection.block_surface import SurfaceViewError
+
+        if rgb is None or rgb.size == 0 or rgb.ndim != 3:
+            return None
+        h, w = rgb.shape[:2]
+        active_crop = crop_box if crop_box is not None else self.crop_box
+        if active_crop is not None and len(active_crop) == 4:
+            x0, y0, x1, y1 = (int(v) for v in active_crop)
+            if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h) or min(x1 - x0, y1 - y0) < 20:
+                return None
+            roi = rgb[y0:y1, x0:x1]
+            used_crop = [x0, y0, x1, y1]
+        else:
+            roi = rgb
+            used_crop = [0, 0, w, h]
+
+        assert self.detector.threshold is not None
+        thr_val = float(self.detector.threshold.value)
+        ts_ns = int(timestamp_ns) if timestamp_ns is not None else time.time_ns()
+        captured_at = ts_ns / 1e9
+        if not (abs(time.time() - captured_at) <= 30.0):
+            captured_at = time.time()
+
+        with self._lock:
+            seq = self.frames_processed + 1
+            fid = frame_id or f"{self.serial}-{seq}"
+
+        raw_score: float | None = None
+        latency_ms = 0.0
+        decision = "REINSPECT"
+        malformed: bool | None = None
+        detail = ""
+        try:
+            pred = self.detector.predict(roi)
+            score = float(pred.score)
+            if not np.isfinite(score):
+                raise ValueError("Non-finite OpenVINO score on wrist frame")
+            raw_score = score
+            latency_ms = float(pred.latency_ms)
+            decision = str(self.detector.threshold.decide(score))
+            if decision == "DEFECTIVE":
+                malformed = True
+                detail = (
+                    f"DEFECT FLAGGED | Wrist PatchCore {score:.3f} vs thr {thr_val:.3f} "
+                    f"({self.detector.model_version})"
+                )[:200]
+            elif decision == "GOOD":
+                malformed = False
+                detail = (
+                    f"GOOD | Wrist PatchCore {score:.3f} vs thr {thr_val:.3f} "
+                    f"({self.detector.model_version})"
+                )[:200]
+            else:
+                decision = "REINSPECT"
+                malformed = None
+                detail = (
+                    f"REINSPECT | Wrist PatchCore {score:.3f} near thr {thr_val:.3f} "
+                    f"({self.detector.model_version})"
+                )[:200]
+        except SurfaceViewError as exc:
+            decision = "REINSPECT"
+            malformed = None
+            detail = f"REINSPECT | Wrist surface check ({exc})"[:200]
+
+        payload: dict[str, Any] = {
+            "camera": "wrist",
+            "serial": self.serial,
+            "frame_id": fid,
+            "captured_at": captured_at,
+            "timestamp_ns": np.array([ts_ns], dtype=np.int64),
+            "synthetic": bool(self.detector.metadata.get("synthetic", False)),
+            "model_version": self.detector.model_version,
+            "threshold_version": self.detector.threshold.version,
+            "threshold": np.array([thr_val], dtype=np.float64),
+            "raw_distance": (
+                np.array([raw_score], dtype=np.float64) if raw_score is not None else None
+            ),
+            "score_type": "raw_patchcore_distance_not_probability",
+            "decision": decision,
+            "malformed": malformed,
+            "detail": detail,
+            "crop": used_crop,
+            "latency_ms": latency_ms,
+        }
+        with self._lock:
+            self.frames_processed += 1
+            if malformed is True:
+                self.alerts_published += 1
+            self.last_result = payload
+
+        self.bus.publish(self.topic_out, payload)
+        if malformed is True and raw_score is not None:
+            self.bus.publish(
+                CANONICAL_TOPICS["inspection_anomaly"],
+                {
+                    "camera": "wrist",
+                    "raw_distance": np.array([raw_score], dtype=np.float64),
+                    "threshold": np.array([thr_val], dtype=np.float64),
+                    "model_version": self.detector.model_version,
+                    "score_type": "raw_patchcore_distance_not_probability",
+                },
+            )
+
+        if self.events_path is not None:
+            event_row = {
+                "camera": "wrist",
+                "serial": self.serial,
+                "frame_id": fid,
+                "captured_at": captured_at,
+                "synthetic": bool(payload["synthetic"]),
+                "model_version": self.detector.model_version,
+                "threshold_version": self.detector.threshold.version,
+                "threshold": thr_val,
+                "decision": decision,
+                "raw_distance": raw_score,
+                "score_type": "raw_patchcore_distance_not_probability",
+                "crop": used_crop,
+                "received_at": time.time(),
+            }
+            self.events_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.events_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event_row) + "\n")
+
+        if self.camui is not None:
+            self.camui.report(
+                malformed=malformed,
+                detail=detail,
+                camera="wrist",
+                frame_id=fid,
+                captured_at=captured_at,
+                source=f"patchcore_openvino_{self.detector.model_version}",
+            )
+        return payload
+
+    def start_polling(self, fetch_rgb_fn: Callable[[], np.ndarray], hz: float = 4.0) -> None:
+        """Run real-time background wrist PatchCore anomaly updates at `hz` Hz."""
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            return
+        self._stop_evt.clear()
+        period_s = 1.0 / max(0.5, float(hz))
+
+        def _loop() -> None:
+            while not self._stop_evt.is_set():
+                t0 = time.monotonic()
+                try:
+                    rgb = fetch_rgb_fn()
+                    if rgb is not None and rgb.size > 0:
+                        self.process_rgb(rgb)
+                except Exception:
+                    pass
+                rem = period_s - (time.monotonic() - t0)
+                if rem > 0.0:
+                    self._stop_evt.wait(rem)
+
+        self._poll_thread = threading.Thread(
+            target=_loop, name="babyros-wrist-anomaly-tracker", daemon=True
         )
         self._poll_thread.start()
 

@@ -97,9 +97,13 @@ class CamUiReporter:
     def __init__(self, base_url: str = "http://127.0.0.1:8093", timeout_s: float = 1.5) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
+        self._lock = threading.Lock()
+        self._latest_by_camera: dict[str, dict] = {}
+        self._stop_event = threading.Event()
+        self._keepalive_thread: threading.Thread | None = None
 
-    def report(self, malformed: bool | None, detail: str) -> bool:
-        payload = json.dumps({"malformed": malformed, "detail": detail}).encode("utf-8")
+    def _post_payload(self, body: dict) -> bool:
+        payload = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             f"{self.base_url}/api/detection",
             data=payload,
@@ -111,6 +115,54 @@ class CamUiReporter:
                 return 200 <= resp.status < 300
         except (urllib.error.URLError, OSError):
             return False
+
+    def report(
+        self,
+        malformed: bool | None,
+        detail: str,
+        *,
+        camera: str = "side",
+        frame_id: str | None = None,
+        captured_at: float | None = None,
+        source: str = "unknown",
+    ) -> bool:
+        body: dict = {
+            "malformed": malformed,
+            "detail": str(detail)[:200],
+            "camera": camera,
+            "frame_id": frame_id,
+            "source": str(source)[:200],
+        }
+        if captured_at is not None:
+            body["captured_at"] = float(captured_at)
+        with self._lock:
+            self._latest_by_camera[camera] = {k: v for k, v in body.items() if k != "captured_at"}
+        return self._post_payload(body)
+
+    def start_keepalive(self, period_s: float = 1.8) -> None:
+        if self._keepalive_thread is not None and self._keepalive_thread.is_alive():
+            return
+        self._stop_event.clear()
+
+        def _worker() -> None:
+            while not self._stop_event.is_set():
+                with self._lock:
+                    snapshots = [dict(v) for v in self._latest_by_camera.values()]
+                for cached in snapshots:
+                    if cached.get("malformed") is not None:
+                        self._post_payload(cached)
+                self._stop_event.wait(period_s)
+
+        self._keepalive_thread = threading.Thread(
+            target=_worker, name="camui-keepalive", daemon=True
+        )
+        self._keepalive_thread.start()
+
+    def stop_keepalive(self) -> None:
+        self._stop_event.set()
+        if self._keepalive_thread is not None:
+            self._keepalive_thread.join(timeout=1.5)
+            self._keepalive_thread = None
 
 
 class TwinDashboardReporter:

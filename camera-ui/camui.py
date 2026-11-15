@@ -82,7 +82,7 @@ class Feed:
 
 
 class Detection:
-    """The newest malform result. Nothing sets it until a model is connected."""
+    """The newest per-camera malform results. Nothing sets a camera until its model connects."""
 
     def __init__(self, stale_s: float):
         self.lock = threading.Lock()
@@ -93,6 +93,7 @@ class Detection:
         self.camera = "side"
         self.frame_id = None
         self.source = "unknown"
+        self._by_camera: dict[str, dict] = {}
 
     def update(self, payload: dict) -> None:
         malformed = payload.get("malformed")
@@ -117,27 +118,87 @@ class Detection:
         if not isinstance(source, str) or len(source) > 200:
             raise ValueError("Invalid detection source")
         with self.lock:
+            self._by_camera[camera] = {
+                "malformed": malformed,
+                "detail": detail,
+                "stamp": None if malformed is None else float(captured_at),
+                "camera": camera,
+                "frame_id": frame_id,
+                "source": source,
+            }
             self.malformed, self.detail = malformed, detail
-            self.stamp = None if malformed is None else captured_at
+            self.stamp = None if malformed is None else float(captured_at)
             self.camera, self.frame_id, self.source = camera, frame_id, source
 
+    def _entry_status(self, camera: str, entry: dict, now: float) -> dict:
+        stamp = entry["stamp"]
+        malformed = entry["malformed"]
+        age = now - stamp if stamp is not None else None
+        if malformed is None or age is None:
+            state = "none"
+        elif age > self.stale_s:
+            state = "stale"
+        else:
+            state = "malformed" if malformed else "ok"
+        return {
+            "state": state,
+            "detail": entry["detail"],
+            "age_s": age,
+            "camera": camera,
+            "frame_id": entry["frame_id"],
+            "source": entry["source"],
+        }
+
     def status(self) -> dict:
+        now = time.time()
         with self.lock:
-            age = time.time() - self.stamp if self.stamp is not None else None
-            if self.malformed is None or age is None:
-                state = "none"
-            elif age > self.stale_s:
-                state = "stale"
-            else:
-                state = "malformed" if self.malformed else "ok"
-            return {
-                "state": state,
-                "detail": self.detail,
-                "age_s": age,
-                "camera": self.camera,
-                "frame_id": self.frame_id,
-                "source": self.source,
+            if not self._by_camera:
+                return {
+                    "state": "none",
+                    "detail": self.detail,
+                    "age_s": None,
+                    "camera": self.camera,
+                    "frame_id": self.frame_id,
+                    "source": self.source,
+                    "cameras": {},
+                }
+            per_camera = {
+                cam: self._entry_status(cam, entry, now) for cam, entry in self._by_camera.items()
             }
+        malformed_list = [s for s in per_camera.values() if s["state"] == "malformed"]
+        ok_list = [s for s in per_camera.values() if s["state"] == "ok"]
+        stale_list = [s for s in per_camera.values() if s["state"] == "stale"]
+        if malformed_list:
+            primary = min(
+                malformed_list, key=lambda s: s["age_s"] if s["age_s"] is not None else 0.0
+            )
+            active = malformed_list + ok_list
+        elif ok_list:
+            primary = min(ok_list, key=lambda s: s["age_s"] if s["age_s"] is not None else 0.0)
+            active = ok_list
+        elif stale_list:
+            primary = min(stale_list, key=lambda s: s["age_s"] if s["age_s"] is not None else 0.0)
+            active = [primary]
+        else:
+            primary = next(iter(per_camera.values()))
+            active = [primary]
+        if len(active) > 1:
+            combined = " | ".join(
+                f"{s['camera']}: {s['detail']}" if s["detail"] else f"{s['camera']}: {s['state']}"
+                for s in active
+            )
+            detail = combined[:200]
+        else:
+            detail = primary["detail"]
+        return {
+            "state": primary["state"],
+            "detail": detail,
+            "age_s": primary["age_s"],
+            "camera": primary["camera"],
+            "frame_id": primary["frame_id"],
+            "source": primary["source"],
+            "cameras": per_camera,
+        }
 
 
 def make_handler(feeds: dict[str, Feed], detection: Detection):
