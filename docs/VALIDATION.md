@@ -2229,3 +2229,47 @@ inference runs on API requests/browser polling; crops are session-only. No
 camera device was opened directly, no arm command was issued, and no interrupted
 cycle was resumed. Wrist modeling, independent calibration and arm-held masking
 remain required for the physical two-camera sorting path.
+
+### Real mark overlays in the existing camera wall — 2026-11-15
+
+Moved the existing `score_brick_roi_dark_mark` function unchanged into the
+image-only `brickcell.inspection.dark_marks` module and imported it back into
+`hardware_cell.py`. Added `scripts/publish_mark_inspection.py` to publish real,
+fresh, frame-paired stroke boxes directly to the existing Studio camera-wall
+inspection endpoint. No standalone animation is shipped. No generated images
+were published to the live wall.
+
+The publisher reports dark-mark contrast, source-code hash/settings provenance,
+and proposed pink-plate destination, with UNCALIBRATED status and sorting
+permission false. Missing/ambiguous red targets return REINSPECT without a score
+or overlay. Added default dominant-red-region tracking after direct visual
+review showed the old fixed yellow crop had become empty as the scene changed.
+Explicit crops remain optional. Source freshness, serial, crop bounds, duplicate
+frame rejection and post-inference freshness are checked before publication.
+
+Executed `uv sync --locked`, `uv run pytest` (**273 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (131 files), and `git diff --check`. Ten added cases
+use synthetic pixels to verify marked/clean routing-preview text, stale/future/
+wrong-serial/synthetic/missing-ID rejection, crop bounds, target tracking and
+missing-target handling. These do not establish real defect accuracy. Skips
+remain optional FastAPI/Frax/MuJoCo/JAX/live simulation and four unconfigured
+calibrated-model tests.
+
+Verified live publication first locally through SDK/Studio SSH forwards. Observed
+fresh source/overlay JPEGs and inspected the actual plate frame. Browser-verified
+the existing native Studio **Live Twin & Control → Live Camera Feeds** tile:
+its image accessibility label and status showed fresh dark-mark heuristic output
+on frame `243622060450-531546`. No real marked-brick positive was independently
+verified in this run; the pink route branch was exercised with synthetic pixels
+in tests only.
+
+Deployed a separate source snapshot and detached publisher on Intel at
+`/home/intel/brickcell-deploy/artifacts/camera-wall-runtime-v1` (PID 1976474 at
+launch). Verified its log and fresh native Studio API record on frame
+`243622060450-532402`, source version
+`dark-mark-heuristic-5d91eb5d61d7-contrast-16`, with explicit no-target REINSPECT.
+Stopped the old local image-only reference publisher (PIDs 47350/47351), which
+was overwriting the same camera tile. Stopped the temporary standalone animation
+preview server and removed its uncommitted source. No camera driver or Studio
+service was restarted, and no arm command or physical sorting action was issued.
