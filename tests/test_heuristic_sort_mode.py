@@ -202,8 +202,8 @@ def test_patchcore_plate_mode_allows_calibrated_plate_only_and_rejects_missing_p
         build_deploy({})(output_dir=tmp_path, inspection_mode="patchcore-plate")
 
 
-def test_cli_deploy_cell_defaults_to_patchcore_plate():
+def test_cli_deploy_cell_defaults_to_lab_dark_mark():
     from brickcell.block_inspector.cli import build_parser
 
     args = build_parser().parse_args(["deploy-cell"])
-    assert args.inspection_mode == "patchcore-plate"
+    assert args.inspection_mode == "lab-dark-mark"
