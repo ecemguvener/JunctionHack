@@ -28,9 +28,9 @@ def _classify_single_rgb(mean_rgb: tuple[float, float, float]) -> str | None:
     arr = np.uint8([[list(np.clip(np.round(mean_rgb), 0, 255))]])
     hsv = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)[0, 0]
     h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
-    if s <= 55 and v >= 170:
+    if s <= 48 and v >= 175:
         return "white_block"
-    if 26 <= h <= 48 and s >= 55 and v >= 110:
+    if 31 <= h <= 48 and s >= 55 and v >= 110:
         return "lime_block"
     if 8 <= h <= 20 and s >= 105 and v >= 70:
         return "orange_brown_block"
