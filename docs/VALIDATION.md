@@ -2180,3 +2180,52 @@ postprocessing and no learned binary labels, and existing surface-mask failures
 remain unresolved. Missing-model preflight and sorting gates were not changed.
 No service restart, camera capture, arm command or interrupted-cycle recovery
 occurred. CPU inference was executed locally; remote checks verified files only.
+
+### Live Intel OpenVINO reference inference — 2026-11-15
+
+Added explicit `ReferenceRGBInspector` review mode and
+`configs/reference-viewer.json` for the four transferred plate color models.
+This mode supports variable review crops and requires a real plate pilot with
+the exact reference-only scope, no calibrated threshold and automatic sorting
+explicitly disabled. It preserves frame freshness/serial checks, crop bounds
+and surface-quality gating. Valid scored views display UNCALIBRATED; no binary
+sort authorization is generated. Existing calibrated camera-contract loading
+and physical deployment preflight remain unchanged.
+
+Added optional `--events` JSONL recording to the existing viewer, with received
+time, camera name, crop, frame identity, model version, score and decision state.
+Verified that stale results log empty channels rather than trusted predictions.
+Ten new regression cases cover variable crops, stale/wrong-camera/missing or
+invalid crops, and rejection of calibrated, synthetic, wrist, unknown-scope or
+sorting-authorized models in reference mode.
+
+Executed `uv sync --locked`, `uv run pytest` (**263 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (128 files), and `git diff --check`. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX, live simulation and four unconfigured calibrated
+model tests. No new training/calibration or test-set accuracy evaluation occurred.
+
+On Intel, confirmed the existing inference environment contains OpenVINO but
+not PyTorch/Anomalib. Started an isolated source snapshot with that environment
+at `127.0.0.1:8098`, without modifying the teammate's deployment source or
+restarting existing services. The snapshot is under
+`/home/intel/brickcell-deploy/artifacts/reference-viewer-runtime-v1`; operational
+log is `viewer.log`, structured evidence is `events.jsonl`. All four exports
+compiled during viewer startup. Source models remain in the transferred
+`trained-plate-references-20261115-v1` artifact directory.
+
+Read one current RGB snapshot from the already running plate service and visually
+reviewed the yellow-brick crop `[89,290,191,363]`. Actual subsequent HTTP inference
+on frame `243622060450-509992`, serial `243622060450`, returned finite CPU raw
+distance **2.872276782989502**, model version `93a1b8e97bb51442`, and RGB/anomaly
+map previews. Acquisition-to-result interval was approximately 0.106 s; this is
+one observed end-to-end sample, not a latency benchmark. Result and channel were
+UNCALIBRATED, threshold version null, sorting permission false. Verified the
+matching JSONL event. This is live reference inference evidence, not a real
+defect-accuracy or physical sorting claim.
+
+Opened and checked a local SSH forward at `http://127.0.0.1:18098/`. Viewer
+inference runs on API requests/browser polling; crops are session-only. No
+camera device was opened directly, no arm command was issued, and no interrupted
+cycle was resumed. Wrist modeling, independent calibration and arm-held masking
+remain required for the physical two-camera sorting path.

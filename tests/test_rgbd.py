@@ -3,7 +3,12 @@ import pytest
 
 from brickcell.detector.runtime import Prediction
 from brickcell.inspection.images import QualityConfig
-from brickcell.inspection.rgbd import DEPTH_ENCODING, RGBDInspector, encode_depth
+from brickcell.inspection.rgbd import (
+    DEPTH_ENCODING,
+    ReferenceRGBInspector,
+    RGBDInspector,
+    encode_depth,
+)
 from brickcell.inspection.threshold import Threshold
 
 
@@ -29,6 +34,70 @@ class Detector:
     def predict(self, image):
         self.inputs.append(image.copy())
         return Prediction(self.score, 1, np.zeros((16, 16)))
+
+
+def reference_detector():
+    detector = Detector("rgb", calibrated=False)
+    detector.metadata = dict(
+        synthetic=False,
+        camera="plate",
+        scope="SAME_OBJECT_REFERENCE_PILOT_NOT_ACCURACY_EVALUATION",
+        automatic_sorting_allowed=False,
+    )
+    return detector
+
+
+def test_reference_review_scores_variable_crops_without_sorting_permission():
+    detector = reference_detector()
+    for crop in ([0, 0, 64, 64], [4, 4, 60, 60]):
+        service = ReferenceRGBInspector(
+            "cam",
+            crop,
+            {"rgb": detector},
+            quality=QualityConfig(min_laplacian_variance=0, max_outside_fraction=1),
+        )
+        result, previews = service.inspect(frame()[0], 100, "cam", "frame", now=101)
+        assert result["decision"] == "UNCALIBRATED"
+        assert result["automatic_sorting_allowed"] is False
+        assert result["channels"]["rgb"]["threshold_version"] is None
+        assert result["channels"]["rgb"]["score"] == detector.score
+        assert "rgb_map" in previews
+
+
+@pytest.mark.parametrize("problem", ["stale", "wrong_camera", "no_crop", "invalid_crop"])
+def test_reference_review_rejects_untrusted_views_before_inference(problem):
+    detector = reference_detector()
+    crop = None if problem == "no_crop" else [0, 0, 64, 64]
+    if problem == "invalid_crop":
+        crop = [0, 0, 1000, 1000]
+    service = ReferenceRGBInspector("cam", crop, {"rgb": detector})
+    result, _ = service.inspect(
+        frame()[0],
+        100,
+        "wrong" if problem == "wrong_camera" else "cam",
+        "frame",
+        now=110 if problem == "stale" else 101,
+    )
+    assert result["decision"] in ("ERROR", "REINSPECT")
+    assert result["automatic_sorting_allowed"] is False
+    assert not detector.inputs
+
+
+@pytest.mark.parametrize("problem", ["threshold", "synthetic", "wrist", "unknown", "permission"])
+def test_reference_mode_requires_explicit_real_uncalibrated_plate_model(problem):
+    detector = reference_detector()
+    if problem == "threshold":
+        detector.threshold = Threshold(0.5, 0, "test", "manifest", 2)
+    elif problem == "synthetic":
+        detector.metadata["synthetic"] = True
+    elif problem == "wrist":
+        detector.metadata["camera"] = "wrist"
+    elif problem == "unknown":
+        detector.metadata.pop("scope")
+    elif problem == "permission":
+        detector.metadata["automatic_sorting_allowed"] = True
+    with pytest.raises(ValueError, match="uncalibrated real plate"):
+        ReferenceRGBInspector("cam", detectors={"rgb": detector})
 
 
 def inspector(detectors=None):

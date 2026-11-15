@@ -74,6 +74,52 @@ remain excluded from `deploy-cell` automatic sorting, and this handoff does not
 change `configs/mark-viewer.json` or the missing-model preflight. See
 [MARK_MODEL_HANDOFF.md](MARK_MODEL_HANDOFF.md) for paired calibrated deployment.
 
+## Live OpenVINO reference viewer
+
+`configs/reference-viewer.json` wires all four trained plate models into the
+existing camera viewer using explicit `reference_rgb` mode. It supports
+variable review crops without changing a model's calibration contract. Fresh
+frame identity, expected camera serial, crop bounds and surface quality are
+still checked. Valid reference results are `UNCALIBRATED`; failed views remain
+REINSPECT/ERROR, and `automatic_sorting_allowed` is always false.
+
+From the repository root after obtaining the model archive:
+
+```sh
+uv sync --locked
+uv run python scripts/patchcore_depth_viewer.py \
+  --config configs/reference-viewer.json \
+  --source http://127.0.0.1:8094 --port 8098 \
+  --events artifacts/reference-viewer/events.jsonl
+```
+
+On Intel, the existing minimal OpenVINO environment can run this without
+PyTorch/Anomalib inference dependencies using
+`PYTHONPATH=src .venv/bin/python scripts/patchcore_depth_viewer.py` with the same
+arguments. Do not reinstall or modify the running robot environment. The viewer
+reads the already running SDK snapshot service; it never opens camera devices or
+commands the arm. Camera URLs in this config target Intel loopback; use SSH
+forwards and an adjusted copy of the config if running on another machine.
+
+The deployed isolated source snapshot currently runs on Intel loopback port 8098,
+under `/home/intel/brickcell-deploy/artifacts/reference-viewer-runtime-v1`.
+Its `viewer.log` and `events.jsonl` contain operational output and inspection
+evidence. It uses the existing `.venv/bin/python` and a separate `src` snapshot;
+the teammate's deployment source and existing services were not replaced.
+
+Open the viewer through an SSH tunnel:
+
+```sh
+ssh -N -L 18098:127.0.0.1:8098 intel
+```
+
+Then visit <http://127.0.0.1:18098/>. Use the matching color card and enter a
+current brick crop as `x0,y0,x1,y1`. Crops apply only until restart. For the
+observed yellow brick at launch, `[89,290,191,363]` produced fresh CPU inference
+and a heatmap. This crop is specific to that scene; review it if objects move.
+Each API response also records a JSONL event when `--events` is configured,
+including frame identity, model version, crop, score and decision state.
+
 Export parity compares PyTorch and OpenVINO CPU on one fitting reference per
 color; it is a numerical export check, not a held-out defect test or a physical
 cell validation. Exact export errors and package versions accompany each model.

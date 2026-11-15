@@ -165,3 +165,35 @@ class RGBInspector(RGBDInspector):
 
     def inspect(self, rgb, captured_at, serial, frame_id, now=None):
         return super().inspect(rgb, None, None, captured_at, serial, frame_id, now)
+
+
+class ReferenceRGBInspector(RGBInspector):
+    """Review variable-crop plate references without authorizing binary sorting."""
+
+    def __init__(self, serial, crop=None, detectors=None, min_depth_fraction=0.6, quality=None):
+        super().__init__(serial, crop, {}, min_depth_fraction, quality)
+        detectors = detectors or {}
+        if set(detectors) != {"rgb"}:
+            raise ValueError("Reference review requires exactly one RGB detector")
+        detector = detectors["rgb"]
+        meta = detector.metadata
+        if (
+            meta.get("synthetic") is not False
+            or meta.get("camera") != "plate"
+            or meta.get("scope") != "SAME_OBJECT_REFERENCE_PILOT_NOT_ACCURACY_EVALUATION"
+            or meta.get("automatic_sorting_allowed") is not False
+            or detector.threshold is not None
+        ):
+            raise ValueError(
+                "Reference review requires an explicitly uncalibrated real plate pilot"
+            )
+        self.detectors = detectors
+
+    def inspect(self, rgb, captured_at, serial, frame_id, now=None):
+        result, previews = super().inspect(rgb, captured_at, serial, frame_id, now)
+        channel = result["channels"].get("rgb")
+        if channel and channel.get("score") is not None:
+            result["decision"] = channel["decision"] = "UNCALIBRATED"
+            result["reason"] = "Reference inference only; no binary threshold or sorting permission"
+        result["automatic_sorting_allowed"] = False
+        return result, previews
