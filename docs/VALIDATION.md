@@ -2399,3 +2399,28 @@ version `dark-mark-heuristic-5d91eb5d61d7-contrast-16`, and sorting permission
 false at the existing Studio endpoint. That observed frame had no unambiguous
 red target, so no valid-frame overlay was asserted to have been visually checked.
 No sorter or arm was started, and no classification algorithm was changed.
+
+### Combined demo_1-sorter branch — 2026-11-15
+
+Created `demo_1-sorter` in an isolated worktree from the verified remote
+`demo_1` head `83dc84782400479ff77196e25ecadc2031d75f31`, then merged `anomaly`
+through `0df11b7` with its required dependency chain. Merge commit `b5fba25`
+has parents `83dc847` and `0df11b7`. Verified ancestry includes the restored
+physical sorting mode (`271ceee`), model-free default (`210afc8`) and camera-wall
+workflow title (`0df11b7`). The merged `src`, `scripts`, `tests` and `configs`
+exactly matched the tested anomaly source before adding branch documentation.
+
+Created a separate Python 3.12.16 environment for the worktree with
+`uv sync --locked`; retained Anomalib 2.7.0 and PyTorch 2.10.0. Executed on this
+branch: `uv run pytest` (**291 passed, 16 skipped**, three upstream warnings),
+`uv run ruff check src tests scripts`, `uv run ruff format --check src tests
+scripts` (132 files), `node --test dashboard/tests/test_studio_inspection.cjs`
+(**2 passed**), and `git diff --check`. The fresh environment emitted the known
+Timm/Anomalib deprecations plus a FrEIA invalid-escape SyntaxWarning. Skips remain
+optional FastAPI/Frax/MuJoCo/JAX/live simulation and four calibrated-model tests.
+
+Added `docs/DEMO_1_SORTER.md` with branch provenance and sync/single-cycle launch
+commands. PowerShell was unavailable, so its launcher was not executed. No
+physical cycle, camera capture, sorter restart or new accuracy evaluation was
+performed while creating this branch. The physical sorting path exists, but a
+successful physical run remains unverified for this combined branch.
