@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from brickcell.detector.runtime import OpenVINODetector, save_map
-from brickcell.inspection.block_surface import SurfaceViewError
 from brickcell.inspection.images import QualityConfig, check_view, read_rgb
 from brickcell.inspection.types import Decision, InspectionResult
 from brickcell.sources.directory import Frame
@@ -33,7 +32,7 @@ class InspectionService:
         try:
             rgb = read_rgb(frame.path)
             quality = check_view(rgb, self.quality)
-            if not getattr(self.detector, "surface_profile", None) and not quality.valid:
+            if not quality.valid:
                 return InspectionResult(
                     **kwargs,
                     is_valid_view=False,
@@ -60,15 +59,6 @@ class InspectionService:
                 inference_latency_ms=prediction.latency_ms,
                 anomaly_map_path=map_path,
                 reason="" if threshold else "No calibrated threshold available",
-            )
-        except SurfaceViewError as exc:
-            return InspectionResult(
-                **kwargs,
-                is_valid_view=False,
-                anomaly_score=None,
-                decision=Decision.REINSPECT,
-                inference_latency_ms=0,
-                reason=str(exc),
             )
         except Exception as exc:
             return InspectionResult(

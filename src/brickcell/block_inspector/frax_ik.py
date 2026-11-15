@@ -528,18 +528,6 @@ class SO101FraxIK:
             cost_tol=None,
         )
         self._jit_grasp_solve = jax.jit(self.grasp_global_ik.solve)
-
-        def _run_grasp_diff(q_init: jax.Array, ref: dict[str, jax.Array]) -> jax.Array:
-            st0 = self.grasp_diff_ik.init(q_init)
-            st_final = jax.lax.fori_loop(
-                0,
-                14,
-                lambda _i, st: self.grasp_diff_ik.step(st, ref, 1.0 / 25.0)[0],
-                st0,
-            )
-            return st_final.q
-
-        self._jit_grasp_diff_solve = jax.jit(_run_grasp_diff)
         self._rng_key = jax.random.PRNGKey(42)
 
     def next_key(self) -> jax.Array:
@@ -645,7 +633,6 @@ class SO101FraxIK:
         jaw_yaw_world: float,
         pitch_down_deg: float = 90.0,
         q_posture: np.ndarray | None = None,
-        local_only: bool = False,
     ) -> GraspIKSolution:
         """Solve 5-DOF collision-free grasp/placement posture.
 
@@ -694,34 +681,11 @@ class SO101FraxIK:
             "is_topdown": jnp.asarray(1.0 if is_topdown else 0.0, dtype=jnp.float64),
             "q_posture": jnp.asarray(q_post, dtype=jnp.float64),
         }
-        if local_only and q_posture is not None:
-            q_sol = np.asarray(self._jit_grasp_diff_solve(ref["q_posture"], ref), dtype=np.float64)
-            cost = float(np.linalg.norm(q_sol - q_post))
-            T_tcp = self.fk_world_tcp(q_sol)
-            pos_err = float(np.linalg.norm(T_tcp[:3, 3] - p_tgt))
-            if is_topdown:
-                orient_ok = (
-                    float(np.dot(-T_tcp[:3, 2], approach)) >= 0.96
-                    and float(np.dot(T_tcp[:3, 0], jaw_axis)) >= 0.92
-                )
-            else:
-                orient_ok = (
-                    abs(float(-T_tcp[2, 2] - approach[2])) <= 0.08
-                    and abs(float(T_tcp[2, 0])) <= 0.08
-                    and float(np.dot(T_tcp[:3, 0], jaw_axis)) >= 0.85
-                )
-            if not (pos_err <= 0.010 and orient_ok):
-                res = self._jit_grasp_solve(ref["q_posture"], ref, self.next_key())
-                q_sol = np.asarray(res.q, dtype=np.float64)
-                cost = float(res.cost)
-                T_tcp = self.fk_world_tcp(q_sol)
-                pos_err = float(np.linalg.norm(T_tcp[:3, 3] - p_tgt))
-        else:
-            res = self._jit_grasp_solve(ref["q_posture"], ref, self.next_key())
-            q_sol = np.asarray(res.q, dtype=np.float64)
-            cost = float(res.cost)
-            T_tcp = self.fk_world_tcp(q_sol)
-            pos_err = float(np.linalg.norm(T_tcp[:3, 3] - p_tgt))
+        res = self._jit_grasp_solve(ref["q_posture"], ref, self.next_key())
+        q_sol = np.asarray(res.q, dtype=np.float64)
+        cost = float(res.cost)
+        T_tcp = self.fk_world_tcp(q_sol)
+        pos_err = float(np.linalg.norm(T_tcp[:3, 3] - p_tgt))
         if is_topdown:
             orient_ok = (
                 float(np.dot(-T_tcp[:3, 2], approach)) >= 0.96

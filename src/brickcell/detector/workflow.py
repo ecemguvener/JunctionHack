@@ -13,10 +13,9 @@ import numpy as np
 
 from brickcell.data.manifest import Manifest, load_manifest, require_valid
 from brickcell.detector.config import ModelConfig
-from brickcell.inspection.block_surface import surface_input, surface_score
-from brickcell.inspection.images import read_rgb
+from brickcell.inspection.images import input_tensor, read_rgb
 from brickcell.inspection.threshold import calibrate
-from brickcell.metrics.report import classification, decision_metrics, latency
+from brickcell.metrics.report import classification, latency
 from brickcell.util import save_json, sha256, versions
 
 
@@ -43,12 +42,7 @@ def run_log(path: Path):
 def build_model(config: ModelConfig, pretrained: bool | None = None):
     from anomalib.models import Patchcore
 
-    model_type = Patchcore
-    if config.foreground_memory:
-        from brickcell.detector.surface_patchcore import SurfacePatchcore
-
-        model_type = SurfacePatchcore
-    model = model_type(
+    return Patchcore(
         backbone=config.backbone,
         layers=config.layers,
         pre_trained=config.pre_trained if pretrained is None else pretrained,
@@ -59,29 +53,17 @@ def build_model(config: ModelConfig, pretrained: bool | None = None):
         evaluator=False,
         visualizer=False,
     )
-    if config.foreground_memory:
-        model.surface_profile = config.surface_profile
-    return model
 
 
 def load_checkpoint(config: ModelConfig, checkpoint: Path | None = None):
     from anomalib.models import Patchcore
 
     metadata = json.loads((config.output_dir / "metadata.json").read_text())
-    if config.foreground_memory != metadata["config"].get("foreground_memory", False):
-        raise ValueError("Foreground memory policy differs from trained model")
     checkpoint = checkpoint or config.output_dir / "model.ckpt"
     if sha256(checkpoint) != metadata["checkpoint_sha256"]:
         raise ValueError("Checkpoint hash differs from calibrated model")
-    for field in (
-        "image_size",
-        "backbone",
-        "layers",
-        "num_neighbors",
-        "sensor_contract",
-        "surface_profile",
-    ):
-        expected = metadata["config"].get(field)
+    for field in ("image_size", "backbone", "layers", "num_neighbors"):
+        expected = metadata["config"][field]
         actual = getattr(config, field)
         if isinstance(actual, tuple):
             actual = list(actual)
@@ -92,23 +74,18 @@ def load_checkpoint(config: ModelConfig, checkpoint: Path | None = None):
     return model.cpu().eval()
 
 
-def torch_predict(model, rgb: np.ndarray, size: tuple[int, int], surface_profile=None):
+def torch_predict(model, rgb: np.ndarray, size: tuple[int, int]):
     import torch
 
-    prepared, mask = surface_input(rgb, size, surface_profile)
-    tensor = torch.from_numpy(prepared)
+    tensor = torch.from_numpy(input_tensor(rgb, size))
     start = time.perf_counter()
     with torch.inference_mode():
         result = model(tensor)
-    score, _ = surface_score(
-        float(result.pred_score.item()), result.anomaly_map.squeeze().cpu().numpy(), mask
-    )
-    return score, (time.perf_counter() - start) * 1000
+    return float(result.pred_score.item()), (time.perf_counter() - start) * 1000
 
 
 def verify_dataset_snapshot(config: ModelConfig, manifest: Manifest) -> None:
     """Detect changed image bytes even if the JSON manifest itself is unchanged."""
-    verify_sensor_manifest(config)
     provenance = json.loads((config.output_dir / "data_provenance.json").read_text())
     recorded = {row["image_id"]: row for row in provenance["images"]}
     if set(recorded) != {sample.image_id for sample in manifest.samples}:
@@ -117,16 +94,6 @@ def verify_dataset_snapshot(config: ModelConfig, manifest: Manifest) -> None:
         row = recorded[sample.image_id]
         if row["split"] != sample.split or row["sha256"] != sha256(manifest.image_path(sample)):
             raise ValueError(f"Dataset changed since training: {sample.image_id}")
-
-
-def verify_sensor_manifest(config: ModelConfig):
-    data = json.loads(config.manifest.read_text())
-    contract = data.get("sensor_contract")
-    if contract != config.sensor_contract:
-        raise ValueError("Dataset sensor contract differs from model camera/crop")
-    if data.get("surface_profile") != config.surface_profile:
-        raise ValueError("Dataset surface profile differs from model preprocessing")
-    return contract
 
 
 def train(config: ModelConfig) -> dict:
@@ -138,7 +105,6 @@ def train(config: ModelConfig) -> dict:
 
     manifest = load_manifest(config.manifest)
     report = require_valid(manifest)
-    sensor_contract = verify_sensor_manifest(config)
     if (config.output_dir / "model.ckpt").exists():
         raise ValueError(
             "Output already contains a checkpoint; use a new output_dir to preserve provenance"
@@ -179,20 +145,10 @@ def train(config: ModelConfig) -> dict:
             default_root_dir=config.output_dir / "engine",
         )
         train_loader = loader(
-            manifest,
-            "train",
-            config.image_size,
-            config.batch_size,
-            config.num_workers,
-            config.surface_profile,
+            manifest, "train", config.image_size, config.batch_size, config.num_workers
         )
         val_loader = loader(
-            manifest,
-            "val",
-            config.image_size,
-            config.batch_size,
-            config.num_workers,
-            config.surface_profile,
+            manifest, "val", config.image_size, config.batch_size, config.num_workers
         )
         engine.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
         engine.trainer.save_checkpoint(config.output_dir / "model.ckpt")
@@ -200,10 +156,7 @@ def train(config: ModelConfig) -> dict:
         rows = []
         for sample in manifest.partition("val"):
             score, elapsed = torch_predict(
-                model,
-                read_rgb(manifest.image_path(sample)),
-                config.image_size,
-                config.surface_profile,
+                model, read_rgb(manifest.image_path(sample)), config.image_size
             )
             rows.append(
                 {
@@ -215,12 +168,7 @@ def train(config: ModelConfig) -> dict:
             )
         scores, labels = [r["score"] for r in rows], [r["label"] for r in rows]
         threshold = calibrate(
-            scores,
-            labels,
-            report["manifest_sha256"],
-            config.uncertainty_fraction,
-            minimum_defect_recall=config.minimum_defect_recall,
-            maximum_good_nonaccept_rate=config.maximum_good_nonaccept_rate,
+            scores, labels, report["manifest_sha256"], config.uncertainty_fraction
         )
         checkpoint_hash = sha256(config.output_dir / "model.ckpt")
         metadata = {
@@ -231,19 +179,8 @@ def train(config: ModelConfig) -> dict:
             "input_size": config.image_size,
             "threshold": asdict(threshold),
             "score_type": threshold.score_type,
-            "preprocessing": (
-                "EXIF transpose; RGB; optional versioned block silhouette mask and global exposure normalization; "
-                "Pillow bilinear resize; NCHW float32 /255; embedded ImageNet normalization once"
-            ),
+            "preprocessing": "EXIF transpose; RGB; Pillow bilinear resize; NCHW float32 /255; embedded ImageNet normalization once",
             "synthetic": any(s.synthetic for s in manifest.samples),
-            "sensor_contract": sensor_contract,
-            "surface_profile": config.surface_profile,
-            "foreground_training_counts": getattr(model, "foreground_training_counts", None),
-            "score_aggregation": (
-                "max_patchcore_map_on_block_mask_v1"
-                if config.surface_profile
-                else "patchcore_pred_score"
-            ),
             "backbone": config.backbone,
             "pretrained": config.pre_trained,
             "backbone_pretrained_config": getattr(
@@ -251,9 +188,6 @@ def train(config: ModelConfig) -> dict:
             ),
             "training_seconds": time.perf_counter() - started,
             "validation_metrics": classification(labels, scores, threshold.value),
-            "validation_decisions": decision_metrics(
-                labels, [threshold.decide(score) for score in scores]
-            ),
             "validation_latency": latency([r["latency_ms"] for r in rows]),
         }
         save_json(config.output_dir / "metadata.json", metadata)
@@ -335,7 +269,7 @@ def parity(config: ModelConfig, tolerance: float = 0.001) -> dict:
     # Use validation only: parity debugging must not become test-set model selection.
     for sample in manifest.partition("val"):
         rgb = read_rgb(manifest.image_path(sample))
-        score, _ = torch_predict(model, rgb, config.image_size, config.surface_profile)
+        score, _ = torch_predict(model, rgb, config.image_size)
         other = detector.predict(rgb).score
         label = detector.threshold.decide(score)
         ov_label = detector.threshold.decide(other)
@@ -383,10 +317,6 @@ def evaluate(config: ModelConfig) -> dict:
                 "label": int(sample.label == "defective"),
                 "latency_ms": prediction.latency_ms,
                 "decision": detector.threshold.decide(prediction.score),
-                "object_id": sample.object_id,
-                "session_id": sample.session_id,
-                "family": sample.family,
-                "view_id": sample.view_id,
             }
         )
     result = {
@@ -399,19 +329,6 @@ def evaluate(config: ModelConfig) -> dict:
             [r["label"] for r in rows], [r["score"] for r in rows], detector.threshold.value
         ),
         "uncertain_count": sum(r["decision"] == "REINSPECT" for r in rows),
-        "decision_metrics": decision_metrics(
-            [r["label"] for r in rows], [r["decision"] for r in rows]
-        ),
-        "by_group": {
-            field: {
-                str(value): decision_metrics(
-                    [r["label"] for r in rows if r[field] == value],
-                    [r["decision"] for r in rows if r[field] == value],
-                )
-                for value in {r[field] for r in rows}
-            }
-            for field in ("family", "view_id", "object_id", "session_id")
-        },
         "latency": latency([r["latency_ms"] for r in rows]),
         "samples": rows,
     }

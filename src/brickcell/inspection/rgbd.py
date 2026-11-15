@@ -5,7 +5,6 @@ import time
 
 import numpy as np
 
-from brickcell.inspection.block_surface import SurfaceViewError
 from brickcell.inspection.images import QualityConfig, check_view
 from brickcell.inspection.types import Decision
 
@@ -102,10 +101,7 @@ class RGBDInspector:
                 fraction = float(valid.mean())
                 result["depth_fraction"] = fraction
             quality = check_view(rgb, self.quality)
-            surface_profile = getattr(self.detectors.get("rgb"), "surface_profile", None)
-            if (not surface_profile and not quality.valid) or (
-                fraction is not None and fraction < self.min_depth_fraction
-            ):
+            if not quality.valid or (fraction is not None and fraction < self.min_depth_fraction):
                 result["reason"] = "Invalid RGB view or insufficient depth: " + ",".join(
                     quality.reasons
                 )
@@ -146,10 +142,6 @@ class RGBDInspector:
             result["reason"] = (
                 "Per-modality decisions; no cross-camera coverage or object identity verified"
             )
-        except SurfaceViewError as exc:
-            result.update(decision="REINSPECT", reason=str(exc))
-            result["channels"] = {}
-            result["depth_used_for_anomaly_score"] = False
         except Exception as exc:
             result.update(decision="ERROR", reason=str(exc))
             result["channels"] = {}
@@ -165,35 +157,3 @@ class RGBInspector(RGBDInspector):
 
     def inspect(self, rgb, captured_at, serial, frame_id, now=None):
         return super().inspect(rgb, None, None, captured_at, serial, frame_id, now)
-
-
-class ReferenceRGBInspector(RGBInspector):
-    """Review variable-crop plate references without authorizing binary sorting."""
-
-    def __init__(self, serial, crop=None, detectors=None, min_depth_fraction=0.6, quality=None):
-        super().__init__(serial, crop, {}, min_depth_fraction, quality)
-        detectors = detectors or {}
-        if set(detectors) != {"rgb"}:
-            raise ValueError("Reference review requires exactly one RGB detector")
-        detector = detectors["rgb"]
-        meta = detector.metadata
-        if (
-            meta.get("synthetic") is not False
-            or meta.get("camera") != "plate"
-            or meta.get("scope") != "SAME_OBJECT_REFERENCE_PILOT_NOT_ACCURACY_EVALUATION"
-            or meta.get("automatic_sorting_allowed") is not False
-            or detector.threshold is not None
-        ):
-            raise ValueError(
-                "Reference review requires an explicitly uncalibrated real plate pilot"
-            )
-        self.detectors = detectors
-
-    def inspect(self, rgb, captured_at, serial, frame_id, now=None):
-        result, previews = super().inspect(rgb, captured_at, serial, frame_id, now)
-        channel = result["channels"].get("rgb")
-        if channel and channel.get("score") is not None:
-            result["decision"] = channel["decision"] = "UNCALIBRATED"
-            result["reason"] = "Reference inference only; no binary threshold or sorting permission"
-        result["automatic_sorting_allowed"] = False
-        return result, previews

@@ -1130,7 +1130,7 @@ def make_handler(app: Dashboard):
                 from brickcell.studio.server import handle_studio_post
 
                 length = int(self.headers.get("Content-Length") or 0)
-                if length < 0 or length > (2_000_000 if route == "/api/so101/inspection" else MAX_BODY):
+                if length < 0 or length > MAX_BODY:
                     return self.send_json(
                         400, {"error": f"Body must be 0..{MAX_BODY} bytes of JSON"}
                     )

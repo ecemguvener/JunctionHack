@@ -24,9 +24,10 @@ import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import cv2
+import mujoco
 import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation
@@ -51,9 +52,10 @@ from brickcell.block_inspector.perception import (
     _split_touching_cluster_if_needed,
     refine_cuboid_icp,
 )
-
-if TYPE_CHECKING:
-    from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
+from brickcell.block_inspector.twin import (
+    SO101InspectionTwin,
+    SpawnedBlockInfo,
+)
 
 DistractorCategory = Literal["human_arm", "wire", "trash", "robot_arm", "support_surface"]
 
@@ -211,8 +213,6 @@ class Real2SimSceneState:
 
     def to_spawned_blocks(self, source_only: bool = False) -> list[SpawnedBlockInfo]:
         """Convert perceived DUPLO bricks into `SpawnedBlockInfo` records for `SO101InspectionTwin`."""
-        from brickcell.block_inspector.twin import SpawnedBlockInfo
-
         selected = [
             b for b in self.bricks if (not source_only or b.support_region in {"source", "table"})
         ]
@@ -2439,8 +2439,6 @@ def synthesize_cluttered_scene_point_cloud(
       - Trash objects: a grey/white cup, a brown cardboard scrap, and an orange calibration fragment (`trash`)
       - Points on the SO-101 robot arm links (`robot_arm`)
     """
-    from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
-
     rng = np.random.default_rng(seed)
     ref_twin = SO101InspectionTwin(
         num_blocks=num_blocks,
@@ -3012,8 +3010,6 @@ class Real2SimPipeline:
         Only the localized LEGO DUPLO brick assets and 3 IKEA KALAS plates are instantiated in the
         MuJoCo physics world; all human arms, wires, and trash clusters are ignored.
         """
-        from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
-
         spawned = scene_state.to_spawned_blocks(source_only=False)
         if not spawned:
             spawned = [
@@ -3295,10 +3291,6 @@ class Real2SimPipeline:
         - Updates plate positions (`model.body_pos`), brick 6D poses (`data.qpos`), brick STL meshes
           (`model.geom_dataid`), and perceived LEGO RGB colors (`model.geom_rgba`) live in MuJoCo Desktop.
         """
-        import mujoco
-
-        from brickcell.block_inspector.twin import SO101InspectionTwin, SpawnedBlockInfo
-
         out_root = (
             Path(output_dir)
             if output_dir is not None
