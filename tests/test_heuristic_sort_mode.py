@@ -5,6 +5,7 @@ import concurrent.futures
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -151,3 +152,58 @@ def test_unknown_or_conflicting_modes_fail_before_constructors(tmp_path, kwargs)
 
     with pytest.raises(ValueError):
         deployment_function(inspector)(output_dir=tmp_path, **kwargs)
+
+
+def test_patchcore_plate_mode_allows_calibrated_plate_only_and_rejects_missing_plate(tmp_path):
+    class ReachedHardware(Exception):
+        pass
+
+    created = []
+    source = ast.parse(Path("src/brickcell/block_inspector/hardware_cell.py").read_text())
+    method = next(
+        n
+        for n in source.body
+        if isinstance(n, ast.FunctionDef) and n.name == "run_physical_cell_deployment"
+    )
+
+    def build_deploy(detectors):
+        def inspector(**kwargs):
+            obj = SimpleNamespace(**kwargs)
+            created.append(obj)
+            return obj
+
+        def stop_at_hardware(**kwargs):
+            raise ReachedHardware
+
+        namespace = dict(
+            Path=Path,
+            RealCameraAnomalyInspector=inspector,
+            load_anomalib_camera_detectors=lambda **kwargs: (
+                detectors,
+                {"plate": [0, 0, 640, 480]},
+            ),
+            LiveBenchHttpFrameSource=stop_at_hardware,
+        )
+        module = ast.Module(
+            body=ast.parse("from __future__ import annotations").body + [method], type_ignores=[]
+        )
+        exec(compile(module, "<actual-patchcore-plate-entry>", "exec"), namespace)
+        return namespace[method.name]
+
+    with pytest.raises(ReachedHardware):
+        build_deploy({"plate": {"rgb": object()}})(
+            output_dir=tmp_path, inspection_mode="patchcore-plate"
+        )
+    assert len(created) == 1
+    assert created[0].allow_heuristic_sorting is False
+    assert created[0].plate_only_anomalib is True
+
+    with pytest.raises(ValueError, match=r"missing_mark_models\(plate\)"):
+        build_deploy({})(output_dir=tmp_path, inspection_mode="patchcore-plate")
+
+
+def test_cli_deploy_cell_defaults_to_patchcore_plate():
+    from brickcell.block_inspector.cli import build_parser
+
+    args = build_parser().parse_args(["deploy-cell"])
+    assert args.inspection_mode == "patchcore-plate"
