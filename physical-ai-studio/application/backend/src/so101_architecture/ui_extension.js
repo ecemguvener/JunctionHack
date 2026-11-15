@@ -421,12 +421,54 @@
     stopCamRefresh();
     state.camStreamTimer = setInterval(() => {
       if (!state.open || !state.camStreamActive) return;
+      refreshInspectionEvidence();
       const ts = Date.now();
-      ["top", "plate", "wrist"].forEach((slot) => {
+      ["top"].forEach((slot) => {
         const img = document.getElementById(`so101-cam-img-${slot}`);
         if (img) img.src = `/api/so101/camera/${slot}.jpg?t=${ts}`;
       });
     }, 1200);
+  }
+
+  let inspectionRequestActive = false;
+  async function refreshInspectionEvidence() {
+    if (inspectionRequestActive) return;
+    inspectionRequestActive = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const response = await fetch("/api/so101/inspection", {cache: "no-store", signal: controller.signal});
+      if (!response.ok) throw new Error("Inspection connection unavailable");
+      const evidence = await response.json();
+      for (const camera of ["plate", "wrist"]) {
+        const result = evidence.cameras[camera];
+        const image = document.getElementById(`so101-cam-img-${camera}`);
+        const status = document.getElementById(`so101-inspection-${camera}`);
+        if (!image || !status) continue;
+        // The overlay and source must come from the same inspection packet.
+        // Never put an old heatmap over a newer live-camera image.
+        if (result && result.fresh && result.image_jpeg) {
+          image.src = "data:image/jpeg;base64," + (result.overlay_jpeg || result.image_jpeg);
+          image.alt = `${camera}: ${result.decision} — ${result.reason}`;
+          status.textContent = `${result.decision} · ${result.reason} · Frame ${result.frame_id}`;
+          status.style.color = result.decision === "DEFECTIVE" ? "#fca5a5" : "#fcd34d";
+        } else {
+          image.src = `/api/so101/camera/${camera}.jpg?t=${Date.now()}`;
+          status.textContent = result ? `${result.decision} · ${result.reason}` : "Detector not connected";
+          status.style.color = "#94a3b8";
+        }
+      }
+    } catch (error) {
+      for (const camera of ["plate", "wrist"]) {
+        const status = document.getElementById(`so101-inspection-${camera}`);
+        const image = document.getElementById(`so101-cam-img-${camera}`);
+        if (status) status.textContent = "Inspection unavailable · showing camera preview";
+        if (image) image.src = `/api/so101/camera/${camera}.jpg?t=${Date.now()}`;
+      }
+    } finally {
+      clearTimeout(timeout);
+      inspectionRequestActive = false;
+    }
   }
 
   function stopCamRefresh() {
@@ -559,6 +601,7 @@
                   <div>
                     <strong style="color:#f1f5f9;">${c.title}</strong><br/>
                     <span>${c.serial} · ${c.role}</span>
+                    ${c.slot !== "top" ? `<div id="so101-inspection-${c.slot}" style="color:#94a3b8">Detector not connected</div>` : ""}
                   </div>
                 </div>
               </div>

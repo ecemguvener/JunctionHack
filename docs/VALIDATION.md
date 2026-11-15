@@ -1960,3 +1960,42 @@ configuration tests. Captures, trained checkpoints, artifacts, credentials and
 unrelated untracked work are excluded from this source snapshot. The documented
 foreground-mask failures and missing calibrated live thresholds remain unresolved;
 this is an experimental implementation, not validated mark-detection accuracy.
+
+### Physical AI Studio existing-camera integration (2026-11-15)
+
+Added bounded, display-only `/api/so101/inspection` GET/POST routes to native
+Studio and the standalone/shared dashboard handlers. The existing plate/wrist
+camera elements receive paired source/overlay JPEGs, status and frame ID; no new
+panel. Added the opt-in clean-reference CPU publisher. Input validation rejects
+invalid images, stale/future/repeated/out-of-order frames, nonfinite distances,
+uncalibrated good/defective claims and heatmaps on invalid views. Three-second
+freshness is tied to acquisition time, not POST receipt. Display evidence never
+authorizes motion/sorting. Unconfigured wrist remains explicitly disconnected.
+
+Deployed additive routes and camera-view JS to the existing Intel native Studio
+container after preserving its newer custom code; retained original copies under
+ignored `artifacts/studio-integration-backup/` and remote
+`/tmp/brickcell-studio-inspection-candidate/`. Reloaded only the existing Studio
+container and verified the served routes and JS. No arm/camera driver commands
+were issued by this integration. Created a loopback-only local forward on 17860
+to Studio 7860. The publisher runs locally on Mac CPU using the yellow reference
+and a visually reviewed crop `[153,276,244,371]` for its current plate position.
+
+Verified actual real frame ID `243622060450-418128` at age 1.428 seconds with
+UNCALIBRATED status, source image and paired heatmap at the native API. Also
+observed real REINSPECT mask/glare failures and automatic STALE image clearing.
+Stored evidence under ignored `artifacts/studio-integration-verification/` and
+visually reviewed the returned live heatmap. These are transport/display checks,
+not real defect accuracy or validated segmentation. The browser automation host
+was unavailable, so a live browser render was not inspected. The two executed
+Node camera-display tests verify frame pairing and stale/disconnected fallback.
+Known mask limitations and missing calibrated thresholds remain unresolved.
+
+Final verification: `uv run pytest` **237 passed, 16 skipped**, two upstream
+warnings; `uv run pytest dashboard/tests -q` **30 passed**; Node camera-display
+tests **2 passed**; Ruff check/format **passed (126 files)**, JS syntax checks
+and diff whitespace checks passed. Optional hardware/simulator dependencies and
+four calibrated-model tests remain skipped. After reloading the final native
+module, confirmed fresh live results and rejection (HTTP 400) of top-camera
+inspection evidence. Existing Studio browser requests to the new inspection
+route appear in backend logs. End-to-end visual browser QA remains unavailable.

@@ -306,3 +306,44 @@ For a future object-level decision, use trusted same-object fresh results: any
 validated defective view can reject; acceptance requires both required views
 and all required presented faces to be valid and calibrated. Never average raw
 anomaly distances across the camera models.
+
+## Physical AI Studio camera overlays
+
+The existing SO-101 Architecture camera views now poll
+`GET /api/so101/inspection`. A publisher posts frame-paired evidence to the same
+route. Plate/wrist images are replaced with the exact inspected frame and its
+optional heatmap; there is no separate inspection panel. Top remains a
+localization preview. Text below the image shows the detector status and source
+frame ID. A missing wrist publisher shows `Detector not connected`.
+
+Reference pilot example (run on the Mac with its existing camera/Studio forwards):
+
+```bash
+uv run python scripts/publish_studio_inspection.py \
+  --pilot artifacts/pilots/clean-block-003-multiview-20261115-v2/model \
+  --source http://127.0.0.1:18094/snapshot/plate \
+  --serial 243622060450 --crop 153 276 244 371 \
+  --studio-url http://127.0.0.1:17860
+```
+
+This example crop is for the yellow brick's observed plate position only. Select
+a matching clean reference and reviewed crop when the object or placement changes.
+This publisher uses the existing PyTorch CPU reference pilot for development;
+production baseline inference remains OpenVINO CPU with calibrated assets.
+It publishes `UNCALIBRATED`, never a good/defective verdict. Colors are relative
+response, not a calibrated defect boundary. Failed masks publish `REINSPECT`
+without a heatmap. Existing masking failures remain unresolved.
+
+Evidence includes acquisition time, camera serial, frame ID and model hash.
+Only explicitly real plate/wrist evidence is accepted; stale/future/repeated or
+out-of-order frames are rejected. Results expire after three seconds from
+acquisition; expired images/maps disappear and the camera preview resumes.
+Frame/heatmap images travel together so an old heatmap is never drawn on a newer
+live image. This API and publisher cannot command the robot or authorize sorting.
+
+The API is available in native Physical AI Studio and the standalone Studio /
+station dashboard through their shared Studio handlers. Native deployment needs
+only the inspection module, additive router routes and existing camera-view JS;
+reload the backend after Python changes and refresh the browser after JS changes.
+No camera driver or arm service changes are required. Trained models and captures
+remain local and are excluded from Git.
