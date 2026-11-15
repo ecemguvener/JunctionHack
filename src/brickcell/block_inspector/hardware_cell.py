@@ -470,9 +470,21 @@ class RealCameraAnomalyInspector:
         camera_detectors: dict[str, dict[str, Any]] | None = None,
         camera_crops: dict[str, list[int] | None] | None = None,
         worker_timeout_s: float = 2.5,
+        allow_heuristic_sorting: bool = False,
     ) -> None:
-        if dark_mark_threshold is None or not math.isfinite(float(dark_mark_threshold)):
-            raise ValueError("RealCameraAnomalyInspector requires a finite dark_mark_threshold")
+        if (
+            dark_mark_threshold is None
+            or not math.isfinite(float(dark_mark_threshold))
+            or float(dark_mark_threshold) <= 0
+        ):
+            raise ValueError(
+                "RealCameraAnomalyInspector requires a positive finite dark_mark_threshold"
+            )
+        if type(allow_heuristic_sorting) is not bool:
+            raise ValueError("Heuristic sorting selection must be explicit boolean")
+        if allow_heuristic_sorting and (openvino_detector is not None or camera_detectors):
+            raise ValueError("Do not mix heuristic sorting with Anomalib models")
+        self.allow_heuristic_sorting = allow_heuristic_sorting
         if openvino_detector is not None and getattr(openvino_detector, "threshold", None) is None:
             raise ValueError("OpenVINODetector requires a calibrated threshold before deployment")
         self.dark_mark_threshold = float(dark_mark_threshold)
@@ -506,6 +518,8 @@ class RealCameraAnomalyInspector:
 
     @property
     def inspector_mode(self) -> str:
+        if self.allow_heuristic_sorting:
+            return "lab_dark_mark_plate_sort"
         return "anomalib_openvino_cpu" if self.has_anomalib_models else "lab_dark_mark_fallback"
 
     def configured_cameras(self) -> list[str]:
@@ -513,6 +527,8 @@ class RealCameraAnomalyInspector:
 
     def has_detector_for_camera(self, camera_name: str) -> bool:
         norm = "plate" if camera_name == "side" else camera_name
+        if self.allow_heuristic_sorting:
+            return norm == "plate"
         return norm in ("plate", "wrist") and norm in self.camera_detectors
 
     def resolve_crop_for_camera(
@@ -549,6 +565,23 @@ class RealCameraAnomalyInspector:
         from brickcell.inspection.types import Decision
 
         h_img, w_img = rgb.shape[:2]
+        if (
+            len(crop_box) != 4
+            or any(type(v) is not int for v in crop_box)
+            or not (
+                0 <= crop_box[0] < crop_box[2] <= w_img and 0 <= crop_box[1] < crop_box[3] <= h_img
+            )
+        ):
+            return FrameInspectionResult(
+                False,
+                0.0,
+                self.dark_mark_threshold,
+                False,
+                [],
+                0,
+                reason="invalid_or_clipped_crop",
+                inspector_backend=self.inspector_mode,
+            )
         u0 = max(0, min(w_img - 1, int(crop_box[0])))
         v0 = max(0, min(h_img - 1, int(crop_box[1])))
         u1 = max(u0 + 1, min(w_img, int(crop_box[2])))
@@ -726,14 +759,18 @@ class RealCameraAnomalyInspector:
             )
 
         return FrameInspectionResult(
-            valid_view=False,
+            valid_view=self.allow_heuristic_sorting,
             raw_anomaly_distance=dark_score,
             threshold_value=self.dark_mark_threshold,
-            flagged=False,
+            flagged=self.allow_heuristic_sorting and dark_score >= self.dark_mark_threshold,
             detections=full_dets,
             foreground_pixels=fg_count,
-            reason="uncalibrated_dark_mark_reference_not_trusted",
-            inspector_backend="lab_dark_mark_fallback",
+            reason=(
+                "explicit_lab_contrast_rule"
+                if self.allow_heuristic_sorting
+                else "uncalibrated_dark_mark_reference_not_trusted"
+            ),
+            inspector_backend=self.inspector_mode,
         )
 
     def evaluate_frame(
@@ -749,7 +786,9 @@ class RealCameraAnomalyInspector:
         if self.timed_out or self._executor is None:
             raise TimeoutError("Inspector worker previously timed out and cannot be reused")
         camera_name = "plate" if camera_name == "side" else camera_name
-        if camera_name not in ("plate", "wrist"):
+        if camera_name not in ("plate", "wrist") or (
+            self.allow_heuristic_sorting and camera_name != "plate"
+        ):
             return FrameInspectionResult(
                 False,
                 0.0,
@@ -2816,21 +2855,26 @@ class PhysicalSO101CellExecutor:
         )
 
     def _skill_present_and_spin_at_plate_camera(self) -> SkillOutcome:
-        """Present held brick and require scheduled plate/wrist RGB inspection evidence."""
+        """Present held brick and require the selected policy's scheduled RGB views."""
         from brickcell.inspection.mark_scan import MarkScanEvidence
         from brickcell.inspection.types import Decision
 
         self.plate_scan_completed = False
         if self.hand_empty or self._active_brick is None:
             return SkillOutcome(False, reason="block_not_held")
+        heuristic = getattr(self.inspector, "allow_heuristic_sorting", False)
         missing_models = [
             camera
             for camera in ("plate", "wrist")
             if not self.inspector.has_detector_for_camera(camera)
         ]
-        if missing_models:
+        if missing_models and not heuristic:
             return SkillOutcome(False, reason=f"missing_mark_models({','.join(missing_models)})")
-        scan_evidence = MarkScanEvidence()
+        scan_evidence = (
+            MarkScanEvidence(required=frozenset(("plate", i) for i in range(7)))
+            if heuristic
+            else MarkScanEvidence()
+        )
 
         brick = self._active_brick
         dash_obj_id = PART_ID_TO_DASHBOARD_ID.get(brick.spec.part_id, "part-001")
@@ -2964,7 +3008,7 @@ class PhysicalSO101CellExecutor:
                     valid=res_plate is not None and res_plate.valid_view,
                     flagged=res_plate is not None and res_plate.flagged,
                 )
-                if step_idx in (0, 3, 6):
+                if not heuristic and step_idx in (0, 3, 6):
                     hw_w = wrist_snap.rgb.shape[:2]
                     w_box = [
                         int(0.24 * hw_w[1]),
@@ -3031,7 +3075,7 @@ class PhysicalSO101CellExecutor:
                 False, reason=f"insufficient_valid_plate_views({self.plate_scan_valid_frames})"
             )
 
-        if scan_evidence.decision() == Decision.REINSPECT:
+        if scan_evidence.decision() == Decision.REINSPECT or (heuristic and scan_evidence.missing):
             return SkillOutcome(
                 False, reason=f"incomplete_plate_wrist_scan({scan_evidence.missing})"
             )
@@ -3253,6 +3297,7 @@ def run_physical_cell_deployment(
     rgbd_viewer_config_path: str | Path | None = None,
     require_anomalib: bool = False,
     output_dir: str | Path | None = None,
+    inspection_mode: str = "patchcore",
 ) -> dict[str, Any]:
     """Run the full physical SO-101 3-plate inspection deployment on `intel`."""
     out_root = (
@@ -3262,14 +3307,22 @@ def run_physical_cell_deployment(
     )
     out_root.mkdir(parents=True, exist_ok=True)
 
-    cam_detectors, cam_crops = load_anomalib_camera_detectors(
-        openvino_model_path=openvino_config_path,
-        rgbd_viewer_config_path=rgbd_viewer_config_path,
-    )
+    if inspection_mode not in ("patchcore", "lab-dark-mark"):
+        raise ValueError("Unknown inspection mode")
+    heuristic = inspection_mode == "lab-dark-mark"
+    if heuristic and (require_anomalib or openvino_config_path is not None):
+        raise ValueError("lab-dark-mark cannot be combined with Anomalib model selection")
+    if heuristic:
+        cam_detectors, cam_crops = {}, {}
+    else:
+        cam_detectors, cam_crops = load_anomalib_camera_detectors(
+            openvino_model_path=openvino_config_path,
+            rgbd_viewer_config_path=rgbd_viewer_config_path,
+        )
     missing_models = [
         camera for camera in ("plate", "wrist") if "rgb" not in cam_detectors.get(camera, {})
     ]
-    if missing_models:
+    if missing_models and not heuristic:
         raise ValueError(
             f"missing_mark_models({','.join(missing_models)}): deployment refused before "
             "camera/arm initialization or pickup. Both plate and wrist require real, "
@@ -3280,14 +3333,15 @@ def run_physical_cell_deployment(
             "Uncalibrated pilots and lab_dark_mark_fallback cannot authorize sorting."
         )
 
-    frame_source = LiveBenchHttpFrameSource(
-        live_depth_url=live_depth_url,
-        wrist_http_url=wrist_http_url,
-    )
     inspector = RealCameraAnomalyInspector(
         dark_mark_threshold=dark_mark_threshold,
         camera_detectors=cam_detectors,
         camera_crops=cam_crops,
+        allow_heuristic_sorting=heuristic,
+    )
+    frame_source = LiveBenchHttpFrameSource(
+        live_depth_url=live_depth_url,
+        wrist_http_url=wrist_http_url,
     )
     arm = PhysicalArmController(armd_url=armd_url, dry_run=dry_run)
     dashboard = TwinDashboardReporter(base_url=dashboard_url) if dashboard_url else None
@@ -3333,6 +3387,11 @@ def run_physical_cell_deployment(
             "synthetic_simulation": False,
             "inspector_mode": inspector.inspector_mode,
             "anomalib_cameras": inspector.configured_cameras(),
+            "inspection_policy": inspection_mode,
+            "threshold_kind": "operator_selected_lab_contrast"
+            if heuristic
+            else "validation_calibrated",
+            "lab_contrast_threshold": dark_mark_threshold if heuristic else None,
             "succeeded": bool(report.succeeded),
             "termination_reason": last_reason,
             "elapsed_s": report.elapsed_s,

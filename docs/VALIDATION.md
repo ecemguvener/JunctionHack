@@ -2306,3 +2306,48 @@ This review changes documentation only; no software tests were rerun. The last
 software suite remains 273 passed/16 skipped; four calibrated-model tests remain
 unconfigured. No live camera was opened, robot commanded, publisher changed,
 model deployed or sorting gate removed.
+
+### Explicit legacy Lab sorting policy restored — 2026-11-15
+
+Compared verified `origin/demo_1` commit `83dc84782400479ff77196e25ecadc2031d75f31`
+with `anomaly`. The older physical path allowed the Lab dark-mark rule without
+loaded PatchCore assets; later changes had disabled it and required both models.
+Added explicit `deploy-cell --inspection-mode lab-dark-mark` to select that
+operator-requested rule. Default `patchcore` mode still requires calibrated
+plate/wrist models before camera/arm initialization. Lab mode does not discover
+models or mix their scores; unknown/conflicting selections fail before hardware.
+
+Lab mode authorizes only plate-camera classification with a positive finite
+contrast setting (default 16). Mark score >= setting flags pink; a complete
+unflagged scan selects green. Reports identify `lab_dark_mark_plate_sort`,
+`inspection_policy`, `operator_selected_lab_contrast` and the actual setting;
+they do not call it validation-calibrated PatchCore. Wrist imagery remains for
+grasp/visualization only and cannot contribute classification in this policy.
+Unlike the old branch's three-view minimum, all seven scheduled plate views
+must be valid with distinct frame IDs, including when a mark has been flagged.
+Clipped/invalid crops are rejected rather than silently clamped. Existing grasp
+checks, unscanned-sort refusal, fault/timeout handling and worker retirement
+remain active. This change does not establish real mark-detection accuracy.
+
+Executed `uv sync --locked`, `uv run pytest` (**291 passed, 16 skipped**, two
+upstream warnings), `uv run ruff check src tests scripts`, `uv run ruff format
+--check src tests scripts` (132 files), and `git diff --check`. Eighteen added
+cases exercise actual extracted inspector/deployment code with synthetic pixels,
+explicit selection, marked/clean flags, invalid thresholds/views, camera
+exclusion, mode conflicts and model-discovery isolation. Skips remain optional
+FastAPI/Frax/MuJoCo/JAX/live simulation and four calibrated-model tests.
+
+Confirmed Intel has JAX/Frax/MuJoCo/SciPy and no active `deploy-cell` process at
+the check. Staged source separately under
+`/home/intel/brickcell-deploy/artifacts/heuristic-sorter-v1`, referencing existing
+assets/configs/models/tools through symlinks. Verified native staged CLI imports
+and `deploy-cell --help`. Executed the actual staged inspector on synthetic
+96x96 clean and dark-line images: clean distance 0.0, marked distance
+166.4598096175211, setting 16.0; expected valid/unflagged and valid/flagged
+results passed. No robot/controller was instantiated by that check.
+
+The existing deployment source and camera-wall publisher were not replaced or
+restarted. No physical pickup, spin, sort or gripper action was launched. An
+operator must establish current workspace/gripper state before the documented
+single-cycle physical command is used. Run instructions and operating limits:
+`docs/HEURISTIC_SORTER.md`.

@@ -76,10 +76,11 @@ the real PatchCore plate pilots.
 ## Sorting readiness
 
 All 16 real pilots have `threshold: null`. None is a trained wrist model. The
-current physical deployment requires calibrated real plate **and wrist** RGB
+default PatchCore deployment policy requires calibrated real plate **and wrist** RGB
 models with matching sensor contracts, valid fresh views and complete scan
 evidence. A frozen image model that responds to one known mark does not supply
-those missing integration requirements. No arm command, camera-wall publisher
+those missing integration requirements. The explicit legacy Lab operating rule
+is documented separately in [HEURISTIC_SORTER.md](HEURISTIC_SORTER.md). No arm command, camera-wall publisher
 change, model replacement or gate bypass occurred during this review.
 
 Full machine-readable rerun evidence is saved locally under ignored
