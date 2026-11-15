@@ -1759,4 +1759,57 @@ def test_wrist_two_view_parallax_triangulation() -> None:
     assert np.linalg.norm(p_est - p_true) < 0.002
 
 
+def test_wrist_anomaly_babyros_node_publishes_anomaly_alerts(tmp_path: Path) -> None:
+    """Verify WristAnomalyNode scores wrist frames with PatchCore and publishes BabyROS alerts."""
+    from types import SimpleNamespace
 
+    from brickcell.block_inspector.runtime_bus import (
+        CANONICAL_TOPICS,
+        InProcessRuntimeBus,
+        pack_rgbd_frame_nddc,
+    )
+    from brickcell.block_inspector.runtime_nodes import WristAnomalyNode
+
+    scores = iter([1.85, 2.75])
+    fake_detector = SimpleNamespace(
+        model_version="6d8add3e0688a925",
+        metadata={"synthetic": False},
+        threshold=SimpleNamespace(
+            value=2.453849196434021,
+            version="4128199aec09eedb",
+            decide=lambda sc: "DEFECTIVE" if sc >= 2.453849196434021 else "GOOD",
+        ),
+        predict=lambda _roi: SimpleNamespace(score=next(scores), latency_ms=14.2, anomaly_map=None),
+    )
+    bus = InProcessRuntimeBus()
+    wrist_msgs: list[dict] = []
+    insp_msgs: list[dict] = []
+    bus.subscribe(CANONICAL_TOPICS["wrist_anomaly"], wrist_msgs.append)
+    bus.subscribe(CANONICAL_TOPICS["inspection_anomaly"], insp_msgs.append)
+    events_file = tmp_path / "wrist_events.jsonl"
+    node = WristAnomalyNode(
+        bus=bus,
+        detector=fake_detector,  # type: ignore[arg-type]
+        crop_box=[10, 10, 50, 50],
+        events_path=events_file,
+    )
+    try:
+        assert not hasattr(node, "robot") and not hasattr(node, "arm")
+        wrist_img = np.full((64, 64, 3), 180, dtype=np.uint8)
+        bus.publish(CANONICAL_TOPICS["wrist_frame"], pack_rgbd_frame_nddc(wrist_img, 1000))
+        assert len(wrist_msgs) == 1
+        assert wrist_msgs[0]["decision"] == "GOOD"
+        assert wrist_msgs[0]["malformed"] is False
+        assert len(insp_msgs) == 0
+
+        bus.publish(CANONICAL_TOPICS["wrist_frame"], pack_rgbd_frame_nddc(wrist_img, 2000))
+        assert len(wrist_msgs) == 2
+        assert wrist_msgs[1]["decision"] == "DEFECTIVE"
+        assert wrist_msgs[1]["malformed"] is True
+        assert len(insp_msgs) == 1
+        assert insp_msgs[0]["camera"] == "wrist"
+        assert node.alerts_published == 1
+        assert len(events_file.read_text(encoding="utf-8").splitlines()) == 2
+    finally:
+        node.close()
+        bus.close()

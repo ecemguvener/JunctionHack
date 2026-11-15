@@ -10,18 +10,21 @@ from urllib.request import Request, urlopen
 
 def detection_payload(event, now=None):
     now = time.time() if now is None else now
+    cam_in = event.get("camera")
+    expected_serial = "sonix-wrist" if cam_in == "wrist" else "243622060450"
+    cam_out = "wrist" if cam_in == "wrist" else "side"
     neutral = dict(
         malformed=None,
         detail="No fresh supported detector result",
-        camera="side",
+        camera=cam_out,
         captured_at=now,
         source="live_dark_mark_heuristic_not_patchcore",
     )
     stamp = event.get("captured_at")
     if (
         event.get("synthetic") is not False
-        or event.get("camera") != "plate"
-        or event.get("serial") != "243622060450"
+        or cam_in not in ("plate", "wrist")
+        or event.get("serial") != expected_serial
         or not isinstance(event.get("frame_id"), str)
         or not event["frame_id"]
         or type(stamp) not in (int, float)
@@ -52,9 +55,10 @@ def detection_payload(event, now=None):
             malformed=found,
             detail=(
                 f"{'DEFECT FLAGGED' if found else 'GOOD'} | "
-                f"PatchCore {score:.3f} vs thr {threshold:.3f} ({event['model_version']})"
+                f"{'Wrist ' if cam_out == 'wrist' else ''}PatchCore "
+                f"{score:.3f} vs thr {threshold:.3f} ({event['model_version']})"
             )[:200],
-            camera="side",
+            camera=cam_out,
             captured_at=stamp,
             frame_id=event["frame_id"],
             source=f"patchcore_openvino_{event['model_version']}",

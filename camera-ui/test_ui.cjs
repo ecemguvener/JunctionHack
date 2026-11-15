@@ -23,5 +23,22 @@ for (const state of ['stale', 'none', 'ok']) {
 showDetection({state: 'malformed', camera: 'side'});
 showDetection(null);
 assert(!tiles.side.classes.has('alert'));
+showDetection({
+  state: 'malformed',
+  camera: 'wrist',
+  cameras: {side: {state: 'ok'}, wrist: {state: 'malformed'}, overhead: {state: 'none'}}
+});
+assert(!tiles.side.classes.has('alert'));
+assert(tiles.wrist.classes.has('alert'));
+showDetection({
+  state: 'malformed',
+  camera: 'side',
+  cameras: {side: {state: 'malformed'}, wrist: {state: 'malformed'}}
+});
+assert(tiles.side.classes.has('alert'));
+assert(tiles.wrist.classes.has('alert'));
+showDetection({state: 'ok', camera: 'side', cameras: {side: {state: 'ok'}, wrist: {state: 'ok'}}});
+assert(!tiles.side.classes.has('alert'));
+assert(!tiles.wrist.classes.has('alert'));
 assert(html.includes('.tile.alert:not(.down) .frame::after'));
 console.log('Camera red warning and stale/offline reset checks passed');
