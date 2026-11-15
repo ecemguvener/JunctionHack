@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from brickcell.inspection.anomaly_blocks import detect_unplated_anomaly_blocks
 from brickcell.inspection.dark_marks import score_brick_roi_dark_mark
 from brickcell.util import sha256
 
@@ -167,6 +168,31 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0, detector=None):
         automatic_sorting_allowed=False,
     )
     if crop is None:
+        if detector is None:
+            found_unplated, anomaly_label, boxes_unplated = detect_unplated_anomaly_blocks(rgb)
+            if found_unplated:
+                overlay = rgb.copy()
+                for bx0, by0, bx1, by1 in boxes_unplated:
+                    cv2.rectangle(overlay, (bx0, by0), (bx1 - 1, by1 - 1), (255, 70, 155), 2)
+                cv2.rectangle(overlay, (0, 0), (rgb.shape[1], 46), (15, 22, 33), -1)
+                cv2.putText(
+                    overlay,
+                    f"MALFORM DETECTED ({anomaly_label}) - PINK PLATE",
+                    (10, 19),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.48,
+                    (255, 70, 155),
+                    1,
+                    cv2.LINE_AA,
+                )
+                body.update(
+                    decision="UNCALIBRATED",
+                    reason=f"Anomaly block detected outside plates ({anomaly_label}); pink plate.",
+                    raw_distance=float(max(contrast, 25.0)),
+                    contrast=float(contrast),
+                    anomaly_block=anomaly_label,
+                    overlay_jpeg=jpeg(overlay),
+                )
         return body
     x0, y0, x1, y1 = crop
     h, w = rgb.shape[:2]

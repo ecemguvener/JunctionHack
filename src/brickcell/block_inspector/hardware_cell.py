@@ -3569,12 +3569,26 @@ class PhysicalSO101CellExecutor:
                     stage_tag=f"spin_{step_idx}",
                     expected_z_m=None,
                 )
+                blk_found = False
+                if heuristic:
+                    from brickcell.inspection.anomaly_blocks import classify_held_anomaly_block
+
+                    px0, py0, px1, py1 = plate_box
+                    blk_found, blk_label, _ = classify_held_anomaly_block(
+                        plate_snap.rgb[py0:py1, px0:px1],
+                        mean_rgb=brick.mean_rgb,
+                    )
+                    if blk_found:
+                        self.anomaly_flagged = True
+                        self.anomaly_messages.append(
+                            f"spin_{step_idx}_plate_anomaly_block={blk_label}"
+                        )
                 scan_evidence.record(
                     "plate",
                     step_idx,
                     plate_snap.frame_id,
                     valid=res_plate is not None and res_plate.valid_view,
-                    flagged=res_plate is not None and res_plate.flagged,
+                    flagged=bool(blk_found or (res_plate is not None and res_plate.flagged)),
                 )
                 if not (heuristic or plate_only_model) and step_idx in (0, 3, 6):
                     hw_w = wrist_snap.rgb.shape[:2]

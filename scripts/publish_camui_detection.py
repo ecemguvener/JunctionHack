@@ -76,10 +76,16 @@ def detection_payload(event, now=None):
     ):
         return neutral
     found = score >= threshold
+    anomaly_block = event.get("anomaly_block")
+    if found and isinstance(anomaly_block, str) and anomaly_block:
+        detail = f"Anomaly block detected ({anomaly_block}) outside plates"
+    else:
+        detail = (
+            "DARK MARK FLAGGED" if found else "No dark mark flagged in this view"
+        ) + " | unvalidated dark-mark rule; separate from colour sorting"
     return dict(
         malformed=found,
-        detail=("DARK MARK FLAGGED" if found else "No dark mark flagged in this view")
-        + " | unvalidated dark-mark rule; separate from colour sorting",
+        detail=detail,
         camera="side",
         captured_at=stamp,
         frame_id=event["frame_id"],

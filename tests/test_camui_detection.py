@@ -242,3 +242,70 @@ def test_wrist_anomaly_babyros_node_integrates_with_camui(monkeypatch):
     assert status2["cameras"]["side"]["state"] == "ok"
     node.close()
     bus.close()
+
+
+def test_anomaly_blocks_detected_outside_plates_and_ignored_inside_plates():
+    import cv2
+    import numpy as np
+
+    from brickcell.inspection.anomaly_blocks import detect_unplated_anomaly_blocks
+
+    # Dark gray background with blue (left), green (center), pink (right) plates
+    rgb = np.full((360, 640, 3), 45, dtype=np.uint8)
+    cv2.circle(rgb, (120, 260), 75, (20, 175, 210), -1)  # blue/aqua plate
+    cv2.circle(rgb, (320, 260), 75, (40, 185, 85), -1)  # green plate
+    cv2.circle(rgb, (520, 260), 75, (225, 85, 165), -1)  # pink plate
+
+    # Blocks INSIDE the plates should NOT trigger unplated detection
+    cv2.rectangle(rgb, (95, 240), (145, 280), (240, 240, 240), -1)  # white inside blue
+    cv2.rectangle(rgb, (295, 240), (345, 280), (185, 215, 95), -1)  # lime inside green
+    cv2.rectangle(rgb, (495, 240), (545, 280), (165, 82, 25), -1)  # orange-brown inside pink
+    found, _, boxes = detect_unplated_anomaly_blocks(rgb)
+    assert found is False
+    assert boxes == []
+
+    # Place lime block OUTSIDE all plates (upper center, like during arm presentation)
+    cv2.rectangle(rgb, (290, 80), (350, 135), (185, 215, 95), -1)
+    found, label, boxes = detect_unplated_anomaly_blocks(rgb)
+    assert found is True
+    assert label == "lime_block"
+    assert len(boxes) == 1
+
+
+def test_held_anomaly_block_classifier_flags_target_three_and_bridges_to_camui():
+    import time
+
+    import cv2
+    import numpy as np
+
+    from brickcell.inspection.anomaly_blocks import classify_held_anomaly_block
+
+    pub_mod = module("pub_mark", "scripts/publish_mark_inspection.py")
+
+    for color, expected in (
+        ((240, 240, 240), "white_block"),
+        ((185, 215, 95), "lime_block"),
+        ((165, 82, 25), "orange_brown_block"),
+    ):
+        crop = np.full((80, 80, 3), color, dtype=np.uint8)
+        found, label, _ = classify_held_anomaly_block(crop, mean_rgb=color)
+        assert found is True
+        assert label == expected
+
+    # Normal red brick must NOT be flagged
+    red_crop = np.full((80, 80, 3), (205, 32, 32), dtype=np.uint8)
+    found_red, _, _ = classify_held_anomaly_block(red_crop, mean_rgb=(205.0, 32.0, 32.0))
+    assert found_red is False
+
+    # End-to-end publish_mark_inspection -> publish_camui_detection for white block outside plates
+    rgb = np.full((360, 640, 3), 45, dtype=np.uint8)
+    cv2.rectangle(rgb, (280, 70), (360, 130), (242, 242, 242), -1)
+    now = time.time()
+    packet = {"synthetic": False, "serial": "243622060450", "frame_id": "f-white", "time": now}
+    body = pub_mod.inspect_frame(rgb, packet, None, "243622060450")
+    assert body["decision"] == "UNCALIBRATED"
+    assert body["anomaly_block"] == "white_block"
+    payload = bridge.detection_payload(body, now=now + 0.1)
+    assert payload["malformed"] is True
+    assert payload["camera"] == "side"
+    assert "white_block" in payload["detail"]
