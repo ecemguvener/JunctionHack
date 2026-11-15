@@ -1875,20 +1875,20 @@ class PhysicalArmController:
         q_start = pre_state.q_enc_rad.copy()
         dq = q_clamped - q_start
         max_delta = float(np.max(np.abs(dq)))
-        eff_speed = max(60, min(int(speed), 620))
-        eff_acc = max(10, min(int(acc), 42))
+        eff_speed = max(60, min(int(speed), 860))
+        eff_acc = max(10, min(int(acc), 64))
 
         if max_delta <= 0.06:
             n_segs = 1
             dt_s = 0.0
         else:
             max_ticks = max_delta * (4096.0 / (2.0 * math.pi))
-            duration_s = max(0.12, (0.5 * math.pi * max_ticks) / float(eff_speed))
+            duration_s = max(0.09, (0.5 * math.pi * max_ticks) / float(eff_speed))
             n_segs = max(2, int(math.ceil(duration_s / 0.065)))
             dt_s = duration_s / n_segs
 
         t0 = time.monotonic()
-        stream_speed = min(850, max(eff_speed, int(round(eff_speed * 1.55))))
+        stream_speed = min(980, max(eff_speed, int(round(eff_speed * 1.45))))
         for seg_idx in range(1, n_segs + 1):
             tau = seg_idx / n_segs
             s = 0.5 * (1.0 - math.cos(math.pi * tau))
@@ -1898,7 +1898,7 @@ class PhysicalArmController:
                 q_wp,
                 g_clamped,
                 speed=eff_speed if is_last else stream_speed,
-                acc=eff_acc if is_last else 48,
+                acc=eff_acc if is_last else 72,
                 wait=is_last,
                 timeout=float(timeout_s),
                 tolerance=int(tolerance_ticks),
@@ -1994,7 +1994,7 @@ class PhysicalArmController:
         settled_polls = 0
         q_now = self._sim_q.copy()
         g_now = g_prev
-        time.sleep(0.28)
+        time.sleep(0.16)
         while time.monotonic() < t_deadline:
             q_now, g_now = self.current_q_and_grip(fresh=True)
             if on_step_cb is not None:
@@ -2008,7 +2008,7 @@ class PhysicalArmController:
             else:
                 settled_polls = 0
             g_prev = g_now
-            time.sleep(0.16)
+            time.sleep(0.08)
         return q_now, g_now
 
 
@@ -2086,6 +2086,8 @@ class PhysicalSO101CellExecutor:
         self._T_body3_block_held: np.ndarray = np.eye(4, dtype=np.float64)
         self._cycles_completed: int = 0
         self._recent_missed_xys: list[np.ndarray] = []
+        self._cached_plate_scan_bounds: tuple[np.ndarray, np.ndarray] | None = None
+        self._cached_drop_pose_by_pile: dict[str, tuple[np.ndarray, float]] = {}
 
         # Dedicated real-time BabyROS node tracking green (`good`) & red/pink (`defective`) bowl circles
         self._rt_bus = InProcessRuntimeBus()
@@ -2231,6 +2233,11 @@ class PhysicalSO101CellExecutor:
             # Reset missed-XY history once remaining bricks were tried so every brick clears to 100%
             self._recent_missed_xys.clear()
 
+        # Pre-rank all geometric (brick, yaw, along-offset) candidates without IK first so we can
+        # branch-and-bound IK solves and avoid running dozens of GlobalIKSolver calls at Home.
+        candidates: list[
+            tuple[float, PerceivedBrick, float, float, float, np.ndarray]
+        ] = []
         for b in source_bricks:
             T_wb = b.T_world_block
             p_b = T_wb[:3, 3]
@@ -2271,6 +2278,9 @@ class PhysicalSO101CellExecutor:
             radial_unit = radial_vec / max(r_plate, 1e-6)
             # Subtle inward nudge if a brick is resting right against the sloped outer KALAS lip
             rim_nudge = -0.003 * radial_unit if r_plate > 0.058 else np.zeros(2, dtype=np.float64)
+            miss_pen = 22.0 * max(0, miss_count - 1) + (4.0 if miss_count == 1 else 0.0)
+            r_robot = float(math.hypot(p_b[0], p_b[1]))
+            rim_crowd_pen = 28.0 * max(0.0, r_plate - 0.046)
 
             for yaw, span, axis_idx in yaw_spans:
                 is_narrow = span <= 0.021
@@ -2305,16 +2315,6 @@ class PhysicalSO101CellExecutor:
                         ],
                         dtype=np.float64,
                     )
-                    sol, pitch_used = solve_adaptive_grasp_pose(
-                        self.ik,
-                        p_tcp,
-                        jaw_yaw_world=yaw,
-                        pitches_deg=(88.0, 84.0, 78.0, 70.0, 60.0),
-                    )
-                    pos_err = float(np.linalg.norm(sol.p_tcp_world - p_tcp))
-                    if not sol.feasible and pos_err > 0.009:
-                        continue
-
                     # Check distance to neighboring bricks along jaw opening direction AND overall crowding
                     neighbor_pen = 0.0
                     for other in source_bricks:
@@ -2328,26 +2328,62 @@ class PhysicalSO101CellExecutor:
                             if 0.012 <= u_j <= 0.044:
                                 neighbor_pen += 12.0
 
-                    # Defer to easier bricks only after >= 2 consecutive misses at this spot
-                    miss_pen = 22.0 * max(0, miss_count - 1) + (4.0 if miss_count == 1 else 0.0)
-                    r_robot = float(math.hypot(p_b[0], p_b[1]))
-                    rim_crowd_pen = 28.0 * max(0.0, r_plate - 0.046)
-                    score = (
-                        (20.0 if sol.feasible else 0.0)
-                        - 400.0 * pos_err
-                        - neighbor_pen
+                    heur_score = (
+                        -neighbor_pen
                         - rim_jaw_pen
                         - rim_crowd_pen
                         - miss_pen
                         + retry_axis_bonus
                         - 12.0 * abs(s_along)
                         - 8.0 * r_robot
-                        - 0.08 * abs(88.0 - pitch_used)
                         + 2.0 * b.confidence
                     )
-                    if score > best_score:
-                        best_score = score
-                        best_item = (b, sol, open_pct, close_pct)
+                    candidates.append((heur_score, b, yaw, open_pct, close_pct, p_tcp))
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        seed_q_by_brick: dict[str, np.ndarray] = {}
+        steep_pitches = (88.0, 84.0, 78.0, 70.0, 60.0)
+        for heur_score, b, yaw, open_pct, close_pct, p_tcp in candidates:
+            # Exact upper bound on achievable score: IK terms contribute at most +20.0 (feasible, 0 err).
+            if best_item is not None and (20.0 + heur_score) <= best_score:
+                break
+
+            q_seed = seed_q_by_brick.get(b.block_id)
+            sol = None
+            pitch_used = 88.0
+            if q_seed is not None:
+                sol, pitch_used = solve_adaptive_grasp_pose(
+                    self.ik,
+                    p_tcp,
+                    jaw_yaw_world=yaw,
+                    q_posture=q_seed,
+                    pitches_deg=steep_pitches,
+                    local_seed_only=True,
+                )
+            if sol is None or not sol.feasible:
+                sol, pitch_used = solve_adaptive_grasp_pose(
+                    self.ik,
+                    p_tcp,
+                    jaw_yaw_world=yaw,
+                    q_posture=q_seed,
+                    pitches_deg=steep_pitches,
+                )
+
+            pos_err = float(np.linalg.norm(sol.p_tcp_world - p_tcp))
+            if not sol.feasible and pos_err > 0.009:
+                continue
+            if b.block_id not in seed_q_by_brick or sol.feasible:
+                seed_q_by_brick[b.block_id] = sol.q_grasp.copy()
+
+            score = (
+                (20.0 if sol.feasible else 0.0)
+                - 400.0 * pos_err
+                - 0.08 * abs(88.0 - pitch_used)
+                + heur_score
+            )
+            if score > best_score:
+                best_score = score
+                best_item = (b, sol, open_pct, close_pct)
 
         return best_item
 
@@ -2426,17 +2462,16 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 PHYSICAL_OBSERVATION_HOME_Q,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=520,
+                speed=820,
+                acc=60,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             if not self.arm.dry_run:
-                time.sleep(0.06)
+                time.sleep(0.03)
 
         q_now, g_now = self.arm.current_q_and_grip(fresh=True)
         top_snap = self.frame_source.fetch_d415_snapshot("top")
         self._bowl_circle_node.process_rgb(top_snap.rgb)
-        plate_snap = self.frame_source.fetch_d415_snapshot("plate")
-        wrist_snap = self.frame_source.fetch_wrist_snapshot()
 
         # Primary pick/place localization: crisp 2D Top-RGB (zero stereo depth drift!)
         R_top, p_top, K_top = self.real_cams["top"]
@@ -2469,6 +2504,8 @@ class PhysicalSO101CellExecutor:
 
         self.remaining_source_blocks = len(source_bricks)
         if not source_bricks:
+            plate_snap = self.frame_source.fetch_d415_snapshot("plate")
+            wrist_snap = self.frame_source.fetch_wrist_snapshot()
             self.source_plate_cleared = True
             self.status_banner = (
                 f"Source Plate Cleared! Good: {self.sorted_counts['good']} | "
@@ -2507,10 +2544,13 @@ class PhysicalSO101CellExecutor:
                 box=top_box,
             )
 
-        # Multi-camera pre-pick inspection across BOTH `top` D415 AND `plate` (`side`) D415 feeds
+        # Multi-camera pre-pick inspection across `top` and `plate` feeds; when no dashboard is
+        # attached, inspect only the chosen target brick rather than every candidate on the tray.
         R_pl, p_pl, K_pl = self.real_cams["plate"]
         all_dash_anoms: list[dict[str, Any]] = []
-        for cand_b in source_bricks:
+        plate_snap = self.frame_source.fetch_d415_snapshot("plate")
+        eval_bricks = source_bricks if self.dashboard is not None else [brick]
+        for cand_b in eval_bricks:
             cand_tbox = self._project_to_top_box(cand_b.T_world_block, cand_b.spec.dims_m)
             cand_pbox, cand_z = project_world_obb_to_image_box(
                 cand_b.T_world_block,
@@ -2611,7 +2651,10 @@ class PhysicalSO101CellExecutor:
             f"Target Locked (2D RGB): {brick.spec.name} at ({brick.T_world_block[0, 3]:.3f}, "
             f"{brick.T_world_block[1, 3]:.3f}) | {len(source_bricks)} in source"
         )
-        self._sync_mirror_and_telemetry(q_now, g_now, top_snap.rgb, plate_snap.rgb, wrist_snap.rgb)
+        wrist_rgb_hud = (
+            self.frame_source.fetch_wrist_snapshot().rgb if self.hud is not None else None
+        )
+        self._sync_mirror_and_telemetry(q_now, g_now, top_snap.rgb, plate_snap.rgb, wrist_rgb_hud)
         return SkillOutcome(
             True,
             reason="cluster_block_localized",
@@ -2649,11 +2692,12 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             pre_sol.q_grasp,
             gripper_pct=self._active_open_pct,
-            speed=480,
+            speed=800,
+            acc=58,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
-            time.sleep(0.06)
+            time.sleep(0.04)
 
         max_local_attempts = 1 if self.arm.dry_run else 3
         q_clamped = grasp_sol.q_grasp.copy()
@@ -2722,11 +2766,12 @@ class PhysicalSO101CellExecutor:
                         self.arm.move_to_pose(
                             pre_sol.q_grasp,
                             gripper_pct=self._active_open_pct,
-                            speed=420,
+                            speed=620,
+                            acc=50,
                             include_gripper=False,
                             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                         )
-                        time.sleep(0.05)
+                        time.sleep(0.04)
                 self._sync_mirror_and_telemetry(
                     q_pre_meas, g_pre_meas, wrist_rgb=wrist_pre_snap.rgb
                 )
@@ -2751,11 +2796,12 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     low_sol.q_grasp,
                     gripper_pct=self._active_open_pct,
-                    speed=210,
+                    speed=240,
+                    acc=34,
                     include_gripper=False,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
-                time.sleep(0.05)
+                time.sleep(0.04)
 
                 trimmed_xy_yaw = False
                 for trim_iter in range(2):
@@ -2802,13 +2848,14 @@ class PhysicalSO101CellExecutor:
                         self.arm.move_to_pose(
                             low_sol.q_grasp,
                             gripper_pct=self._active_open_pct,
-                            speed=195,
+                            speed=210,
+                            acc=32,
                             include_gripper=False,
                             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(
                                 q, g, wrist_rgb=wrist_low_snap.rgb
                             ),
                         )
-                        time.sleep(0.05)
+                        time.sleep(0.04)
                     except StaleCameraFrameError:
                         break
 
@@ -2836,7 +2883,8 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 grasp_sol.q_grasp,
                 gripper_pct=self._active_open_pct,
-                speed=160,
+                speed=220,
+                acc=34,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             # Mark `holding_object = True` BEFORE clamping so gripper holding torque is never relaxed!
@@ -2858,7 +2906,8 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     pre_sol.q_grasp,
                     gripper_pct=self._active_open_pct,
-                    speed=480,
+                    speed=720,
+                    acc=54,
                     timeout_s=3.2,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
@@ -2881,7 +2930,7 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     grasp_sol.q_grasp,
                     gripper_pct=self._active_close_pct,
-                    speed=185,
+                    speed=240,
                     timeout_s=0.70,
                 )
 
@@ -2903,12 +2952,13 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 lift_sol.q_grasp,
                 gripper_pct=self._active_close_pct,
-                speed=360,
+                speed=540,
+                acc=48,
                 include_gripper=False,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             if not self.arm.dry_run:
-                time.sleep(0.08)
+                time.sleep(0.05)
 
             # Post-lift physical pick confirmation: verify jaws did NOT close to empty stop during lift!
             q_lifted, g_lifted = self.arm.current_q_and_grip(fresh=True)
@@ -2922,7 +2972,8 @@ class PhysicalSO101CellExecutor:
                 self.arm.move_to_pose(
                     pre_sol.q_grasp,
                     gripper_pct=self._active_open_pct,
-                    speed=480,
+                    speed=720,
+                    acc=54,
                     timeout_s=2.8,
                     on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
                 )
@@ -2995,30 +3046,36 @@ class PhysicalSO101CellExecutor:
 
         brick = self._active_brick
         dash_obj_id = PART_ID_TO_DASHBOARD_ID.get(brick.spec.part_id, "part-001")
-        radial_az = math.atan2(float(PHYSICAL_PLATE_SCAN_POS[1]), float(PHYSICAL_PLATE_SCAN_POS[0]))
-        q_demo_seed = np.array([0.45, 0.65, -0.65, 0.62, 1.72], dtype=np.float64)
-        pres_sol = self.ik.solve_grasp_pose(
-            PHYSICAL_PLATE_SCAN_POS,
-            jaw_yaw_world=radial_az + 0.5 * math.pi,
-            pitch_down_deg=PHYSICAL_PLATE_SCAN_PITCH_DEG,
-            q_posture=q_demo_seed,
-        )
-
-        q_scan_start = pres_sol.q_grasp.copy()
-        q_scan_start[4] = max(
-            float(self.ik.cal_kin.calibration.lower[4]) + 0.08, PHYSICAL_JOINT5_CCW_START_RAD
-        )
-        q_scan_end = pres_sol.q_grasp.copy()
-        q_scan_end[4] = min(
-            float(self.ik.cal_kin.calibration.upper[4]) - 0.08, PHYSICAL_JOINT5_CCW_END_RAD
-        )
+        if self._cached_plate_scan_bounds is None:
+            radial_az = math.atan2(
+                float(PHYSICAL_PLATE_SCAN_POS[1]), float(PHYSICAL_PLATE_SCAN_POS[0])
+            )
+            q_demo_seed = np.array([0.45, 0.65, -0.65, 0.62, 1.72], dtype=np.float64)
+            pres_sol = self.ik.solve_grasp_pose(
+                PHYSICAL_PLATE_SCAN_POS,
+                jaw_yaw_world=radial_az + 0.5 * math.pi,
+                pitch_down_deg=PHYSICAL_PLATE_SCAN_PITCH_DEG,
+                q_posture=q_demo_seed,
+            )
+            q_s0 = pres_sol.q_grasp.copy()
+            q_s0[4] = max(
+                float(self.ik.cal_kin.calibration.lower[4]) + 0.08, PHYSICAL_JOINT5_CCW_START_RAD
+            )
+            q_s1 = pres_sol.q_grasp.copy()
+            q_s1[4] = min(
+                float(self.ik.cal_kin.calibration.upper[4]) - 0.08, PHYSICAL_JOINT5_CCW_END_RAD
+            )
+            self._cached_plate_scan_bounds = (q_s0, q_s1)
+        q_scan_start = self._cached_plate_scan_bounds[0].copy()
+        q_scan_end = self._cached_plate_scan_bounds[1].copy()
 
         self.arm.holding_object = True
         self.status_banner = "PresentAndSpinAtPlateCamera: Moving held brick directly to Side/Plate D415"
         self.arm.move_to_pose(
             q_scan_start,
             gripper_pct=self._active_close_pct,
-            speed=400,
+            speed=680,
+            acc=54,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
@@ -3032,7 +3089,8 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 PHYSICAL_OBSERVATION_HOME_Q,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=450,
+                speed=780,
+                acc=56,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
             return SkillOutcome(False, reason=f"pick_dropped_retrying(g_arr={g_arrival:.3f})")
@@ -3059,11 +3117,12 @@ class PhysicalSO101CellExecutor:
                 q_step,
                 gripper_pct=self._active_close_pct,
                 speed=230,
+                acc=36,
                 timeout_s=5.0,
                 include_gripper=False,
             )
             if not self.arm.dry_run:
-                time.sleep(0.06)
+                time.sleep(0.05)
 
             q_meas, g_meas = self.arm.current_q_and_grip(fresh=True)
             T_held = self.ik.fk_world_body3(q_meas) @ self._T_body3_block_held
@@ -3174,7 +3233,10 @@ class PhysicalSO101CellExecutor:
             self.hand_empty = True
             self.ledger.reset_all()
             self.arm.move_to_pose(
-                PHYSICAL_OBSERVATION_HOME_Q, gripper_pct=PHYSICAL_HOME_GRIPPER_PCT, speed=200
+                PHYSICAL_OBSERVATION_HOME_Q,
+                gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
+                speed=780,
+                acc=56,
             )
             return SkillOutcome(False, reason="pick_dropped_retrying(not_held_during_spin)")
         if self.plate_scan_valid_frames < 3:
@@ -3255,45 +3317,69 @@ class PhysicalSO101CellExecutor:
         drop_yaw = math.atan2(float(target_xy[1]), float(target_xy[0])) + 0.5 * math.pi
         drop_pitches = (72.0, 62.0, 52.0, 42.0, 34.0)
 
-        above_sol, _ = solve_adaptive_grasp_pose(
-            self.ik,
-            np.array([target_xy[0], target_xy[1], 0.135], dtype=np.float64),
-            jaw_yaw_world=drop_yaw,
-            pitches_deg=drop_pitches,
-        )
+        p_above = np.array([target_xy[0], target_xy[1], 0.135], dtype=np.float64)
+        cached_above = self._cached_drop_pose_by_pile.get(pile)
+        above_sol = None
+        above_pitch = drop_pitches[0]
+        if cached_above is not None:
+            q_seed_ab, p_seed_ab = cached_above
+            pitches_ordered = (p_seed_ab,) + tuple(p for p in drop_pitches if p != p_seed_ab)
+            above_sol, above_pitch = solve_adaptive_grasp_pose(
+                self.ik,
+                p_above,
+                jaw_yaw_world=drop_yaw,
+                q_posture=q_seed_ab,
+                pitches_deg=pitches_ordered,
+                local_seed_only=True,
+            )
+        if above_sol is None or not above_sol.feasible:
+            above_sol, above_pitch = solve_adaptive_grasp_pose(
+                self.ik,
+                p_above,
+                jaw_yaw_world=drop_yaw,
+                q_posture=cached_above[0] if cached_above is not None else None,
+                pitches_deg=drop_pitches,
+            )
+        self._cached_drop_pose_by_pile[pile] = (above_sol.q_grasp.copy(), float(above_pitch))
 
         self.status_banner = f"SortBlockToPile({pile.upper()}): Transiting to {pile} KALAS disk"
-        # Unwind Joint 5 smoothly at safe elevation before lateral swing while keeping firm grip
         q_cur, _ = self.arm.current_q_and_grip(fresh=False)
-        q_mid = 0.5 * (q_cur + above_sol.q_grasp)
-        q_mid[1] = min(float(q_cur[1]), float(above_sol.q_grasp[1]), -0.65)
-        q_mid[4] = float(above_sol.q_grasp[4])
-        self.arm.move_to_pose(
-            q_mid,
-            gripper_pct=self._active_close_pct,
-            speed=420,
-            include_gripper=False,
-            on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
-        )
+        if max(float(q_cur[1]), float(above_sol.q_grasp[1])) > -0.55:
+            # Lift shoulder briefly when starting low before lateral swing over the center tray
+            q_mid = 0.5 * (q_cur + above_sol.q_grasp)
+            q_mid[1] = min(float(q_cur[1]), float(above_sol.q_grasp[1]), -0.65)
+            q_mid[4] = float(above_sol.q_grasp[4])
+            self.arm.move_to_pose(
+                q_mid,
+                gripper_pct=self._active_close_pct,
+                speed=740,
+                acc=56,
+                include_gripper=False,
+                on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
+            )
         self.arm.move_to_pose(
             above_sol.q_grasp,
             gripper_pct=self._active_close_pct,
-            speed=400,
+            speed=700,
+            acc=54,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
 
+        rel_pitches = (above_pitch,) + tuple(p for p in drop_pitches if p != above_pitch)
         release_sol, _ = solve_adaptive_grasp_pose(
             self.ik,
             np.array([target_xy[0], target_xy[1], 0.060], dtype=np.float64),
             jaw_yaw_world=drop_yaw,
             q_posture=above_sol.q_grasp,
-            pitches_deg=drop_pitches,
+            pitches_deg=rel_pitches,
+            local_seed_only=True,
         )
         self.arm.move_to_pose(
             release_sol.q_grasp,
             gripper_pct=self._active_close_pct,
-            speed=160,
+            speed=280,
+            acc=38,
             include_gripper=False,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
@@ -3302,19 +3388,21 @@ class PhysicalSO101CellExecutor:
         self.arm.move_to_pose(
             release_sol.q_grasp,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=260,
+            speed=420,
+            acc=50,
             timeout_s=3.2,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
         if not self.arm.dry_run:
-            time.sleep(0.06)
+            time.sleep(0.03)
         self.hand_empty = True
 
         # Return directly to observation home without an extra upward stop above the bowl
         self.arm.move_to_pose(
             PHYSICAL_OBSERVATION_HOME_Q,
             gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-            speed=500,
+            speed=840,
+            acc=62,
             on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
         )
 
@@ -3364,7 +3452,8 @@ class PhysicalSO101CellExecutor:
             self.arm.move_to_pose(
                 PHYSICAL_OBSERVATION_HOME_Q,
                 gripper_pct=PHYSICAL_HOME_GRIPPER_PCT,
-                speed=480,
+                speed=820,
+                acc=60,
                 on_step_cb=lambda q, g: self._sync_mirror_and_telemetry(q, g),
             )
         self.at_rest = True
