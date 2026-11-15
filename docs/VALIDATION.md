@@ -2787,3 +2787,25 @@ OpenVINO 2026.4.1 CPU, ResNet18 layer2/layer3, 128x128 input, coreset 0.05, 3 ne
   - While the single-camera `plate` `OpenVINODetector` export is calibrated and evaluated,
     two-camera `scripts/bundle_mark_models.py` deployment still requires a separate calibrated `wrist` model.
   - No robot/camera commands or live service restarts were issued during this training/evaluation run.
+
+
+### Switch deployment & camera-wall runtime to `plate-calibrated-707-v1` on Intel (`demo_1-sorter-fast3`) — 2026-11-15
+
+Switched `configs/rgbd-viewer.json`, `brickcell.block_inspector.cli` (`deploy-cell`),
+`scripts/deploy_to_intel.ps1` (`patchcore-plate` mode), and `/home/intel/brickcell-deploy/`
+runtime modules/configs to load the calibrated single-camera `plate` OpenVINO CPU model
+(`../artifacts/models/plate-calibrated-707-v1/model.xml`, `model_version = "6d8add3e0688a925"`,
+calibrated `threshold = 2.453849196434021`, `crop = [0, 0, 640, 480]`).
+
+- **Executed checks on `intel` (`/home/intel/brickcell-deploy/.venv`)**:
+  - `.venv/bin/ruff check src tests scripts`: `All checks passed!`.
+  - `.venv/bin/ruff format --check src tests scripts`: `137 files already formatted`.
+  - `.venv/bin/pytest -v tests/test_heuristic_sort_mode.py tests/test_mark_scan.py tests/test_camui_detection.py tests/test_mark_bundle.py tests/test_inspection.py`:
+    `71 passed in 2.26s`.
+  - `MUJOCO_GL=egl .venv/bin/pytest -q tests/test_block_inspector.py`:
+    `17 passed, 2 failed` (pre-existing unrelated failures on `demo_1-sorter-fast3`: `test_three_plates_eight_clustered_mixed_duplo_blocks_openvino_sort` pile distance `0.1709 > 0.088` and `test_physical_cell_dark_mark_inspector_dashboard_and_executor` failing without `allow_heuristic_sorting=True`).
+  - Full `.venv/bin/pytest -q` collection stopped on `tests/test_foreground_memory.py` (`ModuleNotFoundError: No module named 'torch'`) because `/home/intel/brickcell-deploy/.venv` is the slim runtime environment without PyTorch/Anomalib training packages.
+  - Verified `load_anomalib_camera_detectors(rgbd_viewer_config_path=Path("configs/rgbd-viewer.json"))` on `intel` loads `{'plate': {'rgb': ('6d8add3e0688a925', 2.453849196434021)}}` with crop `[0, 0, 640, 480]`, and scored live `http://127.0.0.1:8094/snapshot/plate` at raw distance `2.2800` (`GOOD`, `26.55 ms`, OpenVINO CPU).
+- **Limitations**:
+  - No `deploy-cell` pick-and-place robot run was executed after this config switch; physical end-to-end cell sorting with `patchcore-plate` remains to be run cleanly on the hardware cell.
+  - Because only `plate` has a calibrated OpenVINO model (`wrist` has no calibrated model), strict two-camera `--inspection-mode patchcore` continues to reject deployment with `missing_mark_models(wrist)`.

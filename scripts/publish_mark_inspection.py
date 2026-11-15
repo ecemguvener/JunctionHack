@@ -96,9 +96,7 @@ def inspect_frame(rgb, packet, crop, serial, contrast=16.0, detector=None):
             if found
             else f"{decision} ({score:.3f} < {thr_val:.3f}) - GREEN PLATE"
         )
-        cv2.putText(
-            overlay, label, (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.46, color, 1, cv2.LINE_AA
-        )
+        cv2.putText(overlay, label, (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.46, color, 1, cv2.LINE_AA)
         cv2.putText(
             overlay,
             f"PatchCore OpenVINO CPU | model {detector.model_version}",

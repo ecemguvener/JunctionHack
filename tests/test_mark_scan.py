@@ -91,6 +91,38 @@ def test_actual_scan_preflight_requires_both_models_before_any_motion():
     assert not cell.plate_scan_completed
 
 
+def test_actual_scan_preflight_plate_only_patchcore_requires_plate_not_wrist():
+    source = ast.parse(Path("src/brickcell/block_inspector/hardware_cell.py").read_text())
+    executor = next(
+        node
+        for node in source.body
+        if isinstance(node, ast.ClassDef) and node.name == "PhysicalSO101CellExecutor"
+    )
+    method = next(
+        node
+        for node in executor.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_skill_present_and_spin_at_plate_camera"
+    )
+    module = ast.Module(
+        body=ast.parse("from __future__ import annotations").body + [method], type_ignores=[]
+    )
+    namespace = {"SkillOutcome": lambda success, **kw: SimpleNamespace(succeeded=success, **kw)}
+    exec(compile(module, "<actual-scan-method-plate-only>", "exec"), namespace)
+    cell = SimpleNamespace(
+        hand_empty=False,
+        _active_brick=object(),
+        plate_scan_completed=True,
+        inspector=SimpleNamespace(
+            plate_only_anomalib=True,
+            has_detector_for_camera=lambda camera: False,
+        ),
+    )
+    result = namespace[method.name](cell)
+    assert not result.succeeded
+    assert result.reason == "missing_mark_models(plate)"
+
+
 @pytest.mark.parametrize(
     ("detectors", "missing"),
     [
