@@ -95,7 +95,6 @@ def analyze_camera_features(cam_slot: str, image_bgr: np.ndarray) -> dict:
 
     h_w, w_w = image_bgr.shape[:2]
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
     H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
     # 1. Detect purple SO-101 gripper jaw corridor (primarily visible in wrist view)
@@ -155,75 +154,152 @@ def analyze_camera_features(cam_slot: str, image_bgr: np.ndarray) -> dict:
                         "right_edge_uv": [[int(p[1]), int(p[2])] for p in edge_pairs[::2]],
                     }
 
-    # 2. Segment DUPLO bricks inside the aquamarine source plate (minAreaRect + short grasp axis)
+    # 2. Fast real-time DUPLO brick segmentation by colour and size (2x strided downsampling)
+    step = 2 if min(h_w, w_w) >= 320 else 1
+    work_bgr = image_bgr[::step, ::step] if step > 1 else image_bgr
+    hs, ws = work_bgr.shape[:2]
+    hsv_s = hsv[::step, ::step] if step > 1 else hsv
+    lab_s = cv2.cvtColor(work_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    Hs, Ss, Vs = hsv_s[:, :, 0], hsv_s[:, :, 1], hsv_s[:, :, 2]
+    jaws_s = jaws_mask[::step, ::step] if step > 1 else jaws_mask
     jaws_dilated = (
-        cv2.dilate(jaws_mask, np.ones((9, 9), np.uint8), iterations=1)
-        if np.any(jaws_mask)
-        else jaws_mask
+        cv2.dilate(jaws_s, np.ones((5, 5), np.uint8), iterations=1) if np.any(jaws_s) else jaws_s
     )
-    is_aqua = (H >= 85) & (H <= 114) & (S >= 68) & (V >= 40) & (jaws_dilated == 0)
+    is_aqua = (Hs >= 85) & (Hs <= 114) & (Ss >= 68) & (Vs >= 40) & (jaws_dilated == 0)
     aqua_u8 = (is_aqua.astype(np.uint8)) * 255
-    aqua_u8 = cv2.morphologyEx(aqua_u8, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    aqua_u8 = cv2.morphologyEx(aqua_u8, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     cnts, _ = cv2.findContours(aqua_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bricks_out: list[dict] = []
-    min_plate_area = 1200 if cam_slot == "wrist" else 450
-    if cnts:
-        plate_cnt = max(cnts, key=cv2.contourArea)
-        if float(cv2.contourArea(plate_cnt)) >= min_plate_area:
-            hull = cv2.convexHull(plate_cnt)
-            hull_mask = np.zeros((h_w, w_w), dtype=np.uint8)
+    scale_area = float(ws * hs) / (320.0 * 240.0)
+    min_plate_area = int((300 if cam_slot == "wrist" else 110) * scale_area)
+    large_cnts = [c for c in cnts if float(cv2.contourArea(c)) >= 0.25 * min_plate_area]
+    if large_cnts:
+        merged_pts = np.vstack(large_cnts)
+        hull = cv2.convexHull(merged_pts)
+        if float(cv2.contourArea(hull)) >= min_plate_area:
+            hull_mask = np.zeros((hs, ws), dtype=np.uint8)
             cv2.drawContours(hull_mask, [hull], -1, 255, -1)
-            erode_k = 11 if cam_slot == "wrist" else 7
+            erode_k = 6 if cam_slot == "wrist" else 4
             plate_interior = cv2.erode(
                 hull_mask, np.ones((erode_k, erode_k), np.uint8), iterations=1
             )
             search_roi = cv2.subtract(plate_interior, jaws_dilated)
-            aqua_pixels = lab[is_aqua]
-            if len(aqua_pixels) >= 100:
+            aqua_pixels = lab_s[is_aqua & (hull_mask > 0)]
+            if len(aqua_pixels) >= 30:
                 L0, A0, B0 = np.median(aqua_pixels, axis=0)
             else:
                 L0, A0, B0 = 150.0, 105.0, 95.0
-            delta_ab = np.hypot(lab[:, :, 1] - A0, lab[:, :, 2] - B0)
-            delta_e = np.sqrt((0.45 * (lab[:, :, 0] - L0)) ** 2 + delta_ab**2)
-            is_glare = (S < 32) & (V > 212) & (delta_ab < 10.0)
+            delta_ab = np.hypot(lab_s[:, :, 1] - A0, lab_s[:, :, 2] - B0)
+            delta_e = np.sqrt((0.45 * (lab_s[:, :, 0] - L0)) ** 2 + delta_ab**2)
+            is_glare = (Ss < 36) & (Vs > 205) & (delta_ab < 11.5)
+            is_shadow = (Vs < 35) & (lab_s[:, :, 0] < 30.0)
             fg = (
                 (search_roi > 0)
                 & (~is_aqua)
                 & (~is_glare)
-                & ((delta_ab >= 11.5) | (delta_e >= 18.0))
+                & (~is_shadow)
+                & ((delta_ab >= 13.5) | (delta_e >= 21.0))
             )
-            fg_u8 = (fg.astype(np.uint8)) * 255
-            fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-            fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-            fcnts, _ = cv2.findContours(fg_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            fg_filled = np.zeros_like(fg_u8)
-            min_brick_area = 260.0 if cam_slot == "wrist" else 90.0
-            for c in fcnts:
-                if cv2.contourArea(c) >= min_brick_area:
-                    cv2.drawContours(fg_filled, [c], -1, 255, -1)
-            dist_thresh = 8.0 if cam_slot == "wrist" else 4.5
-            dist_map = cv2.distanceTransform(fg_filled, cv2.DIST_L2, 5)
-            fg_split = fg_filled.copy()
-            if float(dist_map.max()) > dist_thresh * 1.5:
-                sure_fg = (dist_map >= dist_thresh).astype(np.uint8) * 255
-                sure_fg = cv2.morphologyEx(sure_fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-                n_seeds, markers = cv2.connectedComponents(sure_fg)
-                if n_seeds > 1:
-                    markers = markers + 1
-                    unknown = cv2.subtract(fg_filled, sure_fg)
-                    markers[unknown == 255] = 0
-                    ws = cv2.watershed(cv2.cvtColor(fg_filled, cv2.COLOR_GRAY2BGR), markers)
-                    fg_split[ws == -1] = 0
-            bcnts, _ = cv2.findContours(fg_split, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for c in bcnts:
+
+            B_i = work_bgr[:, :, 0].astype(np.int32)
+            G_i = work_bgr[:, :, 1].astype(np.int32)
+            R_i = work_bgr[:, :, 2].astype(np.int32)
+            m_red = fg & (((Hs <= 7) | (Hs >= 164)) & (Ss >= 80) & (Vs >= 55) & (R_i > G_i + 25))
+            m_orange = fg & ((Hs >= 7) & (Hs <= 18) & (Ss >= 75) & (Vs >= 70) & (R_i > B_i + 35))
+            m_yellow = fg & ((Hs >= 17) & (Hs <= 35) & (Ss >= 70) & (Vs >= 80))
+            m_brown = fg & (
+                (Hs >= 6)
+                & (Hs <= 20)
+                & (Ss >= 60)
+                & (Vs >= 38)
+                & (Vs <= 185)
+                & (~m_red)
+                & (~m_orange)
+                & (~m_yellow)
+            )
+            m_green = fg & ((Hs >= 35) & (Hs <= 86) & (Ss >= 48) & (Vs >= 45))
+            m_blue = fg & ((Hs >= 100) & (Hs <= 132) & (Ss >= 60) & (Vs >= 50) & (B_i > G_i + 8))
+            m_lavender = fg & (
+                (Hs >= 102)
+                & (Hs <= 148)
+                & (Ss >= 35)
+                & (Ss <= 175)
+                & (Vs >= 65)
+                & (B_i > G_i + 4)
+                & (100 * R_i >= 42 * G_i)
+                & (~m_blue)
+            )
+            m_white = fg & (
+                (Ss <= 68)
+                & (Vs >= 145)
+                & (R_i >= 115)
+                & (G_i >= 125)
+                & (B_i >= 130)
+                & ((G_i - R_i) <= 45)
+            )
+            known = m_red | m_orange | m_yellow | m_brown | m_green | m_blue | m_lavender | m_white
+            m_vivid = fg & (Ss >= 72) & (Vs >= 60) & (~known)
+
+            k3 = np.ones((3, 3), np.uint8)
+            bcnts_all: list[np.ndarray] = []
+            for fam_mask in (
+                m_red,
+                m_orange,
+                m_yellow,
+                m_brown,
+                m_green,
+                m_blue,
+                m_lavender,
+                m_white,
+                m_vivid,
+            ):
+                if not np.any(fam_mask):
+                    continue
+                fam_u8 = (fam_mask.astype(np.uint8)) * 255
+                fam_u8 = cv2.morphologyEx(fam_u8, cv2.MORPH_OPEN, k3)
+                fam_u8 = cv2.morphologyEx(fam_u8, cv2.MORPH_CLOSE, k3)
+                fc, _ = cv2.findContours(fam_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                bcnts_all.extend(fc)
+
+            min_brick_area = (185.0 if cam_slot == "wrist" else 22.0) * scale_area
+            max_brick_area = (4500.0 if cam_slot == "wrist" else 450.0) * scale_area
+            min_side_px = (18.0 if cam_slot == "wrist" else 7.0) / float(step)
+            ref_x, ref_y = (
+                (0.494 * float(ws), 0.72 * float(hs))
+                if cam_slot == "wrist"
+                else (0.5 * float(ws), 0.5 * float(hs))
+            )
+            cands: list[tuple[float, dict]] = []
+            f_step = float(step)
+            for c in bcnts_all:
                 area = float(cv2.contourArea(c))
-                if area < min_brick_area:
+                if area < min_brick_area or area > max_brick_area:
+                    continue
+                hull_area = max(float(cv2.contourArea(cv2.convexHull(c))), 1.0)
+                if area / hull_area < 0.65:
                     continue
                 rect = cv2.minAreaRect(c)
                 rw, rh = float(rect[1][0]), float(rect[1][1])
-                if min(rw, rh) < (12.0 if cam_slot == "wrist" else 7.0):
+                if min(rw, rh) < min_side_px:
                     continue
-                box_pts = cv2.boxPoints(rect)
+                if max(rw, rh) / max(min(rw, rh), 1.0) > 2.45:
+                    continue
+                if area / max(rw * rh, 1.0) < 0.50:
+                    continue
+                bx0, by0, bbw, bbh = cv2.boundingRect(c)
+                c_mask = np.zeros((bbh, bbw), dtype=np.uint8)
+                cv2.drawContours(c_mask, [c - np.array([bx0, by0])], -1, 255, -1)
+                in_c = c_mask > 0
+                med_h = float(np.median(Hs[by0 : by0 + bbh, bx0 : bx0 + bbw][in_c]))
+                med_s = float(np.median(Ss[by0 : by0 + bbh, bx0 : bx0 + bbw][in_c]))
+                med_v = float(np.median(Vs[by0 : by0 + bbh, bx0 : bx0 + bbw][in_c]))
+                med_r = float(np.median(R_i[by0 : by0 + bbh, bx0 : bx0 + bbw][in_c]))
+                med_g = float(np.median(G_i[by0 : by0 + bbh, bx0 : bx0 + bbw][in_c]))
+                if med_v < 55.0:
+                    continue
+                if 84.0 <= med_h <= 112.0 and med_s >= 72.0 and med_g > med_r + 22.0:
+                    continue
+                box_pts = cv2.boxPoints(rect) * f_step
                 e01 = box_pts[1] - box_pts[0]
                 e12 = box_pts[2] - box_pts[1]
                 l01 = float(np.linalg.norm(e01))
@@ -232,25 +308,61 @@ def analyze_camera_features(cam_slot: str, image_bgr: np.ndarray) -> dict:
                 short_norm = max(float(np.linalg.norm(short_vec)), 1e-6)
                 ux = float(short_vec[0] / short_norm)
                 uy = float(short_vec[1] / short_norm)
-                bu, bv = float(rect[0][0]), float(rect[0][1])
+                bu, bv = float(rect[0][0]) * f_step, float(rect[0][1]) * f_step
                 half_span = 0.5 * min(l01, l12) + (12.0 if cam_slot == "wrist" else 7.0)
-                bricks_out.append(
-                    {
-                        "center_uv": [round(bu, 1), round(bv, 1)],
-                        "box_uv": [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in box_pts],
-                        "axis_uv": [
-                            [round(bu - half_span * ux, 1), round(bv - half_span * uy, 1)],
-                            [round(bu + half_span * ux, 1), round(bv + half_span * uy, 1)],
-                        ],
-                        "area_px": round(area, 1),
-                    }
+                dist_ref = float(np.hypot(float(rect[0][0]) - ref_x, float(rect[0][1]) - ref_y))
+                cands.append(
+                    (
+                        dist_ref,
+                        {
+                            "center_uv": [round(bu, 1), round(bv, 1)],
+                            "box_uv": [
+                                [round(float(p[0]), 1), round(float(p[1]), 1)] for p in box_pts
+                            ],
+                            "axis_uv": [
+                                [round(bu - half_span * ux, 1), round(bv - half_span * uy, 1)],
+                                [round(bu + half_span * ux, 1), round(bv + half_span * uy, 1)],
+                            ],
+                            "area_px": round(area * f_step * f_step, 1),
+                        },
+                    )
                 )
-    bricks_out.sort(key=lambda b: b["center_uv"][1], reverse=True)
+            if cands:
+                cands.sort(key=lambda item: item[0])
+                bricks_out = [item[1] for item in cands]
+    gripper_mid_uv: list[float] | None = None
+    if cam_slot == "top":
+        B_i = image_bgr[:, :, 0].astype(np.int32)
+        G_i = image_bgr[:, :, 1].astype(np.int32)
+        raw_arm = ((H >= 112) & (H <= 148) & (S >= 65) & (V >= 25) & (B_i > G_i + 12)).astype(
+            np.uint8
+        ) * 255
+        raw_arm = cv2.morphologyEx(raw_arm, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+        n_a, lab_a, st_a, cent_a = cv2.connectedComponentsWithStats(raw_arm)
+        scale_area = float(w_w * h_w) / (640.0 * 480.0)
+        arm_cands = [
+            (int(st_a[idx, cv2.CC_STAT_AREA]), idx)
+            for idx in range(1, n_a)
+            if int(st_a[idx, cv2.CC_STAT_AREA]) >= int(650 * scale_area)
+            and float(cent_a[idx][0]) >= 0.45 * w_w
+        ]
+        if arm_cands:
+            best_arm = max(arm_cands)[1]
+            ys_a, xs_a = np.where(lab_a == best_arm)
+            wx, wy = 0.45 * float(w_w), 0.48 * float(h_w)
+            d_ws = np.hypot(xs_a - wx, ys_a - wy)
+            tip = d_ws <= (float(d_ws.min()) + 14.0 * math.sqrt(scale_area))
+            if np.any(tip):
+                gripper_mid_uv = [
+                    round(float(np.median(xs_a[tip])), 1),
+                    round(float(np.median(ys_a[tip])), 1),
+                ]
     return {
         "width": w_w,
         "height": h_w,
         "corridor": corridor,
         "bricks": bricks_out,
+        "gripper_mid_uv": gripper_mid_uv,
     }
 
 
@@ -661,6 +773,7 @@ class CloudWorker:
             camera_top=state.get("camera_top"),
             camera_plate=state.get("camera_plate"),
             camera_wrist=state.get("camera_wrist"),
+            gripper_fk=state.get("gripper_fk"),
         )
 
     def run(self, stop: threading.Event) -> None:
@@ -1130,7 +1243,9 @@ def make_handler(app: Dashboard):
                 from brickcell.studio.server import handle_studio_post
 
                 length = int(self.headers.get("Content-Length") or 0)
-                if length < 0 or length > (2_000_000 if route == "/api/so101/inspection" else MAX_BODY):
+                if length < 0 or length > (
+                    2_000_000 if route == "/api/so101/inspection" else MAX_BODY
+                ):
                     return self.send_json(
                         400, {"error": f"Body must be 0..{MAX_BODY} bytes of JSON"}
                     )

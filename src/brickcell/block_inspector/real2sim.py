@@ -3540,6 +3540,13 @@ class Real2SimPipeline:
             r2s_dict = sc.to_summary_dict()
             if wrist_cam_summary is not None:
                 r2s_dict["camera_wrist"] = wrist_cam_summary
+            jaw_f, jaw_m = twin.jaw_positions_world()
+            jaw_mid = 0.5 * (jaw_f + jaw_m)
+            r2s_dict["gripper_fk"] = {
+                "jaw_fixed_world_m": [round(float(x), 5) for x in jaw_f],
+                "jaw_moving_world_m": [round(float(x), 5) for x in jaw_m],
+                "pinch_world_m": [round(float(x), 5) for x in jaw_mid],
+            }
             return {
                 "config": "real2sim_so101_inspection_twin",
                 "inference_camera": "overhead",

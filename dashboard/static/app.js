@@ -20,8 +20,8 @@
   const state = {
     src: hash.src === "real" ? "real" : "sim",
     cam: ["top", "plate", "wrist"].includes(hash.cam) ? hash.cam : "top",
-    hud: hash.hud !== "0",
-    features: hash.features !== "0",
+    hud: hash.hud === "1",
+    features: false,
     defects: hash.defects === "1",
     focus: hash.focus !== "0",
     scope: hash.scope === "focus" ? "focus" : "all",
@@ -297,8 +297,6 @@
       fg: css(camPanel, "--label-fg", "#000"),
       pad: parseFloat(css(camPanel, "--box-pad", "4")),
     };
-    if (state.hud && statusFresh() && status?.real2sim?.ok) drawReal2SimHud(g, P, st);
-    if (state.features && statusFresh()) drawFeatureAnalysisHud(g, P, st);
     if (state.cam === "top") {
       const f = focusOverlay();
       if (state.focus && f) box(g, P, f.box, css(camPanel, "--focus", "#ff6a1a"), st, st.pad, `PROJECTED FOCUS  ${(f.label || f.object_id).toUpperCase()}`, "top");
@@ -317,176 +315,309 @@
     if (!Array.isArray(rgba) || rgba.length < 3) return `rgba(255,178,127,${a})`;
     return `rgba(${Math.round(rgba[0] * 255)},${Math.round(rgba[1] * 255)},${Math.round(rgba[2] * 255)},${a})`;
   }
+  function drawCameraPlates2D(g, P, st, feat) {
+    const plates = feat?.plates;
+    if (!plates || typeof plates !== "object") return;
+    const dpr = devicePixelRatio || 1;
+    const lw = (px) => px * dpr;
+    const labelMap = { good: "GOOD", defective: "DEFECT", source: "SOURCE" };
+    g.save();
+    for (const [role, pl] of Object.entries(plates)) {
+      const el = pl?.ellipse;
+      const center = pl?.center_uv;
+      if (!el || !Array.isArray(center) || center.length !== 2) continue;
+      const col = rgbaCss(pl.rgba, 0.88);
+      const ang = ((el.angle_deg || 0) * Math.PI) / 180;
+      const ca = Math.cos(ang);
+      const sa = Math.sin(ang);
+      const rx = el.rx || 0;
+      const ry = el.ry || 0;
+      if (rx > 4 && ry > 4) {
+        g.strokeStyle = "rgba(0, 0, 0, 0.45)";
+        g.lineWidth = lw(2.6);
+        g.setLineDash([6 * dpr, 4 * dpr]);
+        g.beginPath();
+        for (let k = 0; k <= 36; k++) {
+          const th = (2 * Math.PI * k) / 36;
+          const lx = rx * Math.cos(th);
+          const ly = ry * Math.sin(th);
+          const [sx, sy] = P(el.cx + lx * ca - ly * sa, el.cy + lx * sa + ly * ca);
+          if (k === 0) g.moveTo(sx, sy);
+          else g.lineTo(sx, sy);
+        }
+        g.stroke();
+        g.strokeStyle = col;
+        g.lineWidth = lw(1.5);
+        g.stroke();
+        g.setLineDash([]);
+      }
+      const [cx, cy] = P(center[0], center[1]);
+      const arm = role === "source" ? lw(5) : lw(7);
+      const rad = role === "source" ? lw(3) : lw(4.5);
+      g.strokeStyle = "rgba(0, 0, 0, 0.65)";
+      g.lineWidth = lw(3.0);
+      g.beginPath();
+      g.moveTo(cx - arm, cy); g.lineTo(cx + arm, cy);
+      g.moveTo(cx, cy - arm); g.lineTo(cx, cy + arm);
+      g.stroke();
+      g.beginPath();
+      g.arc(cx, cy, rad, 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = col;
+      g.lineWidth = lw(1.6);
+      g.beginPath();
+      g.moveTo(cx - arm, cy); g.lineTo(cx + arm, cy);
+      g.moveTo(cx, cy - arm); g.lineTo(cx, cy + arm);
+      g.stroke();
+      g.beginPath();
+      g.arc(cx, cy, rad, 0, Math.PI * 2);
+      g.stroke();
+
+      const tag = labelMap[role] || role.toUpperCase();
+      const ly = Math.max(12 * dpr, cy - Math.max(ry * 0.55, lw(16)));
+      g.font = `600 ${Math.round(10 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const tw = g.measureText(tag).width + lw(8);
+      const th = lw(14);
+      g.fillStyle = "rgba(10, 10, 12, 0.72)";
+      g.fillRect(cx - tw / 2, ly - th / 2, tw, th);
+      g.fillStyle = col;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(tag, cx, ly);
+    }
+    g.restore();
+  }
   function drawFeatureAnalysisHud(g, P, st) {
     const feat = status?.camera_features?.[state.src]?.[state.cam];
     if (!feat?.ok) return;
-    g.save();
-    // 1. Gripper jaw corridor (green left inner contour + line, cyan right inner contour + line, yellow center pinch line)
-    const cor = feat.corridor;
-    if (cor?.ok) {
-      g.fillStyle = "#00ff00";
-      for (const [u, v] of cor.left_edge_uv || []) {
-        const [sx, sy] = P(u, v);
-        g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
-      }
-      g.fillStyle = "#00ffff";
-      for (const [u, v] of cor.right_edge_uv || []) {
-        const [sx, sy] = P(u, v);
-        g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
-      }
-      const vTop = cor.v_top ?? 180, vBot = cor.v_bottom ?? 340;
-      const [lx0, ly0] = P(cor.u_left_pad, Math.max(0, vTop - 40));
-      const [lx1, ly1] = P(cor.u_left_pad, vBot);
-      g.strokeStyle = "#00dc00";
-      g.lineWidth = 1.6;
-      g.beginPath(); g.moveTo(lx0, ly0); g.lineTo(lx1, ly1); g.stroke();
-
-      const [rx0, ry0] = P(cor.u_right_pad, Math.max(0, vTop - 40));
-      const [rx1, ry1] = P(cor.u_right_pad, vBot);
-      g.strokeStyle = "#00dcff";
-      g.lineWidth = 1.6;
-      g.beginPath(); g.moveTo(rx0, ry0); g.lineTo(rx1, ry1); g.stroke();
-
-      const [px0, py0] = P(cor.u_pinch, Math.max(0, vTop - 60));
-      const [px1, py1] = P(cor.u_pinch, vBot);
-      g.strokeStyle = "#ffff00";
-      g.lineWidth = 2.6;
-      g.beginPath(); g.moveTo(px0, py0); g.lineTo(px1, py1); g.stroke();
-    }
-    // 2. DUPLO brick minAreaRect polygons (red), short grasp axes (orange), and centroids (white)
-    for (const b of feat.bricks || []) {
-      if (Array.isArray(b.box_uv) && b.box_uv.length === 4) {
-        const pts = b.box_uv.map(([u, v]) => P(u, v));
-        g.strokeStyle = "rgb(220, 40, 40)";
-        g.lineWidth = 2.4;
-        g.beginPath();
-        g.moveTo(pts[0][0], pts[0][1]);
-        for (let k = 1; k < 4; k++) g.lineTo(pts[k][0], pts[k][1]);
-        g.closePath();
-        g.stroke();
-      }
-      if (Array.isArray(b.axis_uv) && b.axis_uv.length === 2) {
-        const [a0, a1] = b.axis_uv.map(([u, v]) => P(u, v));
-        g.strokeStyle = "rgb(255, 165, 0)";
-        g.lineWidth = 2.4;
-        g.beginPath();
-        g.moveTo(a0[0], a0[1]);
-        g.lineTo(a1[0], a1[1]);
-        g.stroke();
-      }
-      if (Array.isArray(b.center_uv) && b.center_uv.length === 2) {
-        const [cx, cy] = P(b.center_uv[0], b.center_uv[1]);
-        g.fillStyle = "#ffffff";
-        g.beginPath();
-        g.arc(cx, cy, 3.8, 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-    g.restore();
+    drawCameraPlates2D(g, P, st, feat);
+  }
+  function pickReal2SimTargetBrick(r2s) {
+    const bricks = r2s?.bricks || [];
+    if (!bricks.length) return null;
+    const pinch = r2s?.gripper_fk?.pinch_world_m;
+    const dist2 = (b) => {
+      const p = b?.pos_world_m;
+      if (!Array.isArray(p) || !Array.isArray(pinch)) return 1e9;
+      return (p[0] - pinch[0]) ** 2 + (p[1] - pinch[1]) ** 2 + (p[2] - pinch[2]) ** 2;
+    };
+    const inSource = bricks.filter((b) => b.support_region === "source");
+    const pool = inSource.length ? inSource : bricks;
+    return pool.slice().sort((a, b) => dist2(a) - dist2(b))[0];
   }
   function drawReal2SimHud(g, P, st) {
     const r2s = status.real2sim;
     const r2sCam = activeCameraModel();
     if (!r2sCam) return;
+    const dpr = devicePixelRatio || 1;
+    const lw = (px) => px * dpr;
     const projR2S = (pt) => projectTop(pt, r2sCam);
-    const plates = r2s.plates || {};
     g.save();
-    // 1. 3D projected KALAS plate rings + labels
-    for (const [role, pl] of Object.entries(plates)) {
-      const pos = pl.pos_world_m;
-      if (!Array.isArray(pos) || pos.length < 3) continue;
-      const rad = pl.outer_radius_m || 0.0795;
-      const col = rgbaCss(pl.rgba, 0.85);
-      g.strokeStyle = col;
-      g.lineWidth = 1.75;
-      g.setLineDash([5, 4]);
-      g.beginPath();
-      let started = false;
-      for (let k = 0; k <= 36; k++) {
-        const th = (2 * Math.PI * k) / 36;
-        const uv = projR2S([pos[0] + rad * Math.cos(th), pos[1] + rad * Math.sin(th), pos[2] + 0.008]);
-        if (!uv) continue;
-        const [sx, sy] = P(uv[0], uv[1]);
-        if (!started) { g.moveTo(sx, sy); started = true; } else g.lineTo(sx, sy);
-      }
-      g.stroke();
-      g.setLineDash([]);
-      const rimUv = projR2S([pos[0] - rad, pos[1], pos[2] + 0.012]);
-      if (rimUv) {
-        const [lx, ly] = P(rimUv[0], rimUv[1]);
-        const txt = `${role.toUpperCase()} BOWL`;
-        g.font = st.font;
-        const tw = g.measureText(txt).width + 8;
-        g.fillStyle = "rgba(10,10,12,0.78)";
-        g.fillRect(lx - tw / 2, ly - 9, tw, 16);
-        g.fillStyle = col;
-        g.textAlign = "center";
-        g.textBaseline = "middle";
-        g.fillText(txt, lx, ly - 1);
+    g.lineCap = "round";
+    g.lineJoin = "round";
+    // 1. 3D projected KALAS plate rings only on top when 2D plate tracking is off (never on wrist)
+    if (state.cam === "top" && !state.features) {
+      for (const [role, pl] of Object.entries(r2s.plates || {})) {
+        const pos = pl.pos_world_m;
+        if (!Array.isArray(pos) || pos.length < 3) continue;
+        const rad = pl.outer_radius_m || 0.0795;
+        const col = rgbaCss(pl.rgba, 0.78);
+        g.strokeStyle = col;
+        g.lineWidth = lw(1.4);
+        g.setLineDash([5 * dpr, 4 * dpr]);
+        g.beginPath();
+        let started = false;
+        for (let k = 0; k <= 36; k++) {
+          const th = (2 * Math.PI * k) / 36;
+          const uv = projR2S([pos[0] + rad * Math.cos(th), pos[1] + rad * Math.sin(th), pos[2] + 0.008]);
+          if (!uv) continue;
+          const [sx, sy] = P(uv[0], uv[1]);
+          if (!started) { g.moveTo(sx, sy); started = true; } else g.lineTo(sx, sy);
+        }
+        g.stroke();
+        g.setLineDash([]);
       }
     }
-    // 2. 3D oriented bounding boxes (OBBs), 8 corner dots, 6D pose triads, and brick tags
-    const bricks = r2s.bricks || [];
-    for (let i = 0; i < bricks.length; i++) {
-      const b = bricks[i];
-      const corners = b.corners_world_m;
-      const pos = b.pos_world_m;
-      const R = b.R_world_block;
-      const col = rgbaCss(b.display_rgba, 0.96);
-      if (Array.isArray(corners) && corners.length === 8) {
-        const proj = corners.map((c) => { const uv = projR2S(c); return uv ? P(uv[0], uv[1]) : null; });
-        g.strokeStyle = col;
-        for (const [ia, ib] of OBB_EDGES) {
-          if (!proj[ia] || !proj[ib]) continue;
-          g.lineWidth = ia >= 4 && ib >= 4 ? 2.2 : 1.4;
-          g.beginPath();
-          g.moveTo(proj[ia][0], proj[ia][1]);
-          g.lineTo(proj[ib][0], proj[ib][1]);
-          g.stroke();
-        }
-        g.fillStyle = col;
-        for (const pt of proj) {
-          if (!pt) continue;
-          g.beginPath();
-          g.arc(pt[0], pt[1], 2.2, 0, Math.PI * 2);
-          g.fill();
-        }
+    // 2. Singular block of interest: visible cuboid vertices + centroid + parallel-face axis
+    const camW = r2sCam.width || 640, camH = r2sCam.height || 480;
+    const inFrameUv = (uv) => uv && uv[0] >= 0 && uv[0] <= camW && uv[1] >= 0 && uv[1] <= camH;
+    const drawVertexDot = (pt) => {
+      g.fillStyle = "rgba(0, 0, 0, 0.75)";
+      g.beginPath();
+      g.arc(pt[0], pt[1], lw(4.2), 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "#ff8a3d";
+      g.beginPath();
+      g.arc(pt[0], pt[1], lw(2.8), 0, Math.PI * 2);
+      g.fill();
+    };
+    const drawCentroidTarget = (cx, cy) => {
+      g.strokeStyle = "rgba(0, 0, 0, 0.72)";
+      g.lineWidth = lw(3.6);
+      g.beginPath();
+      g.arc(cx, cy, lw(6.0), 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = "#ffc13b";
+      g.lineWidth = lw(2.0);
+      g.beginPath();
+      g.arc(cx, cy, lw(6.0), 0, Math.PI * 2);
+      g.stroke();
+      g.fillStyle = "#ffc13b";
+      g.beginPath();
+      g.arc(cx, cy, lw(2.8), 0, Math.PI * 2);
+      g.fill();
+    };
+    let centroidCanvas = null;
+    let centroidWorld = null;
+    const wristBrick = state.cam === "wrist" ? status?.camera_features?.[state.src]?.wrist?.bricks?.[0] : null;
+    if (wristBrick && Array.isArray(wristBrick.box_uv) && wristBrick.box_uv.length === 4) {
+      // On wrist view, use image-locked cuboid vertices & centroid for zero-offset visual servoing
+      const proj = wristBrick.box_uv.map((uv) => (inFrameUv(uv) ? P(uv[0], uv[1]) : null));
+      g.strokeStyle = "rgba(255, 106, 26, 0.55)";
+      g.lineWidth = lw(1.3);
+      for (let k = 0; k < 4; k++) {
+        const a = proj[k], c = proj[(k + 1) % 4];
+        if (!a || !c) continue;
+        g.beginPath();
+        g.moveTo(a[0], a[1]);
+        g.lineTo(c[0], c[1]);
+        g.stroke();
       }
-      if (Array.isArray(pos) && Array.isArray(R) && R.length === 3) {
-        const cUv = projR2S(pos);
-        if (cUv) {
-          const [cx, cy] = P(cUv[0], cUv[1]);
-          const axes = [
-            [[R[0][0], R[1][0], R[2][0]], "#ff4747"],
-            [[R[0][1], R[1][1], R[2][1]], "#38e54d"],
-            [[R[0][2], R[1][2], R[2][2]], "#3b9eff"],
-          ];
-          for (const [ax, acol] of axes) {
-            const tipUv = projR2S([pos[0] + 0.022 * ax[0], pos[1] + 0.022 * ax[1], pos[2] + 0.022 * ax[2]]);
-            if (!tipUv) continue;
-            const [tx, ty] = P(tipUv[0], tipUv[1]);
-            g.strokeStyle = acol;
-            g.lineWidth = 2.0;
+      for (const pt of proj) {
+        if (pt) drawVertexDot(pt);
+      }
+      if (Array.isArray(wristBrick.axis_uv) && wristBrick.axis_uv.length === 2) {
+        const [a0, a1] = wristBrick.axis_uv.map(([u, v]) => P(u, v));
+        g.strokeStyle = "rgba(255, 193, 59, 0.85)";
+        g.lineWidth = lw(1.8);
+        g.beginPath();
+        g.moveTo(a0[0], a0[1]);
+        g.lineTo(a1[0], a1[1]);
+        g.stroke();
+      }
+      if (Array.isArray(wristBrick.center_uv) && inFrameUv(wristBrick.center_uv)) {
+        const [cx, cy] = P(wristBrick.center_uv[0], wristBrick.center_uv[1]);
+        centroidCanvas = [cx, cy];
+        drawCentroidTarget(cx, cy);
+      }
+    } else {
+      const b = pickReal2SimTargetBrick(r2s);
+      if (b) {
+        const corners = b.corners_world_m;
+        if (Array.isArray(corners) && corners.length === 8) {
+          const proj = corners.map((c) => {
+            const uv = projR2S(c);
+            return inFrameUv(uv) ? P(uv[0], uv[1]) : null;
+          });
+          g.strokeStyle = "rgba(255, 106, 26, 0.55)";
+          for (const [ia, ib] of OBB_EDGES) {
+            if (!proj[ia] || !proj[ib]) continue;
+            g.lineWidth = lw(1.3);
             g.beginPath();
-            g.moveTo(cx, cy);
-            g.lineTo(tx, ty);
+            g.moveTo(proj[ia][0], proj[ia][1]);
+            g.lineTo(proj[ib][0], proj[ib][1]);
             g.stroke();
           }
-          const shortPart = (b.part_id || "").replace("duplo_", "");
-          const tag = `#${i} ${b.color_name || ""} ${shortPart} (${b.stable_pose || ""})`;
-          g.font = "600 10.5px monospace";
-          const tw = g.measureText(tag).width + 8;
-          const tx0 = cx - tw / 2, ty0 = cy - 22;
-          g.fillStyle = "rgba(10,10,12,0.82)";
-          g.fillRect(tx0, ty0, tw, 15);
-          g.strokeStyle = col;
-          g.lineWidth = 1;
-          g.strokeRect(tx0, ty0, tw, 15);
-          g.fillStyle = col;
-          g.textAlign = "left";
-          g.textBaseline = "middle";
-          g.fillText(tag, tx0 + 4, ty0 + 8);
+          for (const pt of proj) {
+            if (pt) drawVertexDot(pt);
+          }
+          const top4 = corners.slice().sort((u, v) => v[2] - u[2]).slice(0, 4);
+          const cxW = 0.25 * (top4[0][0] + top4[1][0] + top4[2][0] + top4[3][0]);
+          const cyW = 0.25 * (top4[0][1] + top4[1][1] + top4[2][1] + top4[3][1]);
+          const czW = 0.25 * (top4[0][2] + top4[1][2] + top4[2][2] + top4[3][2]);
+          centroidWorld = Array.isArray(b.pos_world_m) ? b.pos_world_m : [cxW, cyW, czW];
+        } else if (Array.isArray(b.pos_world_m)) {
+          centroidWorld = b.pos_world_m;
         }
+
+        if (centroidWorld) {
+          const cUv = projR2S(centroidWorld);
+          if (inFrameUv(cUv)) {
+            const [cx, cy] = P(cUv[0], cUv[1]);
+            centroidCanvas = [cx, cy];
+            drawCentroidTarget(cx, cy);
+          }
+        }
+      }
+    }
+    // 3. Static midpoint between the grippers + visual-servoing vector to cuboid centroid
+    let gripMidCanvas = null;
+    let useImgGripMid = false;
+    const fk = r2s.gripper_fk;
+    const topGripUv = state.cam === "top" ? status?.camera_features?.[state.src]?.top?.gripper_mid_uv : null;
+    if (state.cam === "wrist") {
+      // Physically bolted wrist camera: midpoint between the two grippers is static in image space
+      gripMidCanvas = P(0.494 * camW, 0.72 * camH);
+      useImgGripMid = true;
+    } else if (Array.isArray(topGripUv) && topGripUv.length === 2) {
+      gripMidCanvas = P(topGripUv[0], topGripUv[1]);
+      useImgGripMid = true;
+    } else if (fk && Array.isArray(fk.pinch_world_m)) {
+      const pinchUv = projR2S(fk.pinch_world_m);
+      if (inFrameUv(pinchUv)) {
+        gripMidCanvas = P(pinchUv[0], pinchUv[1]);
+      }
+    }
+    if (gripMidCanvas) {
+      const [gx, gy] = gripMidCanvas;
+      const arm = lw(7.5);
+      g.strokeStyle = "rgba(0, 0, 0, 0.75)";
+      g.lineWidth = lw(3.8);
+      g.beginPath();
+      g.moveTo(gx - arm, gy); g.lineTo(gx + arm, gy);
+      g.moveTo(gx, gy - arm); g.lineTo(gx, gy + arm);
+      g.stroke();
+      g.beginPath();
+      g.arc(gx, gy, lw(5.2), 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = "#00e5ff";
+      g.lineWidth = lw(2.0);
+      g.beginPath();
+      g.moveTo(gx - arm, gy); g.lineTo(gx + arm, gy);
+      g.moveTo(gx, gy - arm); g.lineTo(gx, gy + arm);
+      g.stroke();
+      g.beginPath();
+      g.arc(gx, gy, lw(5.2), 0, Math.PI * 2);
+      g.stroke();
+
+      if (centroidCanvas) {
+        const [cx, cy] = centroidCanvas;
+        let tag = "";
+        let aligned = false;
+        if (!useImgGripMid && fk?.pinch_world_m && centroidWorld) {
+          const dMm = Math.round(
+            1000 * Math.hypot(
+              fk.pinch_world_m[0] - centroidWorld[0],
+              fk.pinch_world_m[1] - centroidWorld[1],
+              fk.pinch_world_m[2] - centroidWorld[2]
+            )
+          );
+          aligned = dMm <= 10;
+          tag = aligned ? `ALIGNED (${dMm}mm)` : `SERVO ${dMm}mm`;
+        } else {
+          const dPx = Math.round(Math.hypot(gx - cx, gy - cy));
+          aligned = dPx <= 12;
+          tag = aligned ? "ALIGNED" : `SERVO ${dPx}px`;
+        }
+        g.strokeStyle = aligned ? "#00ff88" : "#ffe600";
+        g.lineWidth = lw(2.0);
+        g.setLineDash([5 * dpr, 4 * dpr]);
+        g.beginPath();
+        g.moveTo(gx, gy);
+        g.lineTo(cx, cy);
+        g.stroke();
+        g.setLineDash([]);
+
+        g.font = `600 ${Math.round(10 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        const tw = g.measureText(tag).width + lw(8);
+        const th = lw(14);
+        const mx = 0.5 * (gx + cx), my = 0.5 * (gy + cy) - lw(12);
+        g.fillStyle = "rgba(10,10,12,0.78)";
+        g.fillRect(mx - tw / 2, my - th / 2, tw, th);
+        g.fillStyle = aligned ? "#00ff88" : "#ffe600";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(tag, mx, my);
       }
     }
     g.restore();
