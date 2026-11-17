@@ -2619,6 +2619,7 @@ class PhysicalSO101CellExecutor:
         resize_hw: tuple[int, int] | None = (540, 960),
     ) -> LiveCameraSnapshot:
         """Fetch a high-res wrist snapshot guaranteed to be captured after `min_capture_ts`."""
+
         def _grab() -> LiveCameraSnapshot:
             try:
                 return self.frame_source.fetch_wrist_snapshot(resize_hw=resize_hw)
@@ -3199,7 +3200,8 @@ class PhysicalSO101CellExecutor:
                                     if short_m_cal is not None and local_attempt == 0:
                                         if float(short_m_cal) <= 0.021:
                                             self._active_open_pct = min(
-                                                self._active_open_pct, PHYSICAL_NARROW_PREGRASP_PCT + 0.015
+                                                self._active_open_pct,
+                                                PHYSICAL_NARROW_PREGRASP_PCT + 0.015,
                                             )
                                         else:
                                             self._active_open_pct = max(
