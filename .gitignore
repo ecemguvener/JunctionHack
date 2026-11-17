@@ -15,3 +15,4 @@ MUJOCO_LOG.TXT
 .env.*
 !.env.example
 /inspection/output/
+firefox-tabs.txt  
